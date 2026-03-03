@@ -1,10 +1,20 @@
 import arg from "arg";
+import { homedir } from "os";
 import { isAbsolute, join } from "path";
 import packageJson from "../../package.json" with { type: "json" };
 
 export const VERSION = packageJson.version;
 
 export type TransportMode = "stdio" | "http" | "both";
+
+export interface ConversationHistoryConfig {
+  enabled: boolean;
+  sessionLogPath: string | null;
+  historyWeight: number;
+  chunkOverlap: number;
+  maxChunkMessages: number;
+  indexSubagents: boolean;
+}
 
 export interface Config {
   dbPath: string;
@@ -14,11 +24,7 @@ export interface Config {
   httpHost: string;
   enableHttp: boolean;
   transportMode: TransportMode;
-  conversationHistory: {
-    enabled: boolean;
-    sessionPath: string | null; // null = auto-detect Claude Code session dir
-    historyWeight: number; // 0.0-1.0, applied to history scores when merging with memories
-  };
+  conversationHistory: ConversationHistoryConfig;
 }
 
 export interface ConfigOverrides {
@@ -26,11 +32,9 @@ export interface ConfigOverrides {
   httpPort?: number;
   enableHttp?: boolean;
   transportMode?: TransportMode;
-  conversationHistory?: {
-    enabled?: boolean;
-    sessionPath?: string;
-    historyWeight?: number;
-  };
+  enableHistory?: boolean;
+  historyPath?: string;
+  historyWeight?: number;
 }
 
 // Defaults - always use repo-local .vector-memory folder
@@ -58,9 +62,12 @@ export function loadConfig(overrides: ConfigOverrides = {}): Config {
     enableHttp,
     transportMode,
     conversationHistory: {
-      enabled: overrides.conversationHistory?.enabled ?? false,
-      sessionPath: overrides.conversationHistory?.sessionPath ?? null,
-      historyWeight: overrides.conversationHistory?.historyWeight ?? 0.5,
+      enabled: overrides.enableHistory ?? false,
+      sessionLogPath: overrides.historyPath ?? null,
+      historyWeight: overrides.historyWeight ?? 0.3,
+      chunkOverlap: 1,
+      maxChunkMessages: 10,
+      indexSubagents: false,
     },
   };
 }
@@ -74,8 +81,9 @@ export function parseCliArgs(argv: string[]): ConfigOverrides {
       "--db-file": String,
       "--port": Number,
       "--no-http": Boolean,
-      "--conversation-history": Boolean,
-      "--session-path": String,
+      "--enable-history": Boolean,
+      "--history-path": String,
+      "--history-weight": Number,
 
       // Aliases
       "-d": "--db-file",
@@ -88,13 +96,23 @@ export function parseCliArgs(argv: string[]): ConfigOverrides {
     dbPath: args["--db-file"],
     httpPort: args["--port"],
     enableHttp: args["--no-http"] ? false : undefined,
-    conversationHistory: args["--conversation-history"] || args["--session-path"]
-      ? {
-          enabled: args["--conversation-history"],
-          sessionPath: args["--session-path"],
-        }
-      : undefined,
+    enableHistory: args["--enable-history"] ?? undefined,
+    historyPath: args["--history-path"],
+    historyWeight: args["--history-weight"],
   };
+}
+
+/**
+ * Resolve the session log path for conversation history indexing.
+ * Returns the configured path, or auto-detects Claude Code's session directory.
+ */
+export function resolveSessionLogPath(config: ConversationHistoryConfig): string | null {
+  if (config.sessionLogPath) {
+    return resolvePath(config.sessionLogPath);
+  }
+  // Auto-detect Claude Code session log directory
+  const claudeProjectsDir = join(homedir(), ".claude", "projects");
+  return claudeProjectsDir;
 }
 
 // Default config for imports that don't use CLI args

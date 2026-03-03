@@ -3,10 +3,10 @@
 import { loadConfig, parseCliArgs } from "./config/index.js";
 import { connectToDatabase } from "./db/connection.js";
 import { MemoryRepository } from "./db/memory.repository.js";
+import { ConversationRepository } from "./db/conversation.repository.js";
 import { EmbeddingsService } from "./services/embeddings.service.js";
 import { MemoryService } from "./services/memory.service.js";
-import { ConversationHistoryRepository } from "./db/conversation-history.repository.js";
-import { ConversationHistoryService } from "./services/conversation-history.service.js";
+import { ConversationHistoryService } from "./services/conversation.service.js";
 import { startServer } from "./mcp/server.js";
 import { startHttpServer } from "./http/server.js";
 
@@ -32,18 +32,17 @@ async function main(): Promise<void> {
   const embeddings = new EmbeddingsService(config.embeddingModel, config.embeddingDimension);
   const memoryService = new MemoryService(repository, embeddings);
 
-  // Wire conversation history if enabled
+  // Conditionally initialize conversation history indexing
   if (config.conversationHistory.enabled) {
-    const historyRepo = new ConversationHistoryRepository(db);
-    const historyService = new ConversationHistoryService(
-      historyRepo,
+    const conversationRepository = new ConversationRepository(db);
+    const conversationService = new ConversationHistoryService(
+      conversationRepository,
       embeddings,
-      config.conversationHistory.sessionPath,
+      config.conversationHistory,
+      config.dbPath
     );
-    memoryService.setConversationHistory(
-      historyService,
-      config.conversationHistory.historyWeight,
-    );
+    memoryService.setConversationService(conversationService);
+    console.error("[vector-memory-mcp] Conversation history indexing enabled");
   }
 
   // Track cleanup functions

@@ -1,27 +1,8 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { MemoryService } from "../services/memory.service.js";
-import type { ConversationHistoryService } from "../services/conversation-history.service.js";
+import type { ConversationHistoryService } from "../services/conversation.service.js";
 import type { SearchIntent } from "../types/memory.js";
-import type { SearchResult } from "../types/conversation-history.js";
-
-/**
- * Guard: returns the ConversationHistoryService or an error CallToolResult.
- */
-function requireHistoryService(
-  service: MemoryService,
-): ConversationHistoryService | CallToolResult {
-  const historyService = service.getConversationHistory();
-  if (!historyService) {
-    return {
-      content: [{
-        type: "text",
-        text: "Conversation history indexing is not enabled. Set conversationHistory.enabled = true in config.",
-      }],
-      isError: true,
-    };
-  }
-  return historyService;
-}
+import type { HistoryFilters, SearchResult } from "../types/conversation.js";
 
 export async function handleStoreMemories(
   args: Record<string, unknown> | undefined,
@@ -126,69 +107,37 @@ export async function handleSearchMemories(
   const intent = (args?.intent as SearchIntent) ?? "fact_check";
   const limit = (args?.limit as number) ?? 10;
   const includeDeleted = (args?.include_deleted as boolean) ?? false;
-  const includeHistory = (args?.include_history as boolean) ?? false;
+  const includeHistory = args?.include_history as boolean | undefined;
   const historyOnly = (args?.history_only as boolean) ?? false;
 
-  if (includeHistory && historyOnly) {
+  const results = await service.search(query, intent, limit, includeDeleted, {
+    includeHistory,
+    historyOnly,
+    historyFilters: parseHistoryFilters(args),
+  });
+
+  if (results.length === 0) {
     return {
-      content: [{
-        type: "text",
-        text: "Cannot set both include_history and history_only to true. Use history_only for conversation history only, or include_history to merge with memories.",
-      }],
-      isError: true,
+      content: [{ type: "text", text: "No results found matching your query." }],
     };
   }
 
-  // History-only: search only conversation history via the history service
-  if (historyOnly) {
-    const result = requireHistoryService(service);
-    if ("content" in result) return result;
-    const historyResults = await result.search(query, limit);
-    if (historyResults.length === 0) {
-      return {
-        content: [{ type: "text", text: "No conversation history found matching your query." }],
-      };
+  const formatted = results.map((r: SearchResult) => {
+    let result = `[${r.source}] ID: ${r.id}\nContent: ${r.content}`;
+    if (Object.keys(r.metadata).length > 0) {
+      result += `\nMetadata: ${JSON.stringify(r.metadata)}`;
     }
-    return {
-      content: [{ type: "text", text: historyResults.map((r) => formatSearchResult(r)).join("\n\n---\n\n") }],
-    };
-  }
-
-  // Unified search: merge memories + history
-  if (includeHistory) {
-    const results = await service.searchUnified(query, intent, limit, includeDeleted);
-    if (results.length === 0) {
-      return {
-        content: [{ type: "text", text: "No results found matching your query." }],
-      };
-    }
-    return {
-      content: [{ type: "text", text: results.map((r) => formatSearchResult(r, includeDeleted)).join("\n\n---\n\n") }],
-    };
-  }
-
-  // Default: memory-only search (original behavior)
-  const memories = await service.search(query, intent, limit, includeDeleted);
-
-  if (memories.length === 0) {
-    return {
-      content: [{ type: "text", text: "No memories found matching your query." }],
-    };
-  }
-
-  const results = memories.map((mem) => {
-    let result = `ID: ${mem.id}\nContent: ${mem.content}`;
-    if (Object.keys(mem.metadata).length > 0) {
-      result += `\nMetadata: ${JSON.stringify(mem.metadata)}`;
-    }
-    if (includeDeleted && mem.supersededBy) {
+    if (r.source === "memory" && includeDeleted && r.supersededBy) {
       result += `\n[DELETED]`;
+    }
+    if (r.source === "conversation_history" && r.sessionId) {
+      result += `\nSession: ${r.sessionId}`;
     }
     return result;
   });
 
   return {
-    content: [{ type: "text", text: results.join("\n\n---\n\n") }],
+    content: [{ type: "text", text: formatted.join("\n\n---\n\n") }],
   };
 }
 
@@ -210,31 +159,6 @@ function formatMemoryDetail(
     result += `\nSuperseded by: ${memory.supersededBy}`;
   }
   return result;
-}
-
-/**
- * Format a unified SearchResult (memory or history) for display.
- * TODO: The default memory-only search path in handleSearchMemories formats results inline
- * with similar logic but without the "Source:" label. Consolidating would add "Source: memory"
- * to existing output, which may break consumers that parse it. (#5)
- */
-function formatSearchResult(result: SearchResult, includeDeleted: boolean = false): string {
-  if (result.source === "memory") {
-    let text = `ID: ${result.id}\nSource: memory\nContent: ${result.content}`;
-    if (Object.keys(result.metadata).length > 0) {
-      text += `\nMetadata: ${JSON.stringify(result.metadata)}`;
-    }
-    if (includeDeleted && result.supersededBy) {
-      text += `\n[DELETED]`;
-    }
-    return text;
-  }
-  // conversation_history
-  let text = `ID: ${result.id}\nSource: conversation_history\nSession: ${result.sessionId}\nRole: ${result.role}\nTimestamp: ${result.timestamp.toISOString()}\nContent: ${result.content}`;
-  if (Object.keys(result.metadata).length > 0) {
-    text += `\nMetadata: ${JSON.stringify(result.metadata)}`;
-  }
-  return text;
 }
 
 export async function handleGetMemories(
@@ -335,48 +259,105 @@ export async function handleGetCheckpoint(
   };
 }
 
+function parseHistoryFilters(
+  args: Record<string, unknown> | undefined
+): HistoryFilters {
+  return {
+    sessionId: args?.session_id as string | undefined,
+    role: args?.role_filter as string | undefined,
+    after: args?.history_after
+      ? new Date(args.history_after as string)
+      : undefined,
+    before: args?.history_before
+      ? new Date(args.history_before as string)
+      : undefined,
+  };
+}
+
+function requireConversationService(
+  service: MemoryService
+): { service: ConversationHistoryService } | { error: CallToolResult } {
+  const conversationService = service.getConversationService();
+  if (!conversationService) {
+    return {
+      error: {
+        content: [
+          {
+            type: "text",
+            text: "Conversation history indexing is not enabled. Enable it with --enable-history.",
+          },
+        ],
+        isError: true,
+      },
+    };
+  }
+  return { service: conversationService };
+}
+
 export async function handleIndexConversations(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const result = requireHistoryService(service);
-  if ("content" in result) return result;
+  const conv = requireConversationService(service);
+  if ("error" in conv) return conv.error;
+  const conversationService = conv.service;
 
   const path = args?.path as string | undefined;
-  const summary = await result.indexConversations(path);
+  const sinceStr = args?.since as string | undefined;
+  const since = sinceStr ? new Date(sinceStr) : undefined;
+
+  const result = await conversationService.indexConversations(path, since);
 
   return {
-    content: [{
-      type: "text",
-      text: `Indexing complete.\n- Sessions discovered: ${summary.sessionsDiscovered}\n- Sessions indexed: ${summary.sessionsIndexed}\n- Sessions skipped (unchanged): ${summary.sessionsSkipped}\n- Messages indexed: ${summary.messagesIndexed}`,
-    }],
+    content: [
+      {
+        type: "text",
+        text:
+          `Indexing complete:\n- Indexed: ${result.indexed} sessions\n- Skipped: ${result.skipped} sessions (unchanged)\n` +
+          (result.errors.length > 0
+            ? `- Errors: ${result.errors.length}\n${result.errors.map((e) => `  - ${e}`).join("\n")}`
+            : "- No errors"),
+      },
+    ],
   };
 }
 
 export async function handleListIndexedSessions(
-  _args: Record<string, unknown> | undefined,
+  args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const result = requireHistoryService(service);
-  if ("content" in result) return result;
+  const conv = requireConversationService(service);
+  if ("error" in conv) return conv.error;
+  const conversationService = conv.service;
 
-  const sessions = await result.listIndexedSessions();
+  const limit = (args?.limit as number) ?? 20;
+  const offset = (args?.offset as number) ?? 0;
+  const { sessions, total } =
+    await conversationService.listIndexedSessions(limit, offset);
 
   if (sessions.length === 0) {
     return {
-      content: [{ type: "text", text: "No indexed sessions found. Run index_conversations first." }],
+      content: [
+        {
+          type: "text",
+          text: "No indexed sessions found. Run index_conversations first.",
+        },
+      ],
     };
   }
 
-  const lines = sessions.map((s) => {
-    let line = `Session: ${s.sessionId}\n  Messages: ${s.messageCount}\n  First: ${s.firstMessageAt.toISOString()}\n  Last: ${s.lastMessageAt.toISOString()}\n  Indexed: ${s.indexedAt.toISOString()}`;
-    if (s.project) line += `\n  Project: ${s.project}`;
-    if (s.gitBranch) line += `\n  Branch: ${s.gitBranch}`;
-    return line;
-  });
+  const lines = sessions.map(
+    (s) =>
+      `Session: ${s.sessionId}\n  Project: ${s.project}\n  Messages: ${s.messageCount} | Chunks: ${s.chunkCount}\n  Period: ${s.firstMessageAt.toISOString()} to ${s.lastMessageAt.toISOString()}\n  Indexed: ${s.indexedAt.toISOString()}`
+  );
 
   return {
-    content: [{ type: "text", text: `${sessions.length} indexed session(s):\n\n${lines.join("\n\n")}` }],
+    content: [
+      {
+        type: "text",
+        text: `Showing ${offset + 1}-${offset + sessions.length} of ${total} sessions:\n\n${lines.join("\n\n")}`,
+      },
+    ],
   };
 }
 
@@ -384,17 +365,27 @@ export async function handleReindexSession(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const result = requireHistoryService(service);
-  if ("content" in result) return result;
+  const conv = requireConversationService(service);
+  if ("error" in conv) return conv.error;
+  const conversationService = conv.service;
 
   const sessionId = args?.session_id as string;
-  const summary = await result.reindexSession(sessionId);
+  const result = await conversationService.reindexSession(sessionId);
+
+  if (!result.success) {
+    return {
+      content: [{ type: "text", text: `Reindex failed: ${result.error}` }],
+      isError: true,
+    };
+  }
 
   return {
-    content: [{
-      type: "text",
-      text: `Reindex complete for session ${sessionId}.\n- Messages indexed: ${summary.messagesIndexed}`,
-    }],
+    content: [
+      {
+        type: "text",
+        text: `Session ${sessionId} reindexed successfully. ${result.chunkCount} chunks created.`,
+      },
+    ],
   };
 }
 

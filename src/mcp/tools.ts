@@ -170,16 +170,31 @@ When in doubt, search. Missing context is costlier than an extra query.`,
       include_history: {
         type: "boolean",
         description:
-          "Include conversation history results alongside memories (default: false). " +
-          "Requires conversation history indexing to be enabled. History results are weighted lower than explicit memories.",
-        default: false,
+          "Include conversation history results (default: true when history indexing is enabled).",
+        default: true,
       },
       history_only: {
         type: "boolean",
         description:
-          "Search only conversation history, excluding explicit memories (default: false). " +
-          "Requires conversation history indexing to be enabled.",
+          "Search only conversation history, not explicit memories (default: false).",
         default: false,
+      },
+      session_id: {
+        type: "string",
+        description: "Filter conversation history results to a specific session ID.",
+      },
+      role_filter: {
+        type: "string",
+        enum: ["user", "assistant"],
+        description: "Filter conversation history results by message role.",
+      },
+      history_after: {
+        type: "string",
+        description: "Filter conversation history results after this ISO date.",
+      },
+      history_before: {
+        type: "string",
+        description: "Filter conversation history results before this ISO date.",
       },
     },
     required: ["query", "intent", "reason_for_search"],
@@ -288,17 +303,22 @@ export const getCheckpointTool: Tool = {
 
 export const indexConversationsTool: Tool = {
   name: "index_conversations",
-  description:
-    "Index Claude Code session logs for searchable conversation history. " +
-    "Scans for JSONL session files, detects new/changed sessions, and indexes text messages. " +
-    "Skips unchanged files. Run periodically or after significant work sessions.",
+  description: `Scan session log directory for new or updated conversation sessions and index them as searchable history.
+
+Indexing is idempotent: sessions that haven't changed since last indexing are skipped.
+Requires conversation history indexing to be enabled in configuration (--enable-history).`,
   inputSchema: {
     type: "object",
     properties: {
       path: {
         type: "string",
         description:
-          "Directory containing session JSONL files. If omitted, auto-detects the Claude Code sessions directory.",
+          "Override session log directory path. Defaults to configured path or Claude Code's session directory.",
+      },
+      since: {
+        type: "string",
+        description:
+          "Only index sessions modified after this ISO date. Example: '2026-03-01'",
       },
     },
   },
@@ -307,19 +327,28 @@ export const indexConversationsTool: Tool = {
 export const listIndexedSessionsTool: Tool = {
   name: "list_indexed_sessions",
   description:
-    "List all conversation sessions that have been indexed. " +
-    "Shows session ID, message count, time range, and associated project/branch.",
+    "Browse indexed conversation sessions with timestamps and chunk counts.",
   inputSchema: {
     type: "object",
-    properties: {},
+    properties: {
+      limit: {
+        type: "integer",
+        description: "Maximum sessions to return (default: 20).",
+        default: 20,
+      },
+      offset: {
+        type: "integer",
+        description: "Number of sessions to skip for pagination (default: 0).",
+        default: 0,
+      },
+    },
   },
 };
 
 export const reindexSessionTool: Tool = {
   name: "reindex_session",
   description:
-    "Force a full re-index of a specific session. Deletes all existing entries for the session and re-parses from scratch. " +
-    "Use when session data appears corrupted or after parser improvements.",
+    "Force reindex of a specific conversation session. Useful if the session was updated or indexing failed previously.",
   inputSchema: {
     type: "object",
     properties: {

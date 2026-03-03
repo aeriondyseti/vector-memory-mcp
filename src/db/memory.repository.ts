@@ -1,12 +1,13 @@
 import * as lancedb from "@lancedb/lancedb";
 import { type Table } from "@lancedb/lancedb";
 import { TABLE_NAME, memorySchema } from "./schema.js";
-import { arrowVectorToArray, createFtsMutex, createRerankerMutex, escapeLanceDbString } from "./lancedb-utils.js";
+import { arrowVectorToArray, createFtsMutex, createRerankerMutex } from "./lancedb-utils.js";
 import {
   type Memory,
   type HybridRow,
   DELETED_TOMBSTONE,
 } from "../types/memory.js";
+import { escapeSql } from "./sql-utils.js";
 
 export class MemoryRepository {
   // Mutex for schema migration - runs once per instance to add missing columns
@@ -115,14 +116,14 @@ export class MemoryRepository {
 
   async upsert(memory: Memory): Promise<void> {
     const table = await this.getTable();
-    const existing = await table.query().where(`id = '${escapeLanceDbString(memory.id)}'`).limit(1).toArray();
+    const existing = await table.query().where(`id = '${escapeSql(memory.id)}'`).limit(1).toArray();
 
     if (existing.length === 0) {
       return await this.insert(memory);
     }
 
     await table.update({
-      where: `id = '${escapeLanceDbString(memory.id)}'`,
+      where: `id = '${escapeSql(memory.id)}'`,
       values: {
         vector: memory.embedding,
         content: memory.content,
@@ -139,7 +140,7 @@ export class MemoryRepository {
 
   async findById(id: string): Promise<Memory | null> {
     const table = await this.getTable();
-    const results = await table.query().where(`id = '${escapeLanceDbString(id)}'`).limit(1).toArray();
+    const results = await table.query().where(`id = '${escapeSql(id)}'`).limit(1).toArray();
 
     if (results.length === 0) {
       return null;
@@ -152,14 +153,14 @@ export class MemoryRepository {
     const table = await this.getTable();
 
     // Verify existence first to match previous behavior (return false if not found)
-    const existing = await table.query().where(`id = '${escapeLanceDbString(id)}'`).limit(1).toArray();
+    const existing = await table.query().where(`id = '${escapeSql(id)}'`).limit(1).toArray();
     if (existing.length === 0) {
       return false;
     }
 
     const now = Date.now();
     await table.update({
-      where: `id = '${escapeLanceDbString(id)}'`,
+      where: `id = '${escapeSql(id)}'`,
       values: {
         superseded_by: DELETED_TOMBSTONE,
         updated_at: now,

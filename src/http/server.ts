@@ -101,16 +101,17 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
         return c.json({ error: "Missing or invalid 'query' field" }, 400);
       }
 
-      const memories = await memoryService.search(query, intent, limit);
+      const results = await memoryService.search(query, intent, limit);
 
       return c.json({
-        memories: memories.map((m) => ({
-          id: m.id,
-          content: m.content,
-          metadata: m.metadata,
-          createdAt: m.createdAt.toISOString(),
+        results: results.map((r) => ({
+          id: r.id,
+          content: r.content,
+          metadata: r.metadata,
+          source: r.source,
+          createdAt: r.createdAt.toISOString(),
         })),
-        count: memories.length,
+        count: results.length,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";

@@ -1,10 +1,10 @@
 import { randomUUID } from "crypto";
-import type { Memory, SearchIntent, IntentProfile } from "../types/memory.js";
+import type { Memory, SearchIntent, IntentProfile, HybridRow } from "../types/memory.js";
 import { isDeleted } from "../types/memory.js";
+import type { SearchResult, SearchOptions } from "../types/conversation.js";
 import type { MemoryRepository } from "../db/memory.repository.js";
 import type { EmbeddingsService } from "./embeddings.service.js";
-import type { ConversationHistoryService } from "./conversation-history.service.js";
-import type { SearchResult, MemorySearchResult } from "../types/conversation-history.js";
+import type { ConversationHistoryService } from "./conversation.service.js";
 
 const INTENT_PROFILES: Record<SearchIntent, IntentProfile> = {
   continuity: { weights: { relevance: 0.3, recency: 0.5, utility: 0.2 }, jitter: 0.02 },
@@ -17,29 +17,19 @@ const INTENT_PROFILES: Record<SearchIntent, IntentProfile> = {
 const sigmoid = (x: number): number => 1 / (1 + Math.exp(-x));
 
 export class MemoryService {
-  private historyService: ConversationHistoryService | null = null;
-  private historyWeight: number = 0.5;
+  private conversationService: ConversationHistoryService | null = null;
 
   constructor(
     private repository: MemoryRepository,
     private embeddings: EmbeddingsService
-  ) { }
+  ) {}
 
-  /**
-   * Optionally wire conversation history for unified search.
-   * Called from index.ts when conversationHistory.enabled is true.
-   */
-  setConversationHistory(service: ConversationHistoryService, weight: number): void {
-    this.historyService = service;
-    this.historyWeight = weight;
+  setConversationService(service: ConversationHistoryService): void {
+    this.conversationService = service;
   }
 
-  /**
-   * Access the conversation history service (if wired).
-   * Used by MCP handlers for index/list/reindex tools.
-   */
-  getConversationHistory(): ConversationHistoryService | null {
-    return this.historyService;
+  getConversationService(): ConversationHistoryService | null {
+    return this.conversationService;
   }
 
   async store(
@@ -144,103 +134,109 @@ export class MemoryService {
     return updatedMemory;
   }
 
+  private computeMemoryScore(
+    candidate: HybridRow,
+    profile: IntentProfile,
+    now: Date
+  ): number {
+    const relevance = candidate.rrfScore;
+    const lastAccessed = candidate.lastAccessed ?? candidate.createdAt;
+    const hoursSinceAccess = Math.max(
+      0,
+      (now.getTime() - lastAccessed.getTime()) / (1000 * 60 * 60)
+    );
+    const recency = Math.pow(0.995, hoursSinceAccess);
+    const utility = sigmoid(
+      (candidate.usefulness + Math.log(candidate.accessCount + 1)) / 5
+    );
+    const { weights, jitter } = profile;
+    const score =
+      weights.relevance * relevance +
+      weights.recency * recency +
+      weights.utility * utility;
+    return score * (1 + (Math.random() * 2 - 1) * jitter);
+  }
+
   async search(
     query: string,
     intent: SearchIntent,
     limit: number = 10,
-    includeDeleted: boolean = false
-  ): Promise<Memory[]> {
+    includeDeleted: boolean = false,
+    options?: SearchOptions
+  ): Promise<SearchResult[]> {
     const queryEmbedding = await this.embeddings.embed(query);
-    const fetchLimit = limit * 5; // Fetch more for re-ranking
-
-    const candidates = await this.repository.findHybrid(queryEmbedding, query, fetchLimit);
     const profile = INTENT_PROFILES[intent];
     const now = new Date();
 
-    const scored = candidates
-      .filter((m) => includeDeleted || !isDeleted(m))
-      .map((candidate) => {
-        // Relevance: RRF score (already normalized ~0-1)
-        const relevance = candidate.rrfScore;
+    const hasConversationService = this.conversationService !== null;
+    const historyOnly = (options?.historyOnly ?? false) && hasConversationService;
+    const includeHistory =
+      (options?.includeHistory ?? true) && hasConversationService;
+    const historyWeight =
+      options?.historyWeight ??
+      this.conversationService?.config.historyWeight ??
+      0.3;
 
-        // Recency: exponential decay
-        const lastAccessed = candidate.lastAccessed ?? candidate.createdAt;
-        const hoursSinceAccess = Math.max(0, (now.getTime() - lastAccessed.getTime()) / (1000 * 60 * 60));
-        const recency = Math.pow(0.995, hoursSinceAccess);
+    // Run memory + history queries in parallel
+    const memoryPromise =
+      !historyOnly
+        ? this.repository
+            .findHybrid(queryEmbedding, query, limit * 5)
+            .then((candidates) =>
+              candidates
+                .filter((m) => includeDeleted || !isDeleted(m))
+                .map((candidate) => ({
+                  id: candidate.id,
+                  content: candidate.content,
+                  metadata: candidate.metadata,
+                  createdAt: candidate.createdAt,
+                  updatedAt: candidate.updatedAt,
+                  source: "memory" as const,
+                  score: this.computeMemoryScore(candidate, profile, now),
+                  supersededBy: candidate.supersededBy,
+                  usefulness: candidate.usefulness,
+                  accessCount: candidate.accessCount,
+                  lastAccessed: candidate.lastAccessed,
+                }))
+            )
+        : Promise.resolve([] as SearchResult[]);
 
-        // Utility: sigmoid of usefulness + log(accessCount)
-        const utility = sigmoid((candidate.usefulness + Math.log(candidate.accessCount + 1)) / 5);
+    const historyPromise =
+      includeHistory || historyOnly
+        ? this.conversationService!
+            .searchHistory(
+              query,
+              queryEmbedding,
+              historyOnly ? limit * 5 : limit * 3,
+              options?.historyFilters
+            )
+            .then((historyRows) =>
+              historyRows.map((row) => ({
+                id: row.id,
+                content: row.content,
+                metadata: row.metadata,
+                createdAt: row.createdAt,
+                updatedAt: row.createdAt,
+                source: "conversation_history" as const,
+                score: row.rrfScore * historyWeight,
+                sessionId: row.metadata.session_id as string,
+                role: row.metadata.role as string,
+                messageIndexStart: row.metadata.message_index_start as number,
+                messageIndexEnd: row.metadata.message_index_end as number,
+              }))
+            )
+        : Promise.resolve([] as SearchResult[]);
 
-        // Weighted score
-        const { weights, jitter } = profile;
-        const score =
-          weights.relevance * relevance +
-          weights.recency * recency +
-          weights.utility * utility;
-
-        // Apply jitter
-        const finalScore = score * (1 + (Math.random() * 2 - 1) * jitter);
-
-        return { memory: candidate as Memory, finalScore };
-      });
-
-    // Sort by final score descending
-    scored.sort((a, b) => b.finalScore - a.finalScore);
-
-    // Return top N (read-only - no access tracking)
-    return scored.slice(0, limit).map((s) => s.memory);
-  }
-
-  /**
-   * Search across both memories and conversation history (if enabled).
-   * Returns a merged, score-normalized list sorted by relevance.
-   *
-   * If no history service is configured, falls back to memory-only search
-   * wrapped as MemorySearchResult[].
-   */
-  async searchUnified(
-    query: string,
-    intent: SearchIntent,
-    limit: number = 10,
-    includeDeleted: boolean = false,
-  ): Promise<SearchResult[]> {
-    if (!this.historyService) {
-      const memories = await this.search(query, intent, limit, includeDeleted);
-      return this.toMemoryResults(memories, limit);
-    }
-
-    // Run both searches in parallel
-    const [memories, historyResults] = await Promise.all([
-      this.search(query, intent, limit, includeDeleted),
-      this.historyService.search(query, limit),
+    const [memoryResults, historyResults] = await Promise.all([
+      memoryPromise,
+      historyPromise,
     ]);
 
-    const memoryResults = this.toMemoryResults(memories, limit);
-
-    // Apply history weight to RRF scores
-    const weightedHistory: SearchResult[] = historyResults.map((h) => ({
-      ...h,
-      score: h.score * this.historyWeight,
-    }));
-
-    // Merge, sort by score descending, take top N
-    const merged = [...memoryResults, ...weightedHistory];
+    // Merge and sort by score descending
+    const merged = [...memoryResults, ...historyResults];
     merged.sort((a, b) => b.score - a.score);
-    return merged.slice(0, limit);
-  }
 
-  /** Convert pre-sorted Memory[] to MemorySearchResult[] with positional scores. */
-  private toMemoryResults(memories: Memory[], limit: number): MemorySearchResult[] {
-    return memories.map((m, rank) => ({
-      source: "memory" as const,
-      id: m.id,
-      content: m.content,
-      metadata: m.metadata,
-      score: (limit - rank) / limit,
-      createdAt: m.createdAt,
-      updatedAt: m.updatedAt,
-      supersededBy: m.supersededBy,
-    }));
+    return merged.slice(0, limit);
   }
 
   async trackAccess(ids: string[]): Promise<void> {
