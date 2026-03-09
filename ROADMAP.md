@@ -4,15 +4,17 @@ Current version: **0.8.0**
 
 ## Tech Debt
 
-- **SQL injection in LanceDB where clauses**: Both `MemoryRepository` and `ConversationHistoryRepository` interpolate caller-controlled strings directly into filter expressions (e.g., `` where(`id = '${id}'`) ``). LanceDB lacks parameterized queries, so a shared escaping helper is needed. Session IDs from file paths are more likely to contain special characters than UUIDs. Fix both repos together.
-- **Duplicate `getReranker()` across repositories**: `MemoryRepository` and `ConversationHistoryRepository` both have identical promise-mutex `getReranker()` methods. Extract a shared `createReranker()` factory into `lancedb-utils.ts` (same pattern as `createFtsMutex`).
-- **Duplicate JSONL test helpers**: `tests/session-parser.test.ts` and `tests/conversation-history.service.test.ts` both define identical `userLine()`/`assistantLine()` helpers. Extract into a shared `tests/helpers/jsonl-fixtures.ts` when a third consumer appears.
-- **Duplicate `EMBEDDING_DIM` / fake embedding in tests**: `conversation-history.repository.test.ts` and `conversation-history.service.test.ts` both define `EMBEDDING_DIM = 384` and random embedding factories. Extract into shared test helpers alongside the JSONL fixtures.
 - **Duplicate memory formatting in `handleSearchMemories`**: The memory-only code path (default, no `include_history`) formats results inline with the same logic as `formatSearchResult` for `source: "memory"`, minus the `Source:` label. Consolidating would require adding a `Source: memory` prefix to default output, changing existing behavior. Deferred to avoid breaking consumers that parse the output.
-- **`include_history` and `history_only` mutual exclusivity undocumented**: Both params can be set to `true` simultaneously; `history_only` wins silently. Consider adding a note to the tool description or returning an error if both are set.
-- **`handleGetMemories` uses arrow function for `format`**: Pre-existing inconsistency with project's `function` keyword convention. Low priority — normalize when touching that handler.
 
 ## Completed
+
+### v0.9.0 - Conversation History Indexing (Feature 27)
+- Conversation history indexing from Claude Code JSONL session logs
+- Session parser with incremental indexing support
+- Hybrid search (vector + FTS) across conversation history
+- Unified search merging memories and conversation history
+- New MCP tools: index_conversations, list_indexed_sessions, reindex_session
+- search_memories gains include_history and history_only params
 
 ### v0.8.0 - Batch Operations & Checkpoints
 - Batch memory operations (store/update/delete/get multiple)
@@ -38,33 +40,7 @@ This server is general-purpose: useful to developers, creative writers, worldbui
 
 ---
 
-### Next — Conversation History Indexing
-
-#### 27. Conversation History Indexing
-
-Index the host client's conversation session logs as a second-tier memory source. Explicit stored memories always outrank conversation history in retrieval; history provides full coverage as a fallback.
-
-**Architecture:**
-- Separate LanceDB table (`conversation_history`) with schema: `id, vector, content, metadata (session_id, timestamp, role, message_index, project), created_at`
-- Chunks at message boundaries with configurable overlap; roles and timestamps preserved
-- Source-agnostic: designed for Claude Code JSONL session files by default, but configurable for any structured session log format
-
-**Retrieval:**
-- `search_memories` queries both tables; explicit memories ranked first (configurable `history_weight`, default `0.3`)
-- All result objects include a `source: "memory" | "conversation_history"` field
-- Conversation history results can be filtered by `session_id`, `role`, date range, or project
-
-**New tools:**
-- `index_conversations(path?, since?)` — scan session log directory for new/updated sessions and index them; idempotent
-- `list_indexed_sessions(limit, offset)` — browse indexed sessions with timestamps and chunk counts
-- `reindex_session(session_id)` — force reindex of a specific session
-- `search_memories` gains `include_history: boolean` (default: true) and `history_only: boolean` (default: false) params
-
-**Privacy:** indexing is opt-in via configuration; path defaults to Claude Code's session log directory if detected, but must be explicitly enabled.
-
----
-
-### Phase 1 — High Impact, Low Effort
+### Next — Phase 1 — High Impact, Low Effort
 
 No schema changes required. These are handler and query-layer additions.
 
@@ -434,7 +410,7 @@ LanceDB supports `table.checkout_latest()` and `table.list_versions()` natively 
 
 | # | Feature | Phase | Schema Change |
 |---|---------|-------|---------------|
-| 27 | Conversation history indexing | **Next** | Yes — new `conversation_history` table |
+| 27 | Conversation history indexing | **Done** | Yes — new `conversation_history` table |
 | 1 | Date/time filtering in search | 1 | No |
 | 2 | Flexible deletion (tags, time, dry_run) | 1 | No |
 | 3 | Memory pinning | 1 | Yes — `pinned` column |

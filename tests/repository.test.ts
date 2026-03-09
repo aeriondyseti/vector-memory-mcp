@@ -5,6 +5,7 @@ import { tmpdir } from "os";
 import * as lancedb from "@lancedb/lancedb";
 import { connectToDatabase } from "../src/db/connection";
 import { MemoryRepository } from "../src/db/memory.repository";
+import { fakeEmbedding } from "./utils/test-helpers";
 import type { Memory } from "../src/types/memory";
 
 describe("MemoryRepository - Hybrid Search", () => {
@@ -37,7 +38,7 @@ describe("MemoryRepository - Hybrid Search", () => {
   });
 
   test("findHybrid returns results with rrfScore", async () => {
-    const embedding = new Array(384).fill(0).map(() => Math.random());
+    const embedding = fakeEmbedding();
     const memory = createTestMemory("test-1", "TypeScript programming language", embedding);
     await repository.insert(memory);
 
@@ -50,7 +51,7 @@ describe("MemoryRepository - Hybrid Search", () => {
   });
 
   test("findHybrid returns full Memory data", async () => {
-    const embedding = new Array(384).fill(0).map(() => Math.random());
+    const embedding = fakeEmbedding();
     const memory = createTestMemory("test-2", "JavaScript runtime", embedding);
     memory.usefulness = 5;
     memory.accessCount = 10;
@@ -65,7 +66,7 @@ describe("MemoryRepository - Hybrid Search", () => {
   });
 
   test("findHybrid mutex prevents concurrent index creation", async () => {
-    const embedding = new Array(384).fill(0).map(() => Math.random());
+    const embedding = fakeEmbedding();
     const memory = createTestMemory("test-3", "Concurrent test content", embedding);
     await repository.insert(memory);
 
