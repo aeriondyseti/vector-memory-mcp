@@ -16,6 +16,7 @@ import type {
   ConversationHistoryHybridRow,
   IndexedSession,
   IndexedSessionSummary,
+  MessageRole,
 } from "../types/conversation-history.js";
 
 export class ConversationHistoryRepository {
@@ -77,7 +78,7 @@ export class ConversationHistoryRepository {
       content: row.content as string,
       embedding: arrowVectorToArray(row.vector),
       sessionId: row.session_id as string,
-      role: row.role as "user" | "assistant",
+      role: row.role as MessageRole,
       messageIndex: row.message_index as number,
       timestamp: new Date(row.timestamp as number),
       metadata: JSON.parse(row.metadata as string),

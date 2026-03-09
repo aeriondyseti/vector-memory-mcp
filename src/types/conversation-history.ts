@@ -1,5 +1,7 @@
 import type { WithRrfScore } from "./memory.js";
 
+export type MessageRole = "user" | "assistant";
+
 /**
  * A single indexed message from a conversation session log.
  * One entry per user/assistant text message — tool calls and results are excluded.
@@ -9,7 +11,7 @@ export interface ConversationHistoryEntry {
   content: string;
   embedding: number[];
   sessionId: string;
-  role: "user" | "assistant";
+  role: MessageRole;
   messageIndex: number;
   timestamp: Date;
   metadata: Record<string, unknown>;
@@ -62,7 +64,7 @@ export interface HistorySearchResult {
   metadata: Record<string, unknown>;
   score: number;
   sessionId: string;
-  role: "user" | "assistant";
+  role: MessageRole;
   messageIndex: number;
   timestamp: Date;
 }

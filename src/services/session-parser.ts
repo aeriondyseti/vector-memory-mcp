@@ -1,8 +1,9 @@
 import { createReadStream } from "fs";
 import { readdir, stat } from "fs/promises";
 import { createInterface } from "readline";
-import { join } from "path";
+import { basename, join } from "path";
 import { randomUUID } from "crypto";
+import type { MessageRole } from "../types/conversation-history.js";
 
 /**
  * A parsed message extracted from a Claude Code JSONL session file.
@@ -11,7 +12,7 @@ import { randomUUID } from "crypto";
 export interface ParsedMessage {
   id: string;
   sessionId: string;
-  role: "user" | "assistant";
+  role: MessageRole;
   messageIndex: number;
   content: string;
   timestamp: Date;
@@ -29,6 +30,9 @@ export interface SessionFileInfo {
 
 /**
  * Result of parsing a single session file.
+ * Structurally mirrors IndexedSession but with nullable timestamps/metadata
+ * (a file with 0 messages has no timestamps). The service layer maps this to
+ * IndexedSession at write time, supplying messageCount and indexedAt.
  */
 export interface ParseResult {
   sessionId: string;
@@ -94,18 +98,18 @@ function extractTextContent(line: JournalLine): string | null {
  * @param fromByte - Byte offset to start reading from (for incremental parsing).
  *                   When non-zero, messageIndex starts from startIndex.
  * @param startIndex - Starting message index (for incremental parsing).
+ * @param knownFileSize - If already known (e.g. from discoverSessionFiles), avoids a redundant stat().
  */
 export async function parseSessionFile(
   filePath: string,
   fromByte: number = 0,
   startIndex: number = 0,
+  knownFileSize?: number,
 ): Promise<ParseResult> {
-  const fileStats = await stat(filePath);
-  const fileSize = fileStats.size;
+  const fileSize = knownFileSize ?? (await stat(filePath)).size;
 
   // Extract session ID from filename (e.g. "abc-123.jsonl" → "abc-123")
-  const fileName = filePath.split("/").pop() ?? "";
-  const sessionId = fileName.replace(/\.jsonl$/, "");
+  const sessionId = basename(filePath, ".jsonl");
 
   const messages: ParsedMessage[] = [];
   let messageIndex = startIndex;
@@ -139,7 +143,7 @@ export async function parseSessionFile(
     if (gitBranch == null && line.gitBranch) gitBranch = line.gitBranch;
     if (project == null && line.cwd) project = line.cwd;
 
-    const role = line.type as "user" | "assistant";
+    const role: MessageRole = line.type === "user" ? "user" : "assistant";
     const text = extractTextContent(line);
     if (!text) continue;
 
@@ -178,7 +182,7 @@ export async function parseSessionFile(
 
 /**
  * Discover all .jsonl session files in a directory.
- * Returns file info sorted by modification time (newest first).
+ * Stat calls are parallelized for efficiency.
  */
 export async function discoverSessionFiles(
   sessionDir: string,
@@ -190,30 +194,28 @@ export async function discoverSessionFiles(
     return [];
   }
 
-  const results: SessionFileInfo[] = [];
+  const jsonlEntries = entries.filter((e) => e.endsWith(".jsonl"));
 
-  for (const entry of entries) {
-    if (!entry.endsWith(".jsonl")) continue;
-
-    const filePath = join(sessionDir, entry);
-    try {
+  const settled = await Promise.allSettled(
+    jsonlEntries.map(async (entry) => {
+      const filePath = join(sessionDir, entry);
       const fileStats = await stat(filePath);
-      if (!fileStats.isFile()) continue;
-      results.push({
+      if (!fileStats.isFile()) return null;
+      return {
         sessionId: entry.replace(/\.jsonl$/, ""),
         filePath,
         fileSize: fileStats.size,
-      });
-    } catch {
-      // Skip files we can't stat
-      continue;
-    }
-  }
+      } satisfies SessionFileInfo;
+    }),
+  );
 
-  // Sort newest first by modification time
-  // (we already have the stats, but sort by name as proxy since
-  // session IDs are UUIDs and we'd need to store mtime separately)
-  return results;
+  return settled
+    .filter(
+      (r): r is PromiseFulfilledResult<SessionFileInfo | null> =>
+        r.status === "fulfilled",
+    )
+    .map((r) => r.value)
+    .filter((v): v is SessionFileInfo => v != null);
 }
 
 /**
