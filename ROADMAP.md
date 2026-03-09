@@ -8,6 +8,9 @@ Current version: **0.8.0**
 - **Duplicate `getReranker()` across repositories**: `MemoryRepository` and `ConversationHistoryRepository` both have identical promise-mutex `getReranker()` methods. Extract a shared `createReranker()` factory into `lancedb-utils.ts` (same pattern as `createFtsMutex`).
 - **Duplicate JSONL test helpers**: `tests/session-parser.test.ts` and `tests/conversation-history.service.test.ts` both define identical `userLine()`/`assistantLine()` helpers. Extract into a shared `tests/helpers/jsonl-fixtures.ts` when a third consumer appears.
 - **Duplicate `EMBEDDING_DIM` / fake embedding in tests**: `conversation-history.repository.test.ts` and `conversation-history.service.test.ts` both define `EMBEDDING_DIM = 384` and random embedding factories. Extract into shared test helpers alongside the JSONL fixtures.
+- **Duplicate memory formatting in `handleSearchMemories`**: The memory-only code path (default, no `include_history`) formats results inline with the same logic as `formatSearchResult` for `source: "memory"`, minus the `Source:` label. Consolidating would require adding a `Source: memory` prefix to default output, changing existing behavior. Deferred to avoid breaking consumers that parse the output.
+- **`include_history` and `history_only` mutual exclusivity undocumented**: Both params can be set to `true` simultaneously; `history_only` wins silently. Consider adding a note to the tool description or returning an error if both are set.
+- **`handleGetMemories` uses arrow function for `format`**: Pre-existing inconsistency with project's `function` keyword convention. Low priority — normalize when touching that handler.
 
 ## Completed
 

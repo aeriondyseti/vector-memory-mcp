@@ -54,7 +54,7 @@ For long content (>1000 chars), provide embedding_text with a searchable summary
     },
     required: ["memories"],
   },
-};;
+};
 
 export const deleteMemoriesTool: Tool = {
   name: "delete_memories",
@@ -74,7 +74,7 @@ export const deleteMemoriesTool: Tool = {
     },
     required: ["ids"],
   },
-};;
+};
 
 
 const updateMemoriesTool: Tool = {
@@ -167,6 +167,20 @@ When in doubt, search. Missing context is costlier than an extra query.`,
         description: "Include soft-deleted memories in results (default: false). Useful for recovering prior information.",
         default: false,
       },
+      include_history: {
+        type: "boolean",
+        description:
+          "Include conversation history results alongside memories (default: false). " +
+          "Requires conversation history indexing to be enabled. History results are weighted lower than explicit memories.",
+        default: false,
+      },
+      history_only: {
+        type: "boolean",
+        description:
+          "Search only conversation history, excluding explicit memories (default: false). " +
+          "Requires conversation history indexing to be enabled.",
+        default: false,
+      },
     },
     required: ["query", "intent", "reason_for_search"],
   },
@@ -187,7 +201,7 @@ export const getMemoriesTool: Tool = {
     },
     required: ["ids"],
   },
-};;
+};
 
 export const reportMemoryUsefulnessTool: Tool = {
   name: "report_memory_usefulness",
@@ -272,6 +286,52 @@ export const getCheckpointTool: Tool = {
   },
 };
 
+export const indexConversationsTool: Tool = {
+  name: "index_conversations",
+  description:
+    "Index Claude Code session logs for searchable conversation history. " +
+    "Scans for JSONL session files, detects new/changed sessions, and indexes text messages. " +
+    "Skips unchanged files. Run periodically or after significant work sessions.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      path: {
+        type: "string",
+        description:
+          "Directory containing session JSONL files. If omitted, auto-detects the Claude Code sessions directory.",
+      },
+    },
+  },
+};
+
+export const listIndexedSessionsTool: Tool = {
+  name: "list_indexed_sessions",
+  description:
+    "List all conversation sessions that have been indexed. " +
+    "Shows session ID, message count, time range, and associated project/branch.",
+  inputSchema: {
+    type: "object",
+    properties: {},
+  },
+};
+
+export const reindexSessionTool: Tool = {
+  name: "reindex_session",
+  description:
+    "Force a full re-index of a specific session. Deletes all existing entries for the session and re-parses from scratch. " +
+    "Use when session data appears corrupted or after parser improvements.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      session_id: {
+        type: "string",
+        description: "The session ID to reindex.",
+      },
+    },
+    required: ["session_id"],
+  },
+};
+
 export const tools: Tool[] = [
   storeMemoriesTool,
   updateMemoriesTool,
@@ -281,4 +341,7 @@ export const tools: Tool[] = [
   reportMemoryUsefulnessTool,
   storeCheckpointTool,
   getCheckpointTool,
+  indexConversationsTool,
+  listIndexedSessionsTool,
+  reindexSessionTool,
 ];

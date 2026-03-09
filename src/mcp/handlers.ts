@@ -1,6 +1,27 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { MemoryService } from "../services/memory.service.js";
+import type { ConversationHistoryService } from "../services/conversation-history.service.js";
 import type { SearchIntent } from "../types/memory.js";
+import type { SearchResult } from "../types/conversation-history.js";
+
+/**
+ * Guard: returns the ConversationHistoryService or an error CallToolResult.
+ */
+function requireHistoryService(
+  service: MemoryService,
+): ConversationHistoryService | CallToolResult {
+  const historyService = service.getConversationHistory();
+  if (!historyService) {
+    return {
+      content: [{
+        type: "text",
+        text: "Conversation history indexing is not enabled. Set conversationHistory.enabled = true in config.",
+      }],
+      isError: true,
+    };
+  }
+  return historyService;
+}
 
 export async function handleStoreMemories(
   args: Record<string, unknown> | undefined,
@@ -103,9 +124,40 @@ export async function handleSearchMemories(
 ): Promise<CallToolResult> {
   const query = args?.query as string;
   const intent = (args?.intent as SearchIntent) ?? "fact_check";
-  const _reasonForSearch = args?.reason_for_search as string; // Logged but not used in logic
   const limit = (args?.limit as number) ?? 10;
   const includeDeleted = (args?.include_deleted as boolean) ?? false;
+  const includeHistory = (args?.include_history as boolean) ?? false;
+  const historyOnly = (args?.history_only as boolean) ?? false;
+
+  // History-only: search only conversation history via the history service
+  if (historyOnly) {
+    const result = requireHistoryService(service);
+    if ("content" in result) return result;
+    const historyResults = await result.search(query, limit);
+    if (historyResults.length === 0) {
+      return {
+        content: [{ type: "text", text: "No conversation history found matching your query." }],
+      };
+    }
+    return {
+      content: [{ type: "text", text: historyResults.map((r) => formatSearchResult(r)).join("\n\n---\n\n") }],
+    };
+  }
+
+  // Unified search: merge memories + history
+  if (includeHistory) {
+    const results = await service.searchUnified(query, intent, limit, includeDeleted);
+    if (results.length === 0) {
+      return {
+        content: [{ type: "text", text: "No results found matching your query." }],
+      };
+    }
+    return {
+      content: [{ type: "text", text: results.map((r) => formatSearchResult(r, includeDeleted)).join("\n\n---\n\n") }],
+    };
+  }
+
+  // Default: memory-only search (original behavior)
   const memories = await service.search(query, intent, limit, includeDeleted);
 
   if (memories.length === 0) {
@@ -128,6 +180,28 @@ export async function handleSearchMemories(
   return {
     content: [{ type: "text", text: results.join("\n\n---\n\n") }],
   };
+}
+
+/**
+ * Format a unified SearchResult (memory or history) for display.
+ */
+function formatSearchResult(result: SearchResult, includeDeleted: boolean = false): string {
+  if (result.source === "memory") {
+    let text = `ID: ${result.id}\nSource: memory\nContent: ${result.content}`;
+    if (Object.keys(result.metadata).length > 0) {
+      text += `\nMetadata: ${JSON.stringify(result.metadata)}`;
+    }
+    if (includeDeleted && result.supersededBy) {
+      text += `\n[DELETED]`;
+    }
+    return text;
+  }
+  // conversation_history
+  let text = `ID: ${result.id}\nSource: conversation_history\nSession: ${result.sessionId}\nRole: ${result.role}\nTimestamp: ${result.timestamp.toISOString()}\nContent: ${result.content}`;
+  if (Object.keys(result.metadata).length > 0) {
+    text += `\nMetadata: ${JSON.stringify(result.metadata)}`;
+  }
+  return text;
 }
 
 export async function handleGetMemories(
@@ -248,6 +322,69 @@ export async function handleGetCheckpoint(
   };
 }
 
+export async function handleIndexConversations(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const result = requireHistoryService(service);
+  if ("content" in result) return result;
+
+  const path = args?.path as string | undefined;
+  const summary = await result.indexConversations(path);
+
+  return {
+    content: [{
+      type: "text",
+      text: `Indexing complete.\n- Sessions discovered: ${summary.sessionsDiscovered}\n- Sessions indexed: ${summary.sessionsIndexed}\n- Sessions skipped (unchanged): ${summary.sessionsSkipped}\n- Messages indexed: ${summary.messagesIndexed}`,
+    }],
+  };
+}
+
+export async function handleListIndexedSessions(
+  _args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const result = requireHistoryService(service);
+  if ("content" in result) return result;
+
+  const sessions = await result.listIndexedSessions();
+
+  if (sessions.length === 0) {
+    return {
+      content: [{ type: "text", text: "No indexed sessions found. Run index_conversations first." }],
+    };
+  }
+
+  const lines = sessions.map((s) => {
+    let line = `Session: ${s.sessionId}\n  Messages: ${s.messageCount}\n  First: ${s.firstMessageAt.toISOString()}\n  Last: ${s.lastMessageAt.toISOString()}\n  Indexed: ${s.indexedAt.toISOString()}`;
+    if (s.project) line += `\n  Project: ${s.project}`;
+    if (s.gitBranch) line += `\n  Branch: ${s.gitBranch}`;
+    return line;
+  });
+
+  return {
+    content: [{ type: "text", text: `${sessions.length} indexed session(s):\n\n${lines.join("\n\n")}` }],
+  };
+}
+
+export async function handleReindexSession(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const result = requireHistoryService(service);
+  if ("content" in result) return result;
+
+  const sessionId = args?.session_id as string;
+  const summary = await result.reindexSession(sessionId);
+
+  return {
+    content: [{
+      type: "text",
+      text: `Reindex complete for session ${sessionId}.\n- Messages indexed: ${summary.messagesIndexed}`,
+    }],
+  };
+}
+
 export async function handleToolCall(
   name: string,
   args: Record<string, unknown> | undefined,
@@ -270,6 +407,12 @@ export async function handleToolCall(
       return handleStoreCheckpoint(args, service);
     case "get_checkpoint":
       return handleGetCheckpoint(args, service);
+    case "index_conversations":
+      return handleIndexConversations(args, service);
+    case "list_indexed_sessions":
+      return handleListIndexedSessions(args, service);
+    case "reindex_session":
+      return handleReindexSession(args, service);
     default:
       return {
         content: [{ type: "text", text: `Unknown tool: ${name}` }],

@@ -34,6 +34,14 @@ export class MemoryService {
     this.historyWeight = weight;
   }
 
+  /**
+   * Access the conversation history service (if wired).
+   * Used by MCP handlers for index/list/reindex tools.
+   */
+  getConversationHistory(): ConversationHistoryService | null {
+    return this.historyService;
+  }
+
   async store(
     content: string,
     metadata: Record<string, unknown> = {},
