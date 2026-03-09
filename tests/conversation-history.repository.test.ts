@@ -5,10 +5,8 @@ import { tmpdir } from "os";
 import * as lancedb from "@lancedb/lancedb";
 import { connectToDatabase } from "../src/db/connection";
 import { ConversationHistoryRepository } from "../src/db/conversation-history.repository";
+import { fakeEmbedding as randomEmbedding } from "./utils/test-helpers";
 import type { ConversationHistoryEntry, IndexedSession } from "../src/types/conversation-history";
-
-const EMBEDDING_DIM = 384;
-const randomEmbedding = () => new Array(EMBEDDING_DIM).fill(0).map(() => Math.random());
 
 const createTestEntry = (
   id: string,
