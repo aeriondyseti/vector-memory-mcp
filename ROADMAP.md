@@ -2,6 +2,10 @@
 
 Current version: **0.8.0**
 
+## Tech Debt
+
+- **SQL injection in LanceDB where clauses**: Both `MemoryRepository` and `ConversationHistoryRepository` interpolate caller-controlled strings directly into filter expressions (e.g., `` where(`id = '${id}'`) ``). LanceDB lacks parameterized queries, so a shared escaping helper is needed. Session IDs from file paths are more likely to contain special characters than UUIDs. Fix both repos together.
+
 ## Completed
 
 ### v0.8.0 - Batch Operations & Checkpoints

@@ -32,6 +32,15 @@ export interface IndexedSessionSummary {
 }
 
 /**
+ * Full indexed session record including storage-level fields (file path, size).
+ * Used by the repository for upsert operations and by the parser for tracking.
+ */
+export interface IndexedSession extends IndexedSessionSummary {
+  filePath: string;
+  fileSize: number;
+}
+
+/**
  * Discriminated union for merged search results.
  * Narrow on `source` to access type-specific fields.
  */
