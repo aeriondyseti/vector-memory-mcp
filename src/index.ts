@@ -5,6 +5,8 @@ import { connectToDatabase } from "./db/connection.js";
 import { MemoryRepository } from "./db/memory.repository.js";
 import { EmbeddingsService } from "./services/embeddings.service.js";
 import { MemoryService } from "./services/memory.service.js";
+import { ConversationHistoryRepository } from "./db/conversation-history.repository.js";
+import { ConversationHistoryService } from "./services/conversation-history.service.js";
 import { startServer } from "./mcp/server.js";
 import { startHttpServer } from "./http/server.js";
 
@@ -29,6 +31,20 @@ async function main(): Promise<void> {
   const repository = new MemoryRepository(db);
   const embeddings = new EmbeddingsService(config.embeddingModel, config.embeddingDimension);
   const memoryService = new MemoryService(repository, embeddings);
+
+  // Wire conversation history if enabled
+  if (config.conversationHistory.enabled) {
+    const historyRepo = new ConversationHistoryRepository(db);
+    const historyService = new ConversationHistoryService(
+      historyRepo,
+      embeddings,
+      config.conversationHistory.sessionPath,
+    );
+    memoryService.setConversationHistory(
+      historyService,
+      config.conversationHistory.historyWeight,
+    );
+  }
 
   // Track cleanup functions
   let httpStop: (() => void) | null = null;

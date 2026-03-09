@@ -101,6 +101,14 @@ export class ConversationHistoryRepository {
     };
   }
 
+  private rowToSession(row: Record<string, unknown>): IndexedSession {
+    return {
+      ...this.rowToSessionSummary(row),
+      filePath: row.file_path as string,
+      fileSize: row.file_size as number,
+    };
+  }
+
   // --- Conversation History Operations ---
 
   async insert(entries: ConversationHistoryEntry[]): Promise<void> {
@@ -183,7 +191,7 @@ export class ConversationHistoryRepository {
 
   async getIndexedSession(
     sessionId: string
-  ): Promise<IndexedSessionSummary | null> {
+  ): Promise<IndexedSession | null> {
     const table = await this.getSessionsTable();
     const results = await table
       .query()
@@ -195,7 +203,7 @@ export class ConversationHistoryRepository {
       return null;
     }
 
-    return this.rowToSessionSummary(results[0] as Record<string, unknown>);
+    return this.rowToSession(results[0] as Record<string, unknown>);
   }
 
   async upsertIndexedSession(session: IndexedSession): Promise<void> {

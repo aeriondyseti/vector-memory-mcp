@@ -70,3 +70,13 @@ export interface HistorySearchResult {
 }
 
 export type SearchResult = MemorySearchResult | HistorySearchResult;
+
+/**
+ * Summary returned by indexConversations() and reindexSession().
+ */
+export interface IndexingSummary {
+  sessionsDiscovered: number;
+  sessionsIndexed: number;
+  sessionsSkipped: number;
+  messagesIndexed: number;
+}

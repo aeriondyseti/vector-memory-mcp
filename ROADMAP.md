@@ -5,6 +5,9 @@ Current version: **0.8.0**
 ## Tech Debt
 
 - **SQL injection in LanceDB where clauses**: Both `MemoryRepository` and `ConversationHistoryRepository` interpolate caller-controlled strings directly into filter expressions (e.g., `` where(`id = '${id}'`) ``). LanceDB lacks parameterized queries, so a shared escaping helper is needed. Session IDs from file paths are more likely to contain special characters than UUIDs. Fix both repos together.
+- **Duplicate `getReranker()` across repositories**: `MemoryRepository` and `ConversationHistoryRepository` both have identical promise-mutex `getReranker()` methods. Extract a shared `createReranker()` factory into `lancedb-utils.ts` (same pattern as `createFtsMutex`).
+- **Duplicate JSONL test helpers**: `tests/session-parser.test.ts` and `tests/conversation-history.service.test.ts` both define identical `userLine()`/`assistantLine()` helpers. Extract into a shared `tests/helpers/jsonl-fixtures.ts` when a third consumer appears.
+- **Duplicate `EMBEDDING_DIM` / fake embedding in tests**: `conversation-history.repository.test.ts` and `conversation-history.service.test.ts` both define `EMBEDDING_DIM = 384` and random embedding factories. Extract into shared test helpers alongside the JSONL fixtures.
 
 ## Completed
 
