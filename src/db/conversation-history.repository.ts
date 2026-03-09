@@ -1,5 +1,5 @@
 import * as lancedb from "@lancedb/lancedb";
-import { rerankers, type Table } from "@lancedb/lancedb";
+import { type Table } from "@lancedb/lancedb";
 import {
   CONVERSATION_HISTORY_TABLE,
   INDEXED_SESSIONS_TABLE,
@@ -10,6 +10,8 @@ import {
   arrowVectorToArray,
   getOrCreateTable,
   createFtsMutex,
+  createRerankerMutex,
+  escapeLanceDbString,
 } from "./lancedb-utils.js";
 import type {
   ConversationHistoryEntry,
@@ -24,11 +26,11 @@ export class ConversationHistoryRepository {
   private tablePromise: Promise<Table> | null = null;
   private sessionsTablePromise: Promise<Table> | null = null;
 
-  // Cached reranker — k=60 is constant, no need to recreate per search
-  private rerankerPromise: Promise<rerankers.RRFReranker> | null = null;
-
   // FTS index mutex — once created, the promise is never cleared (index persists in LanceDB)
   private ensureFtsIndex: () => Promise<void>;
+
+  // Cached reranker — k=60 is constant, no need to recreate per search
+  private getReranker = createRerankerMutex();
 
   constructor(private db: lancedb.Connection) {
     this.ensureFtsIndex = createFtsMutex(() => this.getTable());
@@ -60,16 +62,6 @@ export class ConversationHistoryRepository {
       });
     }
     return this.sessionsTablePromise;
-  }
-
-  private getReranker(): Promise<rerankers.RRFReranker> {
-    if (!this.rerankerPromise) {
-      this.rerankerPromise = rerankers.RRFReranker.create(60).catch((e) => {
-        this.rerankerPromise = null;
-        throw e;
-      });
-    }
-    return this.rerankerPromise;
   }
 
   private rowToEntry(row: Record<string, unknown>): ConversationHistoryEntry {
@@ -161,7 +153,7 @@ export class ConversationHistoryRepository {
     const table = await this.getTable();
     const results = await table
       .query()
-      .where(`session_id = '${sessionId}'`)
+      .where(`session_id = '${escapeLanceDbString(sessionId)}'`)
       .toArray();
 
     return results.map((row) =>
@@ -175,13 +167,13 @@ export class ConversationHistoryRepository {
     // Select only id — avoids deserializing embedding vectors just for a count
     const existing = await table
       .query()
-      .where(`session_id = '${sessionId}'`)
+      .where(`session_id = '${escapeLanceDbString(sessionId)}'`)
       .select(["id"])
       .toArray();
     const count = existing.length;
 
     if (count > 0) {
-      await table.delete(`session_id = '${sessionId}'`);
+      await table.delete(`session_id = '${escapeLanceDbString(sessionId)}'`);
     }
 
     return count;
@@ -195,7 +187,7 @@ export class ConversationHistoryRepository {
     const table = await this.getSessionsTable();
     const results = await table
       .query()
-      .where(`session_id = '${sessionId}'`)
+      .where(`session_id = '${escapeLanceDbString(sessionId)}'`)
       .limit(1)
       .toArray();
 
@@ -210,7 +202,7 @@ export class ConversationHistoryRepository {
     const table = await this.getSessionsTable();
     const existing = await table
       .query()
-      .where(`session_id = '${session.sessionId}'`)
+      .where(`session_id = '${escapeLanceDbString(session.sessionId)}'`)
       .limit(1)
       .toArray();
 
@@ -230,7 +222,7 @@ export class ConversationHistoryRepository {
       await table.add([row]);
     } else {
       await table.update({
-        where: `session_id = '${session.sessionId}'`,
+        where: `session_id = '${escapeLanceDbString(session.sessionId)}'`,
         values: row,
       });
     }
@@ -249,7 +241,7 @@ export class ConversationHistoryRepository {
     const table = await this.getSessionsTable();
     const existing = await table
       .query()
-      .where(`session_id = '${sessionId}'`)
+      .where(`session_id = '${escapeLanceDbString(sessionId)}'`)
       .limit(1)
       .toArray();
 
@@ -257,7 +249,7 @@ export class ConversationHistoryRepository {
       return false;
     }
 
-    await table.delete(`session_id = '${sessionId}'`);
+    await table.delete(`session_id = '${escapeLanceDbString(sessionId)}'`);
     return true;
   }
 }

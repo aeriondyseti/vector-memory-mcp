@@ -1,7 +1,7 @@
 import * as lancedb from "@lancedb/lancedb";
-import { rerankers, type Table } from "@lancedb/lancedb";
+import { type Table } from "@lancedb/lancedb";
 import { TABLE_NAME, memorySchema } from "./schema.js";
-import { arrowVectorToArray, createFtsMutex } from "./lancedb-utils.js";
+import { arrowVectorToArray, createFtsMutex, createRerankerMutex, escapeLanceDbString } from "./lancedb-utils.js";
 import {
   type Memory,
   type HybridRow,
@@ -12,11 +12,11 @@ export class MemoryRepository {
   // Mutex for schema migration - runs once per instance to add missing columns
   private migrationPromise: Promise<void> | null = null;
 
-  // Cached reranker — k=60 is constant, no need to recreate per search
-  private rerankerPromise: Promise<rerankers.RRFReranker> | null = null;
-
   // FTS index mutex — once created, the promise is never cleared (index persists in LanceDB)
   private ensureFtsIndex: () => Promise<void>;
+
+  // Cached reranker — k=60 is constant, no need to recreate per search
+  private getReranker = createRerankerMutex();
 
   constructor(private db: lancedb.Connection) {
     this.ensureFtsIndex = createFtsMutex(() => this.getTable());
@@ -95,16 +95,6 @@ export class MemoryRepository {
     };
   }
 
-  private getReranker(): Promise<rerankers.RRFReranker> {
-    if (!this.rerankerPromise) {
-      this.rerankerPromise = rerankers.RRFReranker.create(60).catch((e) => {
-        this.rerankerPromise = null;
-        throw e;
-      });
-    }
-    return this.rerankerPromise;
-  }
-
   async insert(memory: Memory): Promise<void> {
     const table = await this.getTable();
     await table.add([
@@ -125,14 +115,14 @@ export class MemoryRepository {
 
   async upsert(memory: Memory): Promise<void> {
     const table = await this.getTable();
-    const existing = await table.query().where(`id = '${memory.id}'`).limit(1).toArray();
+    const existing = await table.query().where(`id = '${escapeLanceDbString(memory.id)}'`).limit(1).toArray();
 
     if (existing.length === 0) {
       return await this.insert(memory);
     }
 
     await table.update({
-      where: `id = '${memory.id}'`,
+      where: `id = '${escapeLanceDbString(memory.id)}'`,
       values: {
         vector: memory.embedding,
         content: memory.content,
@@ -149,7 +139,7 @@ export class MemoryRepository {
 
   async findById(id: string): Promise<Memory | null> {
     const table = await this.getTable();
-    const results = await table.query().where(`id = '${id}'`).limit(1).toArray();
+    const results = await table.query().where(`id = '${escapeLanceDbString(id)}'`).limit(1).toArray();
 
     if (results.length === 0) {
       return null;
@@ -162,14 +152,14 @@ export class MemoryRepository {
     const table = await this.getTable();
 
     // Verify existence first to match previous behavior (return false if not found)
-    const existing = await table.query().where(`id = '${id}'`).limit(1).toArray();
+    const existing = await table.query().where(`id = '${escapeLanceDbString(id)}'`).limit(1).toArray();
     if (existing.length === 0) {
       return false;
     }
 
     const now = Date.now();
     await table.update({
-      where: `id = '${id}'`,
+      where: `id = '${escapeLanceDbString(id)}'`,
       values: {
         superseded_by: DELETED_TOMBSTONE,
         updated_at: now,

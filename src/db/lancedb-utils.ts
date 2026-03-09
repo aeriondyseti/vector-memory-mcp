@@ -1,6 +1,14 @@
 import * as lancedb from "@lancedb/lancedb";
-import { Index, type Table } from "@lancedb/lancedb";
+import { Index, rerankers, type Table } from "@lancedb/lancedb";
 import type { Schema } from "apache-arrow";
+
+/**
+ * Escapes a string for use in LanceDB/DataFusion SQL WHERE clauses.
+ * Doubles single quotes to prevent SQL injection (standard SQL escaping).
+ */
+export function escapeLanceDbString(value: string): string {
+  return value.replace(/'/g, "''");
+}
 
 /**
  * Converts LanceDB's Arrow Vector type to a plain number[].
@@ -64,6 +72,26 @@ export function createFtsMutex(
       throw error;
     });
 
+    return promise;
+  };
+}
+
+/**
+ * Creates a promise-mutex for RRFReranker instantiation.
+ * Same pattern as createFtsMutex: create once, cache forever, reset on error.
+ */
+export function createRerankerMutex(
+  k: number = 60
+): () => Promise<rerankers.RRFReranker> {
+  let promise: Promise<rerankers.RRFReranker> | null = null;
+
+  return () => {
+    if (!promise) {
+      promise = rerankers.RRFReranker.create(k).catch((e) => {
+        promise = null;
+        throw e;
+      });
+    }
     return promise;
   };
 }
