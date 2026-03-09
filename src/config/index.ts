@@ -14,6 +14,11 @@ export interface Config {
   httpHost: string;
   enableHttp: boolean;
   transportMode: TransportMode;
+  conversationHistory: {
+    enabled: boolean;
+    sessionPath: string | null; // null = auto-detect Claude Code session dir
+    historyWeight: number; // 0.0-1.0, applied to history scores when merging with memories
+  };
 }
 
 export interface ConfigOverrides {
@@ -21,6 +26,11 @@ export interface ConfigOverrides {
   httpPort?: number;
   enableHttp?: boolean;
   transportMode?: TransportMode;
+  conversationHistory?: {
+    enabled?: boolean;
+    sessionPath?: string;
+    historyWeight?: number;
+  };
 }
 
 // Defaults - always use repo-local .vector-memory folder
@@ -47,6 +57,11 @@ export function loadConfig(overrides: ConfigOverrides = {}): Config {
     httpHost: DEFAULT_HTTP_HOST,
     enableHttp,
     transportMode,
+    conversationHistory: {
+      enabled: overrides.conversationHistory?.enabled ?? false,
+      sessionPath: overrides.conversationHistory?.sessionPath ?? null,
+      historyWeight: overrides.conversationHistory?.historyWeight ?? 0.5,
+    },
   };
 }
 
@@ -59,6 +74,8 @@ export function parseCliArgs(argv: string[]): ConfigOverrides {
       "--db-file": String,
       "--port": Number,
       "--no-http": Boolean,
+      "--conversation-history": Boolean,
+      "--session-path": String,
 
       // Aliases
       "-d": "--db-file",
@@ -71,6 +88,12 @@ export function parseCliArgs(argv: string[]): ConfigOverrides {
     dbPath: args["--db-file"],
     httpPort: args["--port"],
     enableHttp: args["--no-http"] ? false : undefined,
+    conversationHistory: args["--conversation-history"] || args["--session-path"]
+      ? {
+          enabled: args["--conversation-history"],
+          sessionPath: args["--session-path"],
+        }
+      : undefined,
   };
 }
 

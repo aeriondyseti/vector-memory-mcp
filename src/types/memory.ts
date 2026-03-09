@@ -38,6 +38,7 @@ export interface IntentProfile {
   jitter: number;
 }
 
-export interface HybridRow extends Memory {
-  rrfScore: number;
-}
+/** Augments any entity type with an RRF score from hybrid search. */
+export type WithRrfScore<T> = T & { rrfScore: number };
+
+export type HybridRow = WithRrfScore<Memory>;
