@@ -129,6 +129,16 @@ export async function handleSearchMemories(
   const includeHistory = (args?.include_history as boolean) ?? false;
   const historyOnly = (args?.history_only as boolean) ?? false;
 
+  if (includeHistory && historyOnly) {
+    return {
+      content: [{
+        type: "text",
+        text: "Cannot set both include_history and history_only to true. Use history_only for conversation history only, or include_history to merge with memories.",
+      }],
+      isError: true,
+    };
+  }
+
   // History-only: search only conversation history via the history service
   if (historyOnly) {
     const result = requireHistoryService(service);
@@ -182,8 +192,31 @@ export async function handleSearchMemories(
   };
 }
 
+function formatMemoryDetail(
+  memoryId: string,
+  memory: Awaited<ReturnType<MemoryService["get"]>>
+): string {
+  if (!memory) {
+    return `Memory ${memoryId} not found`;
+  }
+
+  let result = `ID: ${memory.id}\nContent: ${memory.content}`;
+  if (Object.keys(memory.metadata).length > 0) {
+    result += `\nMetadata: ${JSON.stringify(memory.metadata)}`;
+  }
+  result += `\nCreated: ${memory.createdAt.toISOString()}`;
+  result += `\nUpdated: ${memory.updatedAt.toISOString()}`;
+  if (memory.supersededBy) {
+    result += `\nSuperseded by: ${memory.supersededBy}`;
+  }
+  return result;
+}
+
 /**
  * Format a unified SearchResult (memory or history) for display.
+ * TODO: The default memory-only search path in handleSearchMemories formats results inline
+ * with similar logic but without the "Source:" label. Consolidating would add "Source: memory"
+ * to existing output, which may break consumers that parse it. (#5)
  */
 function formatSearchResult(result: SearchResult, includeDeleted: boolean = false): string {
   if (result.source === "memory") {
@@ -210,30 +243,10 @@ export async function handleGetMemories(
 ): Promise<CallToolResult> {
   const ids = args?.ids as string[];
 
-  const format = (
-    memoryId: string,
-    memory: Awaited<ReturnType<MemoryService["get"]>>
-  ) => {
-    if (!memory) {
-      return `Memory ${memoryId} not found`;
-    }
-
-    let result = `ID: ${memory.id}\nContent: ${memory.content}`;
-    if (Object.keys(memory.metadata).length > 0) {
-      result += `\nMetadata: ${JSON.stringify(memory.metadata)}`;
-    }
-    result += `\nCreated: ${memory.createdAt.toISOString()}`;
-    result += `\nUpdated: ${memory.updatedAt.toISOString()}`;
-    if (memory.supersededBy) {
-      result += `\nSuperseded by: ${memory.supersededBy}`;
-    }
-    return result;
-  };
-
   const blocks: string[] = [];
   for (const id of ids) {
     const memory = await service.get(id);
-    blocks.push(format(id, memory));
+    blocks.push(formatMemoryDetail(id, memory));
   }
 
   return {
