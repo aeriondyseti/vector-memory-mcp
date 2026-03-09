@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, writeFile, rm, mkdir } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -8,37 +8,7 @@ import {
   detectSessionPath,
   type ParsedMessage,
 } from "../src/services/session-parser.js";
-
-// -- Helpers for building JSONL lines --
-
-function userLine(content: string, opts: Partial<Record<string, unknown>> = {}): string {
-  return JSON.stringify({
-    type: "user",
-    sessionId: opts.sessionId ?? "test-session",
-    timestamp: opts.timestamp ?? "2026-03-09T10:00:00Z",
-    gitBranch: opts.gitBranch ?? "main",
-    cwd: opts.cwd ?? "/project",
-    message: { role: "user", content },
-    uuid: "u-1",
-    ...opts,
-  });
-}
-
-function assistantLine(
-  blocks: Array<{ type: string; text?: string }>,
-  opts: Partial<Record<string, unknown>> = {},
-): string {
-  return JSON.stringify({
-    type: "assistant",
-    sessionId: opts.sessionId ?? "test-session",
-    timestamp: opts.timestamp ?? "2026-03-09T10:01:00Z",
-    gitBranch: opts.gitBranch ?? "main",
-    cwd: opts.cwd ?? "/project",
-    message: { role: "assistant", content: blocks },
-    uuid: "a-1",
-    ...opts,
-  });
-}
+import { userLine, assistantLine } from "./utils/test-helpers.js";
 
 function progressLine(): string {
   return JSON.stringify({

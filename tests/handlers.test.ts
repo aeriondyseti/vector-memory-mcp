@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, mock } from "bun:test";
 import {
   handleSearchMemories,
   handleIndexConversations,
@@ -11,23 +11,23 @@ import type { HistorySearchResult, IndexedSessionSummary, IndexingSummary, Searc
 
 function createMockService(historyService: ConversationHistoryService | null = null): MemoryService {
   return {
-    search: vi.fn(async () => []),
-    searchUnified: vi.fn(async () => []),
-    getConversationHistory: vi.fn(() => historyService),
+    search: mock(async () => []),
+    searchUnified: mock(async () => []),
+    getConversationHistory: mock(() => historyService),
   } as unknown as MemoryService;
 }
 
 function createMockHistoryService(overrides: Partial<ConversationHistoryService> = {}): ConversationHistoryService {
   return {
-    indexConversations: vi.fn(async (): Promise<IndexingSummary> => ({
+    indexConversations: mock(async (): Promise<IndexingSummary> => ({
       sessionsDiscovered: 3,
       sessionsIndexed: 2,
       sessionsSkipped: 1,
       messagesIndexed: 42,
     })),
-    search: vi.fn(async (): Promise<HistorySearchResult[]> => []),
-    listIndexedSessions: vi.fn(async (): Promise<IndexedSessionSummary[]> => []),
-    reindexSession: vi.fn(async (): Promise<IndexingSummary> => ({
+    search: mock(async (): Promise<HistorySearchResult[]> => []),
+    listIndexedSessions: mock(async (): Promise<IndexedSessionSummary[]> => []),
+    reindexSession: mock(async (): Promise<IndexingSummary> => ({
       sessionsDiscovered: 1,
       sessionsIndexed: 1,
       sessionsSkipped: 0,
@@ -51,7 +51,7 @@ describe("handleSearchMemories", () => {
   });
 
   it("calls historyService.search when history_only is true", async () => {
-    const historySearch = vi.fn(async (): Promise<HistorySearchResult[]> => [
+    const historySearch = mock(async (): Promise<HistorySearchResult[]> => [
       {
         source: "conversation_history",
         id: "h-1",
@@ -91,7 +91,7 @@ describe("handleSearchMemories", () => {
       },
     ];
     const service = createMockService(null);
-    (service.searchUnified as ReturnType<typeof vi.fn>).mockResolvedValue(unifiedResults);
+    (service.searchUnified as ReturnType<typeof mock>).mockResolvedValue(unifiedResults);
 
     const result = await handleSearchMemories(
       { query: "test", intent: "continuity", reason_for_search: "test", include_history: true },
@@ -100,6 +100,16 @@ describe("handleSearchMemories", () => {
 
     expect(service.searchUnified).toHaveBeenCalledWith("test", "continuity", 10, false);
     expect(result.content[0]).toHaveProperty("text", expect.stringContaining("Source: memory"));
+  });
+
+  it("returns error when both include_history and history_only are true", async () => {
+    const service = createMockService(null);
+    const result = await handleSearchMemories(
+      { query: "test", intent: "fact_check", reason_for_search: "test", include_history: true, history_only: true },
+      service,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toHaveProperty("text", expect.stringContaining("Cannot set both"));
   });
 
   it("falls back to memory-only search by default", async () => {
@@ -173,7 +183,7 @@ describe("handleListIndexedSessions", () => {
       gitBranch: "dev",
     }];
     const historyService = createMockHistoryService({
-      listIndexedSessions: vi.fn(async () => sessions),
+      listIndexedSessions: mock(async () => sessions),
     });
     const service = createMockService(historyService);
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, writeFile, rm, mkdir, truncate, appendFile } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -6,53 +6,8 @@ import * as lancedb from "@lancedb/lancedb";
 import { connectToDatabase } from "../src/db/connection.js";
 import { ConversationHistoryRepository } from "../src/db/conversation-history.repository.js";
 import { ConversationHistoryService } from "../src/services/conversation-history.service.js";
+import { createMockEmbeddings, userLine, assistantLine } from "./utils/test-helpers.js";
 import type { EmbeddingsService } from "../src/services/embeddings.service.js";
-
-const EMBEDDING_DIM = 384;
-const fakeEmbedding = () => new Array(EMBEDDING_DIM).fill(0).map(() => Math.random());
-
-/**
- * Stub EmbeddingsService that returns deterministic random embeddings.
- * Avoids loading the real model in tests.
- */
-function createMockEmbeddings(): EmbeddingsService {
-  return {
-    dimension: EMBEDDING_DIM,
-    embed: vi.fn(async () => fakeEmbedding()),
-    embedBatch: vi.fn(async (texts: string[]) => texts.map(() => fakeEmbedding())),
-  } as unknown as EmbeddingsService;
-}
-
-// -- JSONL helpers (reused from session-parser.test.ts pattern) --
-
-function userLine(content: string, opts: Partial<Record<string, unknown>> = {}): string {
-  return JSON.stringify({
-    type: "user",
-    sessionId: opts.sessionId ?? "test-session",
-    timestamp: opts.timestamp ?? "2026-03-09T10:00:00Z",
-    gitBranch: opts.gitBranch ?? "main",
-    cwd: opts.cwd ?? "/project",
-    message: { role: "user", content },
-    uuid: "u-1",
-    ...opts,
-  });
-}
-
-function assistantLine(
-  blocks: Array<{ type: string; text?: string }>,
-  opts: Partial<Record<string, unknown>> = {},
-): string {
-  return JSON.stringify({
-    type: "assistant",
-    sessionId: opts.sessionId ?? "test-session",
-    timestamp: opts.timestamp ?? "2026-03-09T10:01:00Z",
-    gitBranch: opts.gitBranch ?? "main",
-    cwd: opts.cwd ?? "/project",
-    message: { role: "assistant", content: blocks },
-    uuid: "a-1",
-    ...opts,
-  });
-}
 
 let tmpDir: string;
 let dbDir: string;
