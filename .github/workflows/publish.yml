@@ -75,7 +75,7 @@ jobs:
         run: npm --version
 
       - name: Publish to npm
-        run: npm publish --access public --tag ${{ steps.npm-tag.outputs.tag }}
+        run: npm publish --access public --provenance --tag ${{ steps.npm-tag.outputs.tag }}
 
       - name: Extract changelog for this version
         if: steps.npm-tag.outputs.tag == 'latest'
