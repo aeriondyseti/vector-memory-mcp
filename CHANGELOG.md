@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **SQL injection in LanceDB where clauses**: Added `escapeLanceDbString()` helper to double single quotes in all 12 string interpolation sites across `MemoryRepository` and `ConversationHistoryRepository`
+- **`include_history` / `history_only` mutual exclusivity**: Now returns an error if both are set to `true` instead of silently preferring `history_only`
+
+### Changed
+- **Shared reranker factory**: Extracted `createRerankerMutex()` into `lancedb-utils.ts`, replacing duplicate promise-mutex `getReranker()` methods in both repositories
+- **Shared test helpers**: Created `tests/utils/test-helpers.ts` with `EMBEDDING_DIM`, `fakeEmbedding()`, `createMockEmbeddings()`, `userLine()`, `assistantLine()` — eliminates duplication across 4 test files
+- **Test runner consistency**: Migrated 3 vitest test files back to bun:test (`vi.fn()` → `mock()`)
+- **`handleGetMemories` cleanup**: Converted inline arrow `format` to named `formatMemoryDetail()` function
+
 ## [1.0.2] - 2026-02-10
 
 ### Changed
