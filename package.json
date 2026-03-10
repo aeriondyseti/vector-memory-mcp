@@ -17,13 +17,13 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AerionDyseti/vector-memory-mcp.git"
+    "url": "git+https://github.com/aeriondyseti/vector-memory-mcp.git"
   },
   "author": "AerionDyseti",
   "bugs": {
-    "url": "https://github.com/AerionDyseti/vector-memory-mcp/issues"
+    "url": "https://github.com/aeriondyseti/vector-memory-mcp/issues"
   },
-  "homepage": "https://github.com/AerionDyseti/vector-memory-mcp#readme",
+  "homepage": "https://github.com/aeriondyseti/vector-memory-mcp#readme",
   "scripts": {
     "start": "node dist/src/index.js",
     "start:bun": "bun run src/index.ts",
