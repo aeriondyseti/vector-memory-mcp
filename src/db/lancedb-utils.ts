@@ -88,7 +88,7 @@ export function createFtsMutex(
  * Same pattern as createFtsMutex: create once, cache forever, reset on error.
  */
 export function createRerankerMutex(
-  k: number = 60
+  k: number = RRF_K
 ): () => Promise<rerankers.RRFReranker> {
   let promise: Promise<rerankers.RRFReranker> | null = null;
 
