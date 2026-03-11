@@ -14,7 +14,7 @@ A local-first MCP server that provides vector-based memory storage. Uses local e
 - **Local & Private** - All embeddings generated locally, data stored in local LanceDB
 - **Semantic Search** - Vector similarity search with configurable scoring
 - **Batch Operations** - Store, update, delete, and retrieve multiple memories at once
-- **Session Checkpoints** - Save and restore project context between sessions
+- **Session Waypoints** - Save and restore project context between sessions
 - **MCP Native** - Standard protocol, works with any MCP-compatible client
 
 ---
@@ -61,8 +61,12 @@ Restart your MCP client. You now have access to:
 | `get_memories` | Retrieve memories by ID (accepts array) |
 | `update_memories` | Update existing memories |
 | `delete_memories` | Remove memories (accepts array) |
-| `store_checkpoint` | Save session context for later |
-| `get_checkpoint` | Restore session context |
+| `report_memory_usefulness` | Vote on whether a memory was useful |
+| `set_waypoint` | Save session context for later |
+| `get_waypoint` | Restore session context |
+| `index_conversations` | Index Claude Code session logs as searchable history |
+| `list_indexed_sessions` | Browse indexed conversation sessions |
+| `reindex_session` | Force reindex of a specific session |
 
 ---
 
@@ -80,23 +84,32 @@ You: "What did we decide about the database?"
 Assistant: [calls search_memories with relevant query]
 ```
 
-**Session checkpoints:**
+**Session waypoints:**
 ```
 You: "Save context for next session"
-Assistant: [calls store_checkpoint with summary, completed items, next steps]
+Assistant: [calls set_waypoint with summary, completed items, next steps]
+```
+
+**Conversation history** (requires `--enable-history`):
+```
+You: "What did we discuss about the API design last week?"
+Assistant: [calls search_memories with history_only: true, history_before/after filters]
 ```
 
 ---
 
 ## Configuration
 
-Environment variables:
+CLI flags:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VECTOR_MEMORY_DB_PATH` | `.vector-memory/memories.db` | Database location |
-| `VECTOR_MEMORY_MODEL` | `Xenova/all-MiniLM-L6-v2` | Embedding model |
-| `VECTOR_MEMORY_HTTP_PORT` | `3271` | HTTP server port |
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db-file`, `-d` | `.vector-memory/memories.db` | Database location |
+| `--port`, `-p` | `3271` | HTTP server port |
+| `--no-http` | *(HTTP enabled)* | Disable HTTP/SSE transport |
+| `--enable-history` | *(disabled)* | Enable conversation history indexing |
+| `--history-path` | *(auto-detect)* | Path to session log directory |
+| `--history-weight` | `0.75` | Weight for history results in unified search |
 
 ---
 

@@ -1,13 +1,5 @@
 {
   "mcpServers": {
-    "vector-memory-project": {
-      "type": "stdio",
-      "command": "bunx",
-      "args": [
-        "--bun",
-        "@aeriondyseti/vector-memory-mcp@dev"
-      ]
-    },
     "context7": {
       "type": "stdio",
       "command": "npx",

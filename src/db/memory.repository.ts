@@ -148,6 +148,17 @@ export class MemoryRepository {
     return this.rowToMemory(results[0] as Record<string, unknown>);
   }
 
+  async findByIds(ids: string[]): Promise<Memory[]> {
+    if (ids.length === 0) return [];
+    const table = await this.getTable();
+    const inList = ids.map((id) => `'${escapeSql(id)}'`).join(", ");
+    const results = await table
+      .query()
+      .where(`id IN (${inList})`)
+      .toArray();
+    return results.map((row) => this.rowToMemory(row as Record<string, unknown>));
+  }
+
   async markDeleted(id: string): Promise<boolean> {
     const table = await this.getTable();
 

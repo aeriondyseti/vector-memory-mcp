@@ -178,24 +178,24 @@ describe("HTTP API", () => {
     });
   });
 
-  describe("GET /checkpoint", () => {
-    test("returns 404 when no checkpoint exists", async () => {
-      const res = await app.request("/checkpoint");
+  describe("GET /waypoint", () => {
+    test("returns 404 when no waypoint exists", async () => {
+      const res = await app.request("/waypoint");
       expect(res.status).toBe(404);
       const body = await res.json();
-      expect(body.error).toContain("No checkpoint");
+      expect(body.error).toContain("No waypoint");
     });
 
-    test("returns checkpoint after storing one", async () => {
-      await memoryService.storeCheckpoint({
+    test("returns waypoint after storing one", async () => {
+      await memoryService.setWaypoint({
         project: "test-project",
         branch: "main",
-        summary: "Test checkpoint",
+        summary: "Test waypoint",
         completed: ["Task A"],
         next_steps: ["Task B"],
       });
 
-      const res = await app.request("/checkpoint");
+      const res = await app.request("/waypoint");
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.content).toContain("test-project");
@@ -205,13 +205,13 @@ describe("HTTP API", () => {
 
     test("includes referenced memories", async () => {
       const mem = await memoryService.store("Referenced memory content");
-      await memoryService.storeCheckpoint({
+      await memoryService.setWaypoint({
         project: "ref-test",
-        summary: "Checkpoint with refs",
+        summary: "Waypoint with refs",
         memory_ids: [mem.id],
       });
 
-      const res = await app.request("/checkpoint");
+      const res = await app.request("/waypoint");
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.referencedMemories).toBeArray();
@@ -604,7 +604,7 @@ describe("HTTP error handling", () => {
     const throwingService = new Proxy(realService, {
       get(target, prop) {
         if (prop === "search" || prop === "store" || prop === "delete" ||
-            prop === "get" || prop === "getLatestCheckpoint") {
+            prop === "get" || prop === "getLatestWaypoint") {
           return () => { throw new Error("Simulated failure"); };
         }
         return (target as Record<string | symbol, unknown>)[prop];
@@ -654,8 +654,8 @@ describe("HTTP error handling", () => {
     expect(body.error).toBe("Simulated failure");
   });
 
-  test("GET /checkpoint returns 500 on service error", async () => {
-    const res = await app.request("/checkpoint");
+  test("GET /waypoint returns 500 on service error", async () => {
+    const res = await app.request("/waypoint");
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toBe("Simulated failure");

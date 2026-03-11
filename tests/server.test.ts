@@ -11,8 +11,8 @@ import {
   handleDeleteMemories,
   handleSearchMemories,
   handleGetMemories,
-  handleStoreCheckpoint,
-  handleGetCheckpoint,
+  handleSetWaypoint,
+  handleGetWaypoint,
   handleIndexConversations,
   handleListIndexedSessions,
   handleReindexSession,
@@ -80,13 +80,13 @@ describe("mcp", () => {
       expect(tool!.inputSchema.required).toContain("ids");
     });
 
-    test("has store_checkpoint tool", () => {
-      const tool = tools.find((t) => t.name === "store_checkpoint");
+    test("has set_waypoint tool", () => {
+      const tool = tools.find((t) => t.name === "set_waypoint");
       expect(tool).toBeDefined();
     });
 
-    test("has get_checkpoint tool", () => {
-      const tool = tools.find((t) => t.name === "get_checkpoint");
+    test("has get_waypoint tool", () => {
+      const tool = tools.find((t) => t.name === "get_waypoint");
       expect(tool).toBeDefined();
     });
 
@@ -367,9 +367,9 @@ describe("mcp", () => {
     });
   });
 
-  describe("checkpoint handlers", () => {
-    test("store_checkpoint and get_checkpoint work", async () => {
-      await handleStoreCheckpoint(
+  describe("waypoint handlers", () => {
+    test("set_waypoint and get_waypoint work", async () => {
+      await handleSetWaypoint(
         {
           project: "Resonance",
           branch: "main",
@@ -382,8 +382,8 @@ describe("mcp", () => {
         },
         service
       );
-      const response = await handleGetCheckpoint({}, service);
-      expect(response.content[0].text).toContain("# Checkpoint - Resonance");
+      const response = await handleGetWaypoint({}, service);
+      expect(response.content[0].text).toContain("# Waypoint - Resonance");
       expect(response.content[0].text).toContain("## Memory IDs");
     });
   });
@@ -438,16 +438,16 @@ describe("mcp", () => {
       expect(response.content[0].text).toContain(mem.id);
     });
 
-    test("routes to store_checkpoint and get_checkpoint", async () => {
+    test("routes to set_waypoint and get_waypoint", async () => {
       const storeRes = await handleToolCall(
-        "store_checkpoint",
+        "set_waypoint",
         { project: "Resonance", summary: "Summary" },
         service
       );
-      expect(storeRes.content[0].text).toContain("Checkpoint stored");
+      expect(storeRes.content[0].text).toContain("Waypoint stored");
 
-      const getRes = await handleToolCall("get_checkpoint", {}, service);
-      expect(getRes.content[0].text).toContain("# Checkpoint - Resonance");
+      const getRes = await handleToolCall("get_waypoint", {}, service);
+      expect(getRes.content[0].text).toContain("# Waypoint - Resonance");
     });
 
     test("routes to index_conversations (returns error when disabled)", async () => {

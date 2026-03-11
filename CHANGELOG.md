@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Rename checkpoint to waypoint**: All "checkpoint" terminology renamed to "waypoint" throughout the codebase
+  - MCP tools: `store_checkpoint` -> `set_waypoint`, `get_checkpoint` -> `get_waypoint`
+  - Functions: `storeCheckpoint()` -> `setWaypoint()`, `getLatestCheckpoint()` -> `getLatestWaypoint()`
+  - Handlers: `handleStoreCheckpoint()` -> `handleSetWaypoint()`, `handleGetCheckpoint()` -> `handleGetWaypoint()`
+  - HTTP route: `GET /checkpoint` -> `GET /waypoint`
+  - Metadata type field: `"checkpoint"` -> `"waypoint"`
+  - **Migration note**: Existing waypoint data (stored at UUID zero) remains compatible, but client code using old tool names must be updated
+
+## [1.1.0] - 2026-03-11
+
+### Added
+- **Conversation history indexing**: Index Claude Code JSONL session logs as searchable history via `index_conversations`, `list_indexed_sessions`, and `reindex_session` tools
+- **Unified search**: `search_memories` gains `include_history`, `history_only`, `session_id`, `role_filter`, `history_after`, and `history_before` parameters to search across both memories and conversation history
+- **Conversation history parser**: Incremental JSONL parser with chunking, overlap, and role extraction for Claude Code session logs
+- **Conversation history data layer**: Dedicated LanceDB table, repository, and service for conversation chunks with hybrid vector + FTS search
+
 ### Fixed
 - **SQL injection in LanceDB where clauses**: Added `escapeLanceDbString()` helper to double single quotes in all 12 string interpolation sites across `MemoryRepository` and `ConversationHistoryRepository`
 - **`include_history` / `history_only` mutual exclusivity**: Now returns an error if both are set to `true` instead of silently preferring `history_only`
@@ -116,6 +133,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial MCP server implementation
 - Basic project structure
 
+[1.1.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.0.2...v1.1.0
 [0.8.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v0.5.0...v0.8.0
 [0.5.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v0.3.0...v0.4.0

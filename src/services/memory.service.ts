@@ -76,6 +76,24 @@ export class MemoryService {
     return updatedMemory;
   }
 
+  async getMultiple(ids: string[]): Promise<Memory[]> {
+    if (ids.length === 0) return [];
+    const memories = await this.repository.findByIds(ids);
+    // Track access in bulk
+    const now = new Date();
+    const live = memories.filter((m) => !isDeleted(m));
+    await Promise.all(
+      live.map((m) =>
+        this.repository.upsert({
+          ...m,
+          accessCount: m.accessCount + 1,
+          lastAccessed: now,
+        })
+      )
+    );
+    return live;
+  }
+
   async delete(id: string): Promise<boolean> {
     return await this.repository.markDeleted(id);
   }
@@ -240,23 +258,26 @@ export class MemoryService {
   }
 
   async trackAccess(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const memories = await this.repository.findByIds(ids);
     const now = new Date();
-    for (const id of ids) {
-      const memory = await this.repository.findById(id);
-      if (memory && !isDeleted(memory)) {
-        await this.repository.upsert({
-          ...memory,
-          accessCount: memory.accessCount + 1,
-          lastAccessed: now,
-        });
-      }
-    }
+    await Promise.all(
+      memories
+        .filter((m) => !isDeleted(m))
+        .map((m) =>
+          this.repository.upsert({
+            ...m,
+            accessCount: m.accessCount + 1,
+            lastAccessed: now,
+          })
+        )
+    );
   }
 
   private static readonly UUID_ZERO =
     "00000000-0000-0000-0000-000000000000";
 
-  async storeCheckpoint(args: {
+  async setWaypoint(args: {
     project: string;
     branch?: string;
     summary: string;
@@ -283,7 +304,7 @@ export class MemoryService {
       return items.map((i) => `- ${i}`).join("\n");
     };
 
-    const content = `# Checkpoint - ${args.project}
+    const content = `# Waypoint - ${args.project}
 **Date:** ${date} ${time} | **Branch:** ${args.branch ?? "unknown"}
 
 ## Summary
@@ -306,7 +327,7 @@ ${list(args.memory_ids)}`;
 
     const metadata: Record<string, unknown> = {
       ...(args.metadata ?? {}),
-      type: "checkpoint",
+      type: "waypoint",
       project: args.project,
       date,
       branch: args.branch ?? "unknown",
@@ -330,7 +351,7 @@ ${list(args.memory_ids)}`;
     return memory;
   }
 
-  async getLatestCheckpoint(): Promise<Memory | null> {
+  async getLatestWaypoint(): Promise<Memory | null> {
     return await this.get(MemoryService.UUID_ZERO);
   }
 }

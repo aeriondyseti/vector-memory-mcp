@@ -168,11 +168,11 @@ export async function handleGetMemories(
 ): Promise<CallToolResult> {
   const ids = args?.ids as string[];
 
-  const blocks: string[] = [];
-  for (const id of ids) {
-    const memory = await service.get(id);
-    blocks.push(formatMemoryDetail(id, memory));
-  }
+  const memories = await service.getMultiple(ids);
+  const memoryMap = new Map(memories.map((m) => [m.id, m]));
+
+  // Preserve requested order; show "not found" for missing IDs
+  const blocks = ids.map((id) => formatMemoryDetail(id, memoryMap.get(id) ?? null));
 
   return {
     content: [{ type: "text", text: blocks.join("\n\n---\n\n") }],
@@ -205,11 +205,11 @@ export async function handleReportMemoryUsefulness(
   };
 }
 
-export async function handleStoreCheckpoint(
+export async function handleSetWaypoint(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const memory = await service.storeCheckpoint({
+  const memory = await service.setWaypoint({
     project: args?.project as string,
     branch: args?.branch as string | undefined,
     summary: args?.summary as string,
@@ -222,41 +222,36 @@ export async function handleStoreCheckpoint(
   });
 
   return {
-    content: [{ type: "text", text: `Checkpoint stored with memory ID: ${memory.id}` }],
+    content: [{ type: "text", text: `Waypoint stored with memory ID: ${memory.id}` }],
   };
 }
 
-export async function handleGetCheckpoint(
+export async function handleGetWaypoint(
   _args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const checkpoint = await service.getLatestCheckpoint();
+  const waypoint = await service.getLatestWaypoint();
 
-  if (!checkpoint) {
+  if (!waypoint) {
     return {
-      content: [{ type: "text", text: "No stored checkpoint found." }],
+      content: [{ type: "text", text: "No stored waypoint found." }],
     };
   }
 
-  // Fetch referenced memories if any
-  const memoryIds = (checkpoint.metadata.memory_ids as string[] | undefined) ?? [];
+  // Fetch referenced memories in batch
+  const memoryIds = (waypoint.metadata.memory_ids as string[] | undefined) ?? [];
   let memoriesSection = "";
 
   if (memoryIds.length > 0) {
-    const memories: string[] = [];
-    for (const id of memoryIds) {
-      const memory = await service.get(id);
-      if (memory) {
-        memories.push(`### Memory: ${id}\n${memory.content}`);
-      }
-    }
-    if (memories.length > 0) {
-      memoriesSection = `\n\n## Referenced Memories\n\n${memories.join("\n\n")}`;
+    const fetched = await service.getMultiple(memoryIds);
+    const blocks = fetched.map((m) => `### Memory: ${m.id}\n${m.content}`);
+    if (blocks.length > 0) {
+      memoriesSection = `\n\n## Referenced Memories\n\n${blocks.join("\n\n")}`;
     }
   }
 
   return {
-    content: [{ type: "text", text: checkpoint.content + memoriesSection }],
+    content: [{ type: "text", text: waypoint.content + memoriesSection }],
   };
 }
 
@@ -414,10 +409,10 @@ export async function handleToolCall(
       return handleGetMemories(args, service);
     case "report_memory_usefulness":
       return handleReportMemoryUsefulness(args, service);
-    case "store_checkpoint":
-      return handleStoreCheckpoint(args, service);
-    case "get_checkpoint":
-      return handleGetCheckpoint(args, service);
+    case "set_waypoint":
+      return handleSetWaypoint(args, service);
+    case "get_waypoint":
+      return handleGetWaypoint(args, service);
     case "index_conversations":
       return handleIndexConversations(args, service);
     case "list_indexed_sessions":

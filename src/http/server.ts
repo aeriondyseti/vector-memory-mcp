@@ -163,31 +163,25 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
     }
   });
 
-  // Get latest checkpoint
-  app.get("/checkpoint", async (c) => {
+  // Get latest waypoint
+  app.get("/waypoint", async (c) => {
     try {
-      const checkpoint = await memoryService.getLatestCheckpoint();
+      const waypoint = await memoryService.getLatestWaypoint();
 
-      if (!checkpoint) {
-        return c.json({ error: "No checkpoint found" }, 404);
+      if (!waypoint) {
+        return c.json({ error: "No waypoint found" }, 404);
       }
 
-      // Fetch referenced memories if any
-      const memoryIds = (checkpoint.metadata.memory_ids as string[] | undefined) ?? [];
-      const referencedMemories: Array<{ id: string; content: string }> = [];
-
-      for (const id of memoryIds) {
-        const memory = await memoryService.get(id);
-        if (memory && !isDeleted(memory)) {
-          referencedMemories.push({ id: memory.id, content: memory.content });
-        }
-      }
+      // Fetch referenced memories in a single query
+      const memoryIds = (waypoint.metadata.memory_ids as string[] | undefined) ?? [];
+      const memories = await memoryService.getMultiple(memoryIds);
+      const referencedMemories = memories.map((m) => ({ id: m.id, content: m.content }));
 
       return c.json({
-        content: checkpoint.content,
-        metadata: checkpoint.metadata,
+        content: waypoint.content,
+        metadata: waypoint.metadata,
         referencedMemories,
-        updatedAt: checkpoint.updatedAt.toISOString(),
+        updatedAt: waypoint.updatedAt.toISOString(),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";

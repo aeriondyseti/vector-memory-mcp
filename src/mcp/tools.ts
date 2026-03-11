@@ -237,9 +237,9 @@ export const reportMemoryUsefulnessTool: Tool = {
   },
 };
 
-export const storeCheckpointTool: Tool = {
-  name: "store_checkpoint",
-  description: `Save session state for seamless resumption later. Use at end of work sessions or before context switches.
+export const setWaypointTool: Tool = {
+  name: "set_waypoint",
+  description: `Save session waypoint for seamless resumption later. Use at end of work sessions or before context switches.
 
 Creates a structured snapshot with:
 - summary: 2-3 sentences on goal and current status
@@ -249,7 +249,7 @@ Creates a structured snapshot with:
 - next_steps: concrete, actionable items
 - memory_ids: link to related memories stored this session
 
-Retrievable via get_checkpoint. Only one checkpoint per project—new checkpoints overwrite previous.`,
+Retrievable via get_waypoint. Only one waypoint per project—new waypoints overwrite previous.`,
   inputSchema: {
     type: "object",
     properties: {
@@ -279,7 +279,7 @@ Retrievable via get_checkpoint. Only one checkpoint per project—new checkpoint
       memory_ids: {
         type: "array",
         items: { type: "string" },
-        description: "Memory IDs referenced by this checkpoint.",
+        description: "Memory IDs referenced by this waypoint.",
       },
       metadata: {
         type: "object",
@@ -291,10 +291,10 @@ Retrievable via get_checkpoint. Only one checkpoint per project—new checkpoint
   },
 };
 
-export const getCheckpointTool: Tool = {
-  name: "get_checkpoint",
+export const getWaypointTool: Tool = {
+  name: "get_waypoint",
   description:
-    "Load the current project checkpoint snapshot. Call at conversation start or when resuming a project.",
+    "Load the current project waypoint snapshot. Call at conversation start or when resuming a project.",
   inputSchema: {
     type: "object",
     properties: {},
@@ -368,8 +368,8 @@ export const tools: Tool[] = [
   searchMemoriesTool,
   getMemoriesTool,
   reportMemoryUsefulnessTool,
-  storeCheckpointTool,
-  getCheckpointTool,
+  setWaypointTool,
+  getWaypointTool,
   indexConversationsTool,
   listIndexedSessionsTool,
   reindexSessionTool,

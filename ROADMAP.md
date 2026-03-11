@@ -1,6 +1,6 @@
 # Roadmap
 
-Current version: **0.8.0**
+Current version: **1.1.0**
 
 ## Tech Debt
 
@@ -10,9 +10,13 @@ Current version: **0.8.0**
 
 - **Inconsistent parameter validation in MCP handlers**: `handleReindexSession` validates its required `session_id` arg defensively, but other handlers (`handleStoreMemories`, `handleDeleteMemories`, `handleReportMemoryUsefulness`, etc.) trust the MCP SDK schema validation and would throw unhandled `TypeError` on missing input. Low risk today since the SDK validates before calling handlers, but fragile if handlers are ever called directly (e.g. from HTTP routes).
 
+- **N individual upserts for access tracking in `getMultiple()`**: `memory.service.ts:getMultiple()` batches the read via `findByIds` (single IN query), but fans out to N individual `repository.upsert()` calls for access tracking. Each upsert does a SELECT (existence check) + UPDATE — 2N queries total. A `bulkUpdateAccess(ids, now)` repository method using a single `UPDATE ... WHERE id IN (...)` would collapse this to 1 query. Same pattern applies to `trackAccess()`.
+
+- **Unbounded IN clause in `findByIds()`**: `memory.repository.ts:findByIds()` builds a SQL IN clause from an unbounded array of IDs. LanceDB/DataFusion may have query length limits. Add a size guard (e.g., 100 IDs) and batch if needed.
+
 ## Completed
 
-### v0.9.0 - Conversation History Indexing (Feature 27)
+### v1.1.0 - Conversation History Indexing (Feature 27)
 - Conversation history indexing from Claude Code JSONL session logs
 - Session parser with incremental indexing support
 - Hybrid search (vector + FTS) across conversation history
@@ -311,7 +315,7 @@ Tools:
 - `temporal` on entity graph — `PRECEDED_BY`, `CONCURRENT_WITH` — enables timeline construction and ordered event traversal
 
 #### 20. Session Handoff System
-Upgrade the current single-overwrite checkpoint system to a proper history-aware handoff:
+Upgrade the current single-overwrite waypoint system to a proper history-aware handoff:
 - `prepare_handoff` — structured export: summary, completed, in-progress, key decisions with rationale, next steps, linked memory IDs. Stored with a UUID (not overwritten).
 - `resume_from_handoff(handoff_id?)` — load specific handoff (defaults to most recent), marks it as resumed
 - `list_handoffs` — browse handoff history with timestamps and resume status
