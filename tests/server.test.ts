@@ -338,13 +338,13 @@ describe("mcp", () => {
       expect(response.content[0].text).toBe("Memory non-existent not found");
     });
 
-    test("includes supersededBy when set", async () => {
+    test("returns not found for deleted memory", async () => {
       const mem = await service.store("test");
       await service.delete(mem.id);
 
       const response = await handleGetMemories({ ids: [mem.id] }, service);
 
-      expect(response.content[0].text).toContain("Superseded by: DELETED");
+      expect(response.content[0].text).toBe(`Memory ${mem.id} not found`);
     });
 
     test("omits metadata line when empty", async () => {
