@@ -6,79 +6,94 @@ import {
   handleReindexSession,
 } from "../src/mcp/handlers.js";
 import type { MemoryService } from "../src/services/memory.service.js";
-import type { ConversationHistoryService } from "../src/services/conversation-history.service.js";
-import type { HistorySearchResult, IndexedSessionSummary, IndexingSummary, SearchResult } from "../src/types/conversation-history.js";
+import type { ConversationHistoryService } from "../src/services/conversation.service.js";
+import type { SearchResult, IndexedSession } from "../src/types/conversation.js";
 
-function createMockService(historyService: ConversationHistoryService | null = null): MemoryService {
+function createMockService(conversationService: ConversationHistoryService | null = null): MemoryService {
   return {
-    search: mock(async () => []),
-    searchUnified: mock(async () => []),
-    getConversationHistory: mock(() => historyService),
+    search: mock(async (): Promise<SearchResult[]> => []),
+    getConversationService: mock(() => conversationService),
   } as unknown as MemoryService;
 }
 
-function createMockHistoryService(overrides: Partial<ConversationHistoryService> = {}): ConversationHistoryService {
+function createMockConversationService(overrides: Partial<ConversationHistoryService> = {}): ConversationHistoryService {
   return {
-    indexConversations: mock(async (): Promise<IndexingSummary> => ({
-      sessionsDiscovered: 3,
-      sessionsIndexed: 2,
-      sessionsSkipped: 1,
-      messagesIndexed: 42,
+    indexConversations: mock(async () => ({
+      indexed: 2,
+      skipped: 1,
+      errors: [] as string[],
     })),
-    search: mock(async (): Promise<HistorySearchResult[]> => []),
-    listIndexedSessions: mock(async (): Promise<IndexedSessionSummary[]> => []),
-    reindexSession: mock(async (): Promise<IndexingSummary> => ({
-      sessionsDiscovered: 1,
-      sessionsIndexed: 1,
-      sessionsSkipped: 0,
-      messagesIndexed: 15,
+    searchHistory: mock(async () => []),
+    listIndexedSessions: mock(async () => ({
+      sessions: [] as IndexedSession[],
+      total: 0,
     })),
+    reindexSession: mock(async () => ({
+      success: true,
+      chunkCount: 5,
+    })),
+    config: {
+      enabled: true,
+      sessionLogPath: null,
+      historyWeight: 0.3,
+      chunkOverlap: 1,
+      maxChunkMessages: 10,
+      indexSubagents: false,
+    },
     ...overrides,
   } as unknown as ConversationHistoryService;
 }
 
-// -- search_memories with include_history / history_only --
+// -- search_memories --
 
 describe("handleSearchMemories", () => {
-  it("returns error when history_only but history not enabled", async () => {
+  it("calls search with options including history flags", async () => {
     const service = createMockService(null);
-    const result = await handleSearchMemories(
+    await handleSearchMemories(
       { query: "test", intent: "fact_check", reason_for_search: "test", history_only: true },
       service,
     );
-    expect(result.isError).toBe(true);
-    expect(result.content[0]).toHaveProperty("text", expect.stringContaining("not enabled"));
+
+    expect(service.search).toHaveBeenCalledWith("test", "fact_check", 10, false, {
+      includeHistory: undefined,
+      historyOnly: true,
+      historyFilters: {
+        sessionId: undefined,
+        role: undefined,
+        after: undefined,
+        before: undefined,
+      },
+    });
   });
 
-  it("calls historyService.search when history_only is true", async () => {
-    const historySearch = mock(async (): Promise<HistorySearchResult[]> => [
+  it("passes include_history and filters through to search", async () => {
+    const service = createMockService(null);
+    await handleSearchMemories(
       {
-        source: "conversation_history",
-        id: "h-1",
-        content: "Hello world",
-        metadata: {},
-        score: 0.9,
-        sessionId: "sess-1",
-        role: "user",
-        messageIndex: 0,
-        timestamp: new Date("2026-03-09T10:00:00Z"),
+        query: "test",
+        intent: "continuity",
+        reason_for_search: "test",
+        include_history: true,
+        session_id: "sess-1",
+        role_filter: "user",
       },
-    ]);
-    const historyService = createMockHistoryService({ search: historySearch });
-    const service = createMockService(historyService);
-
-    const result = await handleSearchMemories(
-      { query: "hello", intent: "fact_check", reason_for_search: "test", history_only: true },
       service,
     );
 
-    expect(historySearch).toHaveBeenCalledWith("hello", 10);
-    expect(result.content[0]).toHaveProperty("text", expect.stringContaining("conversation_history"));
-    expect(result.content[0]).toHaveProperty("text", expect.stringContaining("sess-1"));
+    expect(service.search).toHaveBeenCalledWith("test", "continuity", 10, false, {
+      includeHistory: true,
+      historyOnly: false,
+      historyFilters: {
+        sessionId: "sess-1",
+        role: "user",
+        after: undefined,
+        before: undefined,
+      },
+    });
   });
 
-  it("calls searchUnified when include_history is true", async () => {
-    const unifiedResults: SearchResult[] = [
+  it("returns formatted results with source labels", async () => {
+    const results: SearchResult[] = [
       {
         source: "memory",
         id: "m-1",
@@ -89,37 +104,38 @@ describe("handleSearchMemories", () => {
         updatedAt: new Date(),
         supersededBy: null,
       },
+      {
+        source: "conversation_history",
+        id: "h-1",
+        content: "A conversation chunk",
+        metadata: {},
+        score: 0.6,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        sessionId: "sess-1",
+      },
     ];
     const service = createMockService(null);
-    (service.searchUnified as ReturnType<typeof mock>).mockResolvedValue(unifiedResults);
+    (service.search as ReturnType<typeof mock>).mockResolvedValue(results);
 
     const result = await handleSearchMemories(
-      { query: "test", intent: "continuity", reason_for_search: "test", include_history: true },
-      service,
-    );
-
-    expect(service.searchUnified).toHaveBeenCalledWith("test", "continuity", 10, false);
-    expect(result.content[0]).toHaveProperty("text", expect.stringContaining("Source: memory"));
-  });
-
-  it("returns error when both include_history and history_only are true", async () => {
-    const service = createMockService(null);
-    const result = await handleSearchMemories(
-      { query: "test", intent: "fact_check", reason_for_search: "test", include_history: true, history_only: true },
-      service,
-    );
-    expect(result.isError).toBe(true);
-    expect(result.content[0]).toHaveProperty("text", expect.stringContaining("Cannot set both"));
-  });
-
-  it("falls back to memory-only search by default", async () => {
-    const service = createMockService(null);
-    await handleSearchMemories(
       { query: "test", intent: "fact_check", reason_for_search: "test" },
       service,
     );
-    expect(service.search).toHaveBeenCalledWith("test", "fact_check", 10, false);
-    expect(service.searchUnified).not.toHaveBeenCalled();
+
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("[memory] ID: m-1");
+    expect(text).toContain("[conversation_history] ID: h-1");
+    expect(text).toContain("Session: sess-1");
+  });
+
+  it("returns no results message when empty", async () => {
+    const service = createMockService(null);
+    const result = await handleSearchMemories(
+      { query: "test", intent: "fact_check", reason_for_search: "test" },
+      service,
+    );
+    expect(result.content[0]).toHaveProperty("text", "No results found matching your query.");
   });
 });
 
@@ -134,23 +150,44 @@ describe("handleIndexConversations", () => {
   });
 
   it("calls indexConversations and returns summary", async () => {
-    const historyService = createMockHistoryService();
-    const service = createMockService(historyService);
+    const convService = createMockConversationService();
+    const service = createMockService(convService);
 
     const result = await handleIndexConversations({}, service);
 
-    expect(historyService.indexConversations).toHaveBeenCalledWith(undefined);
-    expect(result.content[0]).toHaveProperty("text", expect.stringContaining("Sessions discovered: 3"));
-    expect(result.content[0]).toHaveProperty("text", expect.stringContaining("Messages indexed: 42"));
+    expect(convService.indexConversations).toHaveBeenCalledWith(undefined, undefined);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("Indexed: 2");
+    expect(text).toContain("Skipped: 1");
+    expect(text).toContain("No errors");
   });
 
-  it("passes path argument through", async () => {
-    const historyService = createMockHistoryService();
-    const service = createMockService(historyService);
+  it("passes path and since arguments through", async () => {
+    const convService = createMockConversationService();
+    const service = createMockService(convService);
 
-    await handleIndexConversations({ path: "/custom/path" }, service);
+    await handleIndexConversations({ path: "/custom/path", since: "2026-03-01" }, service);
 
-    expect(historyService.indexConversations).toHaveBeenCalledWith("/custom/path");
+    expect(convService.indexConversations).toHaveBeenCalledWith(
+      "/custom/path",
+      new Date("2026-03-01"),
+    );
+  });
+
+  it("reports errors in summary", async () => {
+    const convService = createMockConversationService({
+      indexConversations: mock(async () => ({
+        indexed: 0,
+        skipped: 0,
+        errors: ["sess-1: file not found"],
+      })),
+    });
+    const service = createMockService(convService);
+
+    const result = await handleIndexConversations({}, service);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("Errors: 1");
+    expect(text).toContain("sess-1: file not found");
   });
 });
 
@@ -164,36 +201,47 @@ describe("handleListIndexedSessions", () => {
   });
 
   it("returns empty message when no sessions", async () => {
-    const historyService = createMockHistoryService();
-    const service = createMockService(historyService);
+    const convService = createMockConversationService();
+    const service = createMockService(convService);
 
     const result = await handleListIndexedSessions({}, service);
 
     expect(result.content[0]).toHaveProperty("text", expect.stringContaining("No indexed sessions"));
   });
 
-  it("formats session list with metadata", async () => {
-    const sessions: IndexedSessionSummary[] = [{
+  it("formats session list with pagination info", async () => {
+    const sessions: IndexedSession[] = [{
       sessionId: "sess-1",
+      filePath: "/tmp/sess-1.jsonl",
+      project: "my-project",
+      lastModified: Date.now(),
+      chunkCount: 8,
       messageCount: 25,
+      indexedAt: new Date("2026-03-09T12:00:00Z"),
       firstMessageAt: new Date("2026-03-09T10:00:00Z"),
       lastMessageAt: new Date("2026-03-09T11:00:00Z"),
-      indexedAt: new Date("2026-03-09T12:00:00Z"),
-      project: "my-project",
-      gitBranch: "dev",
     }];
-    const historyService = createMockHistoryService({
-      listIndexedSessions: mock(async () => sessions),
+    const convService = createMockConversationService({
+      listIndexedSessions: mock(async () => ({ sessions, total: 1 })),
     });
-    const service = createMockService(historyService);
+    const service = createMockService(convService);
 
     const result = await handleListIndexedSessions({}, service);
     const text = (result.content[0] as { text: string }).text;
 
     expect(text).toContain("sess-1");
     expect(text).toContain("Messages: 25");
-    expect(text).toContain("Project: my-project");
-    expect(text).toContain("Branch: dev");
+    expect(text).toContain("Chunks: 8");
+    expect(text).toContain("Showing 1-1 of 1");
+  });
+
+  it("passes limit and offset through", async () => {
+    const convService = createMockConversationService();
+    const service = createMockService(convService);
+
+    await handleListIndexedSessions({ limit: 5, offset: 10 }, service);
+
+    expect(convService.listIndexedSessions).toHaveBeenCalledWith(5, 10);
   });
 });
 
@@ -206,13 +254,30 @@ describe("handleReindexSession", () => {
     expect(result.isError).toBe(true);
   });
 
-  it("calls reindexSession and returns summary", async () => {
-    const historyService = createMockHistoryService();
-    const service = createMockService(historyService);
+  it("calls reindexSession and returns success", async () => {
+    const convService = createMockConversationService();
+    const service = createMockService(convService);
 
     const result = await handleReindexSession({ session_id: "sess-1" }, service);
 
-    expect(historyService.reindexSession).toHaveBeenCalledWith("sess-1");
-    expect(result.content[0]).toHaveProperty("text", expect.stringContaining("Messages indexed: 15"));
+    expect(convService.reindexSession).toHaveBeenCalledWith("sess-1");
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("sess-1");
+    expect(text).toContain("5 chunks");
+  });
+
+  it("returns error on reindex failure", async () => {
+    const convService = createMockConversationService({
+      reindexSession: mock(async () => ({
+        success: false,
+        chunkCount: 0,
+        error: "Session not found",
+      })),
+    });
+    const service = createMockService(convService);
+
+    const result = await handleReindexSession({ session_id: "bad-id" }, service);
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toHaveProperty("text", expect.stringContaining("Session not found"));
   });
 });

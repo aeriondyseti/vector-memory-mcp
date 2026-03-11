@@ -1,5 +1,5 @@
 import * as lancedb from "@lancedb/lancedb";
-import { Index, rerankers, type Table } from "@lancedb/lancedb";
+import { type Table } from "@lancedb/lancedb";
 import {
   CONVERSATION_TABLE_NAME,
   conversationSchema,
@@ -8,58 +8,36 @@ import type {
   ConversationHybridRow,
   HistoryFilters,
 } from "../types/conversation.js";
-import { escapeSql, RRF_K } from "./sql-utils.js";
+import {
+  getOrCreateTable,
+  createFtsMutex,
+  createRerankerMutex,
+  escapeSql,
+} from "./lancedb-utils.js";
 
 export class ConversationRepository {
   private tablePromise: Promise<Table> | null = null;
-  private ftsIndexPromise: Promise<void> | null = null;
+
+  // FTS index mutex — recreated after data mutations to force re-check
+  private ensureFtsIndex = createFtsMutex(() => this.getTable());
+
+  // Cached reranker — k=60 is constant, no need to recreate per search
+  private getReranker = createRerankerMutex();
 
   constructor(private db: lancedb.Connection) {}
 
   private getTable(): Promise<Table> {
     if (!this.tablePromise) {
-      this.tablePromise = (async () => {
-        const names = await this.db.tableNames();
-        if (names.includes(CONVERSATION_TABLE_NAME)) {
-          return await this.db.openTable(CONVERSATION_TABLE_NAME);
-        }
-        return await this.db.createTable(CONVERSATION_TABLE_NAME, [], {
-          schema: conversationSchema,
-        });
-      })().catch((err) => {
+      this.tablePromise = getOrCreateTable(
+        this.db,
+        CONVERSATION_TABLE_NAME,
+        conversationSchema,
+      ).catch((err) => {
         this.tablePromise = null;
         throw err;
       });
     }
     return this.tablePromise;
-  }
-
-  private ensureFtsIndex(): Promise<void> {
-    if (this.ftsIndexPromise) {
-      return this.ftsIndexPromise;
-    }
-
-    this.ftsIndexPromise = this.createFtsIndexIfNeeded().catch((error) => {
-      this.ftsIndexPromise = null;
-      throw error;
-    });
-
-    return this.ftsIndexPromise;
-  }
-
-  private async createFtsIndexIfNeeded(): Promise<void> {
-    const table = await this.getTable();
-    const indices = await table.listIndices();
-    const hasFtsIndex = indices.some(
-      (idx) => idx.columns.includes("content") && idx.indexType === "FTS"
-    );
-
-    if (!hasFtsIndex) {
-      await table.createIndex("content", {
-        config: Index.fts(),
-      });
-      await table.waitForIndex(["content_idx"], 30);
-    }
   }
 
   private rowToConversationHybridRow(
@@ -91,14 +69,14 @@ export class ConversationRepository {
     if (rows.length === 0) return;
     const table = await this.getTable();
     await table.add(rows);
-    // Reset FTS index promise so it gets recreated with new data
-    this.ftsIndexPromise = null;
+    // Reset FTS mutex so index existence is re-verified after new data
+    this.ensureFtsIndex = createFtsMutex(() => this.getTable());
   }
 
   async deleteBySessionId(sessionId: string): Promise<void> {
     const table = await this.getTable();
     await table.delete(`session_id = '${escapeSql(sessionId)}'`);
-    this.ftsIndexPromise = null;
+    this.ensureFtsIndex = createFtsMutex(() => this.getTable());
   }
 
   async findHybrid(
@@ -109,7 +87,7 @@ export class ConversationRepository {
   ): Promise<ConversationHybridRow[]> {
     await this.ensureFtsIndex();
     const table = await this.getTable();
-    const reranker = await rerankers.RRFReranker.create(RRF_K);
+    const reranker = await this.getReranker();
 
     let queryBuilder = table
       .query()
@@ -137,5 +115,4 @@ export class ConversationRepository {
       this.rowToConversationHybridRow(row as Record<string, unknown>)
     );
   }
-
 }

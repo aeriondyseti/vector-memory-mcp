@@ -137,7 +137,7 @@ export class ClaudeCodeSessionParser implements SessionLogParser {
   ): Promise<SessionFileInfo[]> {
     const files: SessionFileInfo[] = [];
 
-    let dirents: Awaited<ReturnType<typeof readdir<{ withFileTypes: true }>>>;
+    let dirents: import("fs").Dirent[];
     try {
       dirents = await readdir(dirPath, { withFileTypes: true });
     } catch {

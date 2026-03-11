@@ -1,13 +1,12 @@
 import * as lancedb from "@lancedb/lancedb";
 import { type Table } from "@lancedb/lancedb";
 import { TABLE_NAME, memorySchema } from "./schema.js";
-import { arrowVectorToArray, createFtsMutex, createRerankerMutex } from "./lancedb-utils.js";
+import { arrowVectorToArray, createFtsMutex, createRerankerMutex, escapeSql } from "./lancedb-utils.js";
 import {
   type Memory,
   type HybridRow,
   DELETED_TOMBSTONE,
 } from "../types/memory.js";
-import { escapeSql } from "./sql-utils.js";
 
 export class MemoryRepository {
   // Mutex for schema migration - runs once per instance to add missing columns

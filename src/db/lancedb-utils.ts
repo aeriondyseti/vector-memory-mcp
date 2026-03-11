@@ -3,12 +3,19 @@ import { Index, rerankers, type Table } from "@lancedb/lancedb";
 import type { Schema } from "apache-arrow";
 
 /**
- * Escapes a string for use in LanceDB/DataFusion SQL WHERE clauses.
- * Doubles single quotes to prevent SQL injection (standard SQL escaping).
+ * Escape a string value for safe interpolation into LanceDB/DataFusion SQL WHERE clauses.
+ *
+ * DataFusion uses ANSI SQL string literal rules:
+ * - String literals are delimited by single quotes
+ * - Single quotes within strings are escaped by doubling: ' -> ''
+ * - Backslashes are NOT escape characters (treated literally)
  */
-export function escapeLanceDbString(value: string): string {
+export function escapeSql(value: string): string {
   return value.replace(/'/g, "''");
 }
+
+/** Default k parameter for Reciprocal Rank Fusion reranking. */
+export const RRF_K = 60;
 
 /**
  * Converts LanceDB's Arrow Vector type to a plain number[].

@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { readFile, writeFile, mkdir } from "fs/promises";
 import { dirname, join } from "path";
 import type { ConversationRepository } from "../db/conversation.repository.js";
 import type {
@@ -127,10 +127,10 @@ export class ConversationHistoryService {
     );
   }
 
-  private loadIndexState(): Map<string, IndexedSession> {
+  private async loadIndexState(): Promise<Map<string, IndexedSession>> {
     if (this.indexStateCache) return this.indexStateCache;
     try {
-      const raw = readFileSync(this.indexStatePath, "utf-8");
+      const raw = await readFile(this.indexStatePath, "utf-8");
       const entries: IndexStateEntry[] = JSON.parse(raw);
       const map = new Map<string, IndexedSession>();
       for (const e of entries) {
@@ -155,7 +155,7 @@ export class ConversationHistoryService {
     }
   }
 
-  private saveIndexState(state: Map<string, IndexedSession>): void {
+  private async saveIndexState(state: Map<string, IndexedSession>): Promise<void> {
     const entries: IndexStateEntry[] = [...state.values()].map((s) => ({
       sessionId: s.sessionId,
       filePath: s.filePath,
@@ -167,8 +167,8 @@ export class ConversationHistoryService {
       firstMessageAt: s.firstMessageAt.toISOString(),
       lastMessageAt: s.lastMessageAt.toISOString(),
     }));
-    mkdirSync(dirname(this.indexStatePath), { recursive: true });
-    writeFileSync(this.indexStatePath, JSON.stringify(entries, null, 2));
+    await mkdir(dirname(this.indexStatePath), { recursive: true });
+    await writeFile(this.indexStatePath, JSON.stringify(entries, null, 2));
     this.indexStateCache = state;
   }
 
@@ -198,7 +198,7 @@ export class ConversationHistoryService {
       since,
       this.config.indexSubagents
     );
-    const indexState = this.loadIndexState();
+    const indexState = await this.loadIndexState();
 
     let indexed = 0;
     let skipped = 0;
@@ -221,7 +221,7 @@ export class ConversationHistoryService {
       }
     }
 
-    this.saveIndexState(indexState);
+    await this.saveIndexState(indexState);
     return { indexed, skipped, errors };
   }
 
@@ -304,7 +304,7 @@ export class ConversationHistoryService {
       };
     }
 
-    const indexState = this.loadIndexState();
+    const indexState = await this.loadIndexState();
     const existing = indexState.get(sessionId);
     if (!existing) {
       return {
@@ -323,7 +323,7 @@ export class ConversationHistoryService {
     };
 
     await this.indexSession(file, indexState);
-    this.saveIndexState(indexState);
+    await this.saveIndexState(indexState);
 
     const updated = indexState.get(sessionId)!;
     return { success: true, chunkCount: updated.chunkCount };
@@ -333,7 +333,7 @@ export class ConversationHistoryService {
     limit: number = 20,
     offset: number = 0
   ): Promise<{ sessions: IndexedSession[]; total: number }> {
-    const indexState = this.loadIndexState();
+    const indexState = await this.loadIndexState();
     const sessions = [...indexState.values()].sort(
       (a, b) => b.indexedAt.getTime() - a.indexedAt.getTime()
     );
