@@ -64,7 +64,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): Config {
     conversationHistory: {
       enabled: overrides.enableHistory ?? false,
       sessionLogPath: overrides.historyPath ?? null,
-      historyWeight: overrides.historyWeight ?? 0.3,
+      historyWeight: overrides.historyWeight ?? 0.75,
       chunkOverlap: 1,
       maxChunkMessages: 10,
       indexSubagents: false,
@@ -106,7 +106,7 @@ export function parseCliArgs(argv: string[]): ConfigOverrides {
  * Resolve the session log path for conversation history indexing.
  * Returns the configured path, or auto-detects Claude Code's session directory.
  */
-export function resolveSessionLogPath(config: ConversationHistoryConfig): string | null {
+export function resolveSessionLogPath(config: ConversationHistoryConfig): string {
   if (config.sessionLogPath) {
     return resolvePath(config.sessionLogPath);
   }

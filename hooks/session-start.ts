@@ -2,10 +2,10 @@
 /**
  * SessionStart hook for Claude Code
  *
- * Fetches config from the running vector-memory server's /health endpoint,
- * then retrieves and outputs the latest checkpoint.
+ * 1. Triggers incremental conversation history indexing (if enabled)
+ * 2. Loads and outputs the latest checkpoint with referenced memories
  *
- * Requires the server to be running with HTTP enabled.
+ * Requires the vector-memory-mcp server to be running with HTTP enabled.
  *
  * Usage in ~/.claude/settings.json:
  * {
@@ -20,13 +20,8 @@
  * }
  */
 
-import { existsSync } from "fs";
-import { connectToDatabase } from "../src/db/connection.js";
-import { MemoryRepository } from "../src/db/memory.repository.js";
-import { EmbeddingsService } from "../src/services/embeddings.service.js";
-import { MemoryService } from "../src/services/memory.service.js";
-
-const VECTOR_MEMORY_URL = process.env.VECTOR_MEMORY_URL ?? "http://127.0.0.1:3271";
+const VECTOR_MEMORY_URL =
+  process.env.VECTOR_MEMORY_URL ?? "http://127.0.0.1:3271";
 
 interface HealthResponse {
   status: string;
@@ -34,11 +29,19 @@ interface HealthResponse {
     dbPath: string;
     embeddingModel: string;
     embeddingDimension: number;
+    historyEnabled: boolean;
   };
 }
 
+interface CheckpointResponse {
+  content: string;
+  metadata: Record<string, unknown>;
+  referencedMemories: Array<{ id: string; content: string }>;
+  updatedAt: string;
+}
+
 async function main() {
-  // Get config from running server
+  // Step 1: Check server is running and get config
   let health: HealthResponse;
   try {
     const response = await fetch(`${VECTOR_MEMORY_URL}/health`);
@@ -54,47 +57,62 @@ async function main() {
     throw error;
   }
 
-  const { dbPath, embeddingModel, embeddingDimension } = health.config;
-
-  // Check if DB exists
-  if (!existsSync(dbPath)) {
-    console.log("Vector memory database not found. Starting fresh session.");
-    return;
-  }
-
-  const db = await connectToDatabase(dbPath);
-  const repository = new MemoryRepository(db);
-  const embeddings = new EmbeddingsService(embeddingModel, embeddingDimension);
-  const service = new MemoryService(repository, embeddings);
-
-  const checkpoint = await service.getLatestCheckpoint();
-
-  if (!checkpoint) {
-    console.log("No checkpoint found. Starting fresh session.");
-    return;
-  }
-
-  // Fetch referenced memories if any
-  const memoryIds = (checkpoint.metadata.memory_ids as string[] | undefined) ?? [];
-  let memoriesSection = "";
-
-  if (memoryIds.length > 0) {
-    const memories: string[] = [];
-    for (const id of memoryIds) {
-      const memory = await service.get(id);
-      if (memory) {
-        memories.push(`### Memory: ${id}\n${memory.content}`);
+  // Step 2: Trigger conversation history indexing (if enabled)
+  if (health.config.historyEnabled) {
+    try {
+      const indexResponse = await fetch(
+        `${VECTOR_MEMORY_URL}/index-conversations`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }
+      );
+      if (indexResponse.ok) {
+        const result = await indexResponse.json();
+        if (result.indexed > 0 || result.errors?.length > 0) {
+          console.error(
+            `[vector-memory] Indexed ${result.indexed} sessions, skipped ${result.skipped}` +
+              (result.errors?.length > 0
+                ? `, ${result.errors.length} errors`
+                : "")
+          );
+        }
       }
-    }
-    if (memories.length > 0) {
-      memoriesSection = `\n\n## Referenced Memories\n\n${memories.join("\n\n")}`;
+    } catch {
+      // Non-fatal — indexing failure shouldn't block session start
+      console.error("[vector-memory] Conversation indexing failed, continuing.");
     }
   }
 
-  console.log(checkpoint.content + memoriesSection);
+  // Step 3: Load and output checkpoint
+  let checkpoint: CheckpointResponse;
+  try {
+    const response = await fetch(`${VECTOR_MEMORY_URL}/checkpoint`);
+    if (response.status === 404) {
+      console.log("No checkpoint found. Starting fresh session.");
+      return;
+    }
+    if (!response.ok) {
+      throw new Error(`Checkpoint endpoint returned ${response.status}`);
+    }
+    checkpoint = await response.json();
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(`[vector-memory] Failed to load checkpoint: ${msg}`);
+    return;
+  }
+
+  // Format output: checkpoint content + referenced memories
+  let output = checkpoint.content;
+
+  if (checkpoint.referencedMemories.length > 0) {
+    const memoriesSection = checkpoint.referencedMemories
+      .map((m) => `### Memory: ${m.id}\n${m.content}`)
+      .join("\n\n");
+    output += `\n\n## Referenced Memories\n\n${memoriesSection}`;
+  }
+
+  console.log(output);
 }
 
 main().catch((err) => {
-  console.error("Error loading checkpoint:", err.message);
+  console.error("Error in session-start hook:", err.message);
   process.exit(1);
 });

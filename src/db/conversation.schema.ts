@@ -15,7 +15,7 @@ export const conversationSchema = new Schema([
   new Field("id", new Utf8(), false),
   new Field(
     "vector",
-    new FixedSizeList(384, new Field("item", new Float32())),
+    new FixedSizeList(384, new Field("item", new Float32(), false)),
     false
   ),
   new Field("content", new Utf8(), false),

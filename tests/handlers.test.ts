@@ -35,7 +35,7 @@ function createMockConversationService(overrides: Partial<ConversationHistorySer
     config: {
       enabled: true,
       sessionLogPath: null,
-      historyWeight: 0.3,
+      historyWeight: 0.75,
       chunkOverlap: 1,
       maxChunkMessages: 10,
       indexSubagents: false,
@@ -55,7 +55,7 @@ describe("handleSearchMemories", () => {
     );
 
     expect(service.search).toHaveBeenCalledWith("test", "fact_check", 10, false, {
-      includeHistory: undefined,
+      includeHistory: true,
       historyOnly: true,
       historyFilters: {
         sessionId: undefined,

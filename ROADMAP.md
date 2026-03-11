@@ -6,6 +6,10 @@ Current version: **0.8.0**
 
 - **Duplicate memory formatting in `handleSearchMemories`**: The memory-only code path (default, no `include_history`) formats results inline with the same logic as `formatSearchResult` for `source: "memory"`, minus the `Source:` label. Consolidating would require adding a `Source: memory` prefix to default output, changing existing behavior. Deferred to avoid breaking consumers that parse the output.
 
+- **Repetitive error-response boilerplate in `handlers.ts`**: The `{ content: [{ type: "text", text }], isError: true }` shape is constructed inline at 5+ locations. An `errorResult(text)` helper would reduce duplication and make it easy to add a `requireStringArg` guard for common validation patterns.
+
+- **Inconsistent parameter validation in MCP handlers**: `handleReindexSession` validates its required `session_id` arg defensively, but other handlers (`handleStoreMemories`, `handleDeleteMemories`, `handleReportMemoryUsefulness`, etc.) trust the MCP SDK schema validation and would throw unhandled `TypeError` on missing input. Low risk today since the SDK validates before calling handlers, but fragile if handlers are ever called directly (e.g. from HTTP routes).
+
 ## Completed
 
 ### v0.9.0 - Conversation History Indexing (Feature 27)
@@ -253,7 +257,7 @@ Edge type tools:
 
 Causal edges between memories. Answers: *why does this memory exist, what caused it, what did it cause?*
 
-Lineage edge types are system-defined (not user-registered): `caused`, `informed_by`, `resolved_by`, `superseded_by`, `triggered`. The hard-enforcement type registry applies only to agent-defined entity and edge types.
+Lineage edge types are pre-populated in the registry with `system: true`: `caused`, `informed_by`, `resolved_by`, `superseded_by`, `triggered`. These system types cannot be modified or deleted. The type registry enforcement applies to all edges, but only agent-defined types (`system: false`) can be created, updated, or removed.
 
 Edge provenance: `inferred` (auto-created by system) | `confirmed` (agent approved) | `explicit` (agent created directly)
 
@@ -337,6 +341,8 @@ Defined types with default importance bonuses:
 Implemented as: type validation in `store_memories`, default quality score bonuses in the scoring system (Feature 15), and a `type` filter in `search_memories`.
 
 No schema change — type is already stored in `metadata`. The bonus system is a service-layer concern.
+
+**Migration:** Existing memories with free-form `metadata.type` remain readable. Validation is enforced only on new writes via `store_memories`. Unrecognized types in existing data are treated as `observation` for scoring purposes. A future `audit_memory_types` maintenance tool could scan and report non-conforming types.
 
 ### Phase 4 — Extended Capabilities
 
@@ -429,7 +435,7 @@ LanceDB supports `table.checkout_latest()` and `table.list_versions()` natively 
 | 16 | Tag management system | 3 | Optional sidecar table |
 | 17 | Document ingestion | 3 | No |
 | 18 | Memory consolidation | 3 | No (requires #15) |
-| 19 | Knowledge graph subsystem | 3 | Yes — `entities`, `entity_edges`, `memory_edges`, `memory_entity_refs` |
+| 19 | Knowledge graph subsystem | 3 | Yes — `entity_types`, `edge_types`, `entities`, `graph_edges` |
 | 20 | Session handoff system | 3 | No (sidecar store) |
 | 21 | Formal memory type taxonomy | 3 | No |
 | 22 | ~~Source & credibility tracking~~ | — | Absorbed into Feature 19 |

@@ -85,6 +85,7 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
         dbPath: config.dbPath,
         embeddingModel: config.embeddingModel,
         embeddingDimension: config.embeddingDimension,
+        historyEnabled: config.conversationHistory.enabled,
       },
     });
   });
@@ -188,6 +189,28 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
         referencedMemories,
         updatedAt: checkpoint.updatedAt.toISOString(),
       });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  // Index conversations (trigger incremental indexing)
+  app.post("/index-conversations", async (c) => {
+    try {
+      const conversationService = memoryService.getConversationService();
+      if (!conversationService) {
+        return c.json({ error: "Conversation history indexing is not enabled" }, 400);
+      }
+
+      const body = await c.req.json().catch(() => ({}));
+      const since = body.since ? new Date(body.since as string) : undefined;
+      const result = await conversationService.indexConversations(
+        body.path as string | undefined,
+        since
+      );
+
+      return c.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       return c.json({ error: message }, 500);

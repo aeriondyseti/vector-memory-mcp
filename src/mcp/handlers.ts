@@ -107,8 +107,9 @@ export async function handleSearchMemories(
   const intent = (args?.intent as SearchIntent) ?? "fact_check";
   const limit = (args?.limit as number) ?? 10;
   const includeDeleted = (args?.include_deleted as boolean) ?? false;
-  const includeHistory = args?.include_history as boolean | undefined;
   const historyOnly = (args?.history_only as boolean) ?? false;
+  // history_only implies include_history
+  const includeHistory = historyOnly ? true : (args?.include_history as boolean | undefined);
 
   const results = await service.search(query, intent, limit, includeDeleted, {
     includeHistory,
@@ -124,7 +125,7 @@ export async function handleSearchMemories(
 
   const formatted = results.map((r: SearchResult) => {
     let result = `[${r.source}] ID: ${r.id}\nContent: ${r.content}`;
-    if (Object.keys(r.metadata).length > 0) {
+    if (r.metadata && Object.keys(r.metadata).length > 0) {
       result += `\nMetadata: ${JSON.stringify(r.metadata)}`;
     }
     if (r.source === "memory" && includeDeleted && r.supersededBy) {
@@ -150,7 +151,7 @@ function formatMemoryDetail(
   }
 
   let result = `ID: ${memory.id}\nContent: ${memory.content}`;
-  if (Object.keys(memory.metadata).length > 0) {
+  if (memory.metadata && Object.keys(memory.metadata).length > 0) {
     result += `\nMetadata: ${JSON.stringify(memory.metadata)}`;
   }
   result += `\nCreated: ${memory.createdAt.toISOString()}`;
@@ -369,7 +370,13 @@ export async function handleReindexSession(
   if ("error" in conv) return conv.error;
   const conversationService = conv.service;
 
-  const sessionId = args?.session_id as string;
+  const sessionId = args?.session_id as string | undefined;
+  if (!sessionId) {
+    return {
+      content: [{ type: "text", text: "session_id is required" }],
+      isError: true,
+    };
+  }
   const result = await conversationService.reindexSession(sessionId);
 
   if (!result.success) {

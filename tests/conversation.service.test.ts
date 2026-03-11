@@ -32,7 +32,7 @@ function makeConfig(overrides: Partial<ConversationHistoryConfig> = {}): Convers
   return {
     enabled: true,
     sessionLogPath: null,
-    historyWeight: 0.3,
+    historyWeight: 0.75,
     chunkOverlap: 1,
     maxChunkMessages: 5,
     indexSubagents: false,
@@ -100,7 +100,7 @@ describe("ConversationHistoryService", () => {
       expect(result.errors).toContain("Conversation history indexing is not enabled");
     });
 
-    test("returns error when no session log path", async () => {
+    test("returns zero counts when no session files found", async () => {
       const config = makeConfig({ sessionLogPath: null });
       const parser = createMockParser();
       // Override resolveSessionLogPath by providing a non-existent path
@@ -464,6 +464,12 @@ describe("ConversationHistoryService", () => {
       const result = await service.listIndexedSessions();
       expect(result.total).toBe(2);
       expect(result.sessions).toHaveLength(2);
+      // Verify descending order by indexedAt
+      expect(
+        result.sessions[0].indexedAt.getTime()
+      ).toBeGreaterThanOrEqual(
+        result.sessions[1].indexedAt.getTime()
+      );
     });
 
     test("respects limit and offset", async () => {

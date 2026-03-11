@@ -17,10 +17,14 @@ function extractAssistantText(
     .join("\n");
 }
 
-/** Extract project name from path-encoded directory name */
+/**
+ * Extract project name from path-encoded directory name.
+ * Claude Code encodes paths by replacing `/` with `-`, e.g. `/home/user/project` → `-home-user-project`.
+ * This is a lossy encoding: directory names containing literal dashes (e.g. `my-project`)
+ * cannot be distinguished from path separators, so `my-project` decodes as `my/project`.
+ * This is a known limitation of Claude Code's encoding scheme.
+ */
 function extractProjectFromDir(dirName: string): string {
-  // Directory names are like: -home-aerion-Development-project-name
-  // Remove leading dash and convert dashes back to slashes for readability
   return dirName.startsWith("-")
     ? dirName.slice(1).replace(/-/g, "/")
     : dirName;

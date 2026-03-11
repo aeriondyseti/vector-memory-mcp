@@ -176,7 +176,7 @@ When in doubt, search. Missing context is costlier than an extra query.`,
       history_only: {
         type: "boolean",
         description:
-          "Search only conversation history, not explicit memories (default: false).",
+          "Search only conversation history, not explicit memories. Implies include_history: true (default: false).",
         default: false,
       },
       session_id: {

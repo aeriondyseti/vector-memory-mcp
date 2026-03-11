@@ -21,7 +21,7 @@ function createTestConfig(dbPath: string): Config {
     conversationHistory: {
       enabled: false,
       sessionLogPath: null,
-      historyWeight: 0.3,
+      historyWeight: 0.75,
       chunkOverlap: 1,
       maxChunkMessages: 10,
       indexSubagents: false,

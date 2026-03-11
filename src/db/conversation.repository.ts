@@ -13,6 +13,7 @@ import {
   createFtsMutex,
   createRerankerMutex,
   escapeSql,
+  safeParseJsonObject,
 } from "./lancedb-utils.js";
 
 export class ConversationRepository {
@@ -43,10 +44,11 @@ export class ConversationRepository {
   private rowToConversationHybridRow(
     row: Record<string, unknown>
   ): ConversationHybridRow {
+    const metadata = safeParseJsonObject(row.metadata as string);
     return {
       id: row.id as string,
       content: row.content as string,
-      metadata: JSON.parse(row.metadata as string),
+      metadata,
       createdAt: new Date(row.created_at as number),
       rrfScore: (row._relevance_score as number) ?? 0,
     };

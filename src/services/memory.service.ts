@@ -175,7 +175,7 @@ export class MemoryService {
     const historyWeight =
       options?.historyWeight ??
       this.conversationService?.config.historyWeight ??
-      0.3;
+      0.75;
 
     // Run memory + history queries in parallel
     const memoryPromise =
@@ -219,10 +219,10 @@ export class MemoryService {
                 updatedAt: row.createdAt,
                 source: "conversation_history" as const,
                 score: row.rrfScore * historyWeight,
-                sessionId: row.metadata.session_id as string,
-                role: row.metadata.role as string,
-                messageIndexStart: row.metadata.message_index_start as number,
-                messageIndexEnd: row.metadata.message_index_end as number,
+                sessionId: (row.metadata?.session_id as string) ?? "",
+                role: (row.metadata?.role as string) ?? "unknown",
+                messageIndexStart: (row.metadata?.message_index_start as number) ?? 0,
+                messageIndexEnd: (row.metadata?.message_index_end as number) ?? 0,
               }))
             )
         : Promise.resolve([] as SearchResult[]);

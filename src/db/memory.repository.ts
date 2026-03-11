@@ -1,7 +1,7 @@
 import * as lancedb from "@lancedb/lancedb";
 import { type Table } from "@lancedb/lancedb";
 import { TABLE_NAME, memorySchema } from "./schema.js";
-import { arrowVectorToArray, createFtsMutex, createRerankerMutex, escapeSql } from "./lancedb-utils.js";
+import { arrowVectorToArray, createFtsMutex, createRerankerMutex, escapeSql, safeParseJsonObject } from "./lancedb-utils.js";
 import {
   type Memory,
   type HybridRow,
@@ -83,7 +83,7 @@ export class MemoryRepository {
       id: row.id as string,
       content: row.content as string,
       embedding: arrowVectorToArray(row.vector),
-      metadata: JSON.parse(row.metadata as string),
+      metadata: safeParseJsonObject(row.metadata as string),
       createdAt: new Date(row.created_at as number),
       updatedAt: new Date(row.updated_at as number),
       supersededBy: row.superseded_by as string | null,

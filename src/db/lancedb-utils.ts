@@ -28,6 +28,17 @@ export function arrowVectorToArray(value: unknown): number[] {
 }
 
 /**
+ * Safely parse a JSON string into an object, returning an empty object on failure.
+ */
+export function safeParseJsonObject(raw: string): Record<string, unknown> {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+/**
  * Opens an existing table or creates it with the given schema.
  * Does NOT cache — callers should cache the returned Table if desired.
  */
@@ -36,11 +47,21 @@ export async function getOrCreateTable(
   name: string,
   schema: Schema
 ): Promise<Table> {
-  const names = await db.tableNames();
-  if (names.includes(name)) {
+  try {
+    return await db.openTable(name);
+  } catch (err: unknown) {
+    // Only proceed to create if the table was not found
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes("was not found") && !message.includes("does not exist")) {
+      throw err;
+    }
+  }
+  try {
+    return await db.createTable(name, [], { schema });
+  } catch {
+    // Another caller may have created it concurrently
     return await db.openTable(name);
   }
-  return await db.createTable(name, [], { schema });
 }
 
 /**

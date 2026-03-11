@@ -8,7 +8,7 @@ export function fakeEmbedding(): number[] {
 }
 
 /**
- * Stub EmbeddingsService that returns deterministic random embeddings.
+ * Stub EmbeddingsService that returns random embeddings.
  * Avoids loading the real model in tests.
  */
 export function createMockEmbeddings(): EmbeddingsService {

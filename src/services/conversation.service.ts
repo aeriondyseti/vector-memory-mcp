@@ -243,8 +243,8 @@ export class ConversationHistoryService {
         chunkCount: 0,
         messageCount: 0,
         indexedAt: new Date(),
-        firstMessageAt: new Date(),
-        lastMessageAt: new Date(),
+        firstMessageAt: file.lastModified,
+        lastMessageAt: file.lastModified,
       });
       return;
     }
@@ -314,7 +314,7 @@ export class ConversationHistoryService {
       };
     }
 
-    // Force re-index by setting lastModified to 0
+    // Construct session info for re-indexing
     const file: SessionFileInfo = {
       filePath: existing.filePath,
       sessionId,
