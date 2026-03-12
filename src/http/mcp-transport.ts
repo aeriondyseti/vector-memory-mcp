@@ -23,6 +23,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { tools } from "../mcp/tools.js";
 import { handleToolCall } from "../mcp/handlers.js";
+import { SERVER_INSTRUCTIONS } from "../mcp/server.js";
+import { VERSION } from "../config/index.js";
 import type { MemoryService } from "../services/memory.service.js";
 
 interface Session {
@@ -50,8 +52,11 @@ export function createMcpRoutes(memoryService: MemoryService): Hono {
    */
   async function createSession(): Promise<Session> {
     const server = new Server(
-      { name: "vector-memory-mcp", version: "0.6.0" },
-      { capabilities: { tools: {} } }
+      { name: "vector-memory-mcp", version: VERSION },
+      {
+        capabilities: { tools: {} },
+        instructions: SERVER_INSTRUCTIONS,
+      }
     );
 
     server.setRequestHandler(ListToolsRequestSchema, async () => {
