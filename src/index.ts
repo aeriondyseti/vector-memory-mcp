@@ -18,6 +18,14 @@ async function runMigrate(args: string[]): Promise<void> {
   const source = config.dbPath;
   const target = source + ".sqlite";
 
+  if (!isLanceDbDirectory(source)) {
+    console.error(
+      `[vector-memory-mcp] No LanceDB data found at ${source}\n` +
+      `  Nothing to migrate. The server will create a fresh SQLite database on startup.`
+    );
+    return;
+  }
+
   const result = await migrate({ source, target });
   console.error(formatMigrationSummary(source, target, result));
 }
