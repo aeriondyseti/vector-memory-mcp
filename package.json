@@ -1,6 +1,6 @@
 {
   "name": "@aeriondyseti/vector-memory-mcp",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "A zero-configuration RAG memory server for MCP clients",
   "type": "module",
   "main": "src/index.ts",
@@ -45,7 +45,6 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@hono/node-server": "^1.19.9",
     "@huggingface/transformers": "^3.8.0",
     "@lancedb/lancedb": "^0.26.2",
     "@modelcontextprotocol/sdk": "^1.0.0",

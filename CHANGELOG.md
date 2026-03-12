@@ -5,16 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - 2026-03-12
+
+### Breaking Changes
+- **SQLite replaces LanceDB**: Storage backend migrated from LanceDB (~845-file directory) to a single SQLite file using [sqlite-vec](https://github.com/asg017/sqlite-vec) for vector search and FTS5 for full-text search. Dependencies reduced from 223MB to 24KB.
+- **Bun runtime required**: Node.js support removed. The server now requires [Bun](https://bun.sh/) for `bun:sqlite` native SQLite bindings. The `dist/` build step and `@hono/node-server` dependency have been removed.
+- **Rename checkpoint to waypoint**: All "checkpoint" terminology renamed to "waypoint"
+  - MCP tools: `store_checkpoint` → `set_waypoint`, `get_checkpoint` → `get_waypoint`
+  - HTTP route: `GET /checkpoint` → `GET /waypoint`
+  - Metadata type field: `"checkpoint"` → `"waypoint"`
+  - Existing waypoint data (stored at UUID zero) remains compatible
+
+### Added
+- **`migrate` subcommand**: Run `vector-memory-mcp migrate` to convert LanceDB data to SQLite. Auto-detects legacy data at startup and prompts for migration.
+- **Lockfile-based port discovery**: Server writes `.vector-memory/server.lock` with `{port, pid}` on startup, enabling hooks to discover the correct port in multi-session scenarios.
 
 ### Changed
-- **Rename checkpoint to waypoint**: All "checkpoint" terminology renamed to "waypoint" throughout the codebase
-  - MCP tools: `store_checkpoint` -> `set_waypoint`, `get_checkpoint` -> `get_waypoint`
-  - Functions: `storeCheckpoint()` -> `setWaypoint()`, `getLatestCheckpoint()` -> `getLatestWaypoint()`
-  - Handlers: `handleStoreCheckpoint()` -> `handleSetWaypoint()`, `handleGetCheckpoint()` -> `handleGetWaypoint()`
-  - HTTP route: `GET /checkpoint` -> `GET /waypoint`
-  - Metadata type field: `"checkpoint"` -> `"waypoint"`
-  - **Migration note**: Existing waypoint data (stored at UUID zero) remains compatible, but client code using old tool names must be updated
+- **Direct TypeScript execution**: Package now runs `.ts` source directly via Bun instead of compiling to `dist/`. Simplifies development and eliminates stale-build issues.
+- **Hybrid search rewritten**: KNN (sqlite-vec) + FTS5 queries with manual Reciprocal Rank Fusion (k=60) replace LanceDB's built-in reranker chain. Service layer unchanged.
+
+### Removed
+- `dist/` build pipeline (`tsc` compilation, `prebuild`, `build` scripts)
+- `@hono/node-server` dependency and Node.js HTTP fallback code path
+- LanceDB schema files (`src/db/schema.ts`, `conversation.schema.ts`, `lancedb-utils.ts`)
+
+### Migration
+Users upgrading from 1.x with existing data should run:
+```bash
+vector-memory-mcp migrate
+mv .vector-memory/memories.db .vector-memory/memories.db.lance-backup
+mv .vector-memory/memories.db.sqlite .vector-memory/memories.db
+```
+
+LanceDB (`@lancedb/lancedb`, `apache-arrow`) ships as a production dependency in 2.0 solely to support migration. It will be removed in the next major version.
 
 ## [1.1.0] - 2026-03-11
 
@@ -133,6 +156,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial MCP server implementation
 - Basic project structure
 
+[2.0.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.0.2...v1.1.0
 [0.8.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v0.5.0...v0.8.0
 [0.5.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v0.4.0...v0.5.0

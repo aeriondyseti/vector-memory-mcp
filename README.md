@@ -2,7 +2,7 @@
 
 > Semantic memory storage for AI assistants. Store decisions, patterns, and context that persists across sessions.
 
-A local-first MCP server that provides vector-based memory storage. Uses local embeddings and LanceDB for fast, private semantic search.
+A local-first MCP server that provides vector-based memory storage. Uses local embeddings and SQLite with sqlite-vec for fast, private semantic search — all in a single file.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![npm version](https://img.shields.io/npm/v/@aeriondyseti/vector-memory-mcp.svg)](https://www.npmjs.com/package/@aeriondyseti/vector-memory-mcp)
@@ -11,10 +11,11 @@ A local-first MCP server that provides vector-based memory storage. Uses local e
 
 ## Features
 
-- **Local & Private** - All embeddings generated locally, data stored in local LanceDB
-- **Semantic Search** - Vector similarity search with configurable scoring
+- **Local & Private** - All embeddings generated locally, data stored in a single SQLite file
+- **Semantic Search** - Hybrid vector + full-text search with intent-based ranking
 - **Batch Operations** - Store, update, delete, and retrieve multiple memories at once
 - **Session Waypoints** - Save and restore project context between sessions
+- **Conversation History** - Index and search Claude Code session transcripts
 - **MCP Native** - Standard protocol, works with any MCP-compatible client
 
 ---
@@ -113,6 +114,23 @@ CLI flags:
 
 ---
 
+## Migrating from 1.x (LanceDB)
+
+Version 2.0 replaced LanceDB with SQLite (sqlite-vec) for storage. If you have existing data from 1.x, the server will detect it automatically and prompt you to migrate:
+
+```bash
+vector-memory-mcp migrate
+```
+
+This reads your LanceDB directory, writes a new SQLite file, and prints instructions to swap them. Your original data is preserved until you manually remove it.
+
+**What changed:**
+- Storage: LanceDB directory (~845 files) → single `.db` file
+- Dependencies: 223MB (`@lancedb/lancedb` + `apache-arrow`) → 24KB (`sqlite-vec`)
+- Runtime: Node.js support dropped, Bun required (for `bun:sqlite`)
+
+---
+
 ## Development
 
 ```bash
@@ -139,4 +157,4 @@ MIT - see [LICENSE](LICENSE)
 
 ---
 
-Built with [MCP SDK](https://github.com/modelcontextprotocol/typescript-sdk), [LanceDB](https://lancedb.com/), and [Transformers.js](https://huggingface.co/docs/transformers.js)
+Built with [MCP SDK](https://github.com/modelcontextprotocol/typescript-sdk), [sqlite-vec](https://github.com/asg017/sqlite-vec), and [Transformers.js](https://huggingface.co/docs/transformers.js)

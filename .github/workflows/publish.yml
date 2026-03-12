@@ -68,8 +68,8 @@ jobs:
       - name: Run tests
         run: bun run test
 
-      - name: Build
-        run: bun run build
+      - name: Typecheck
+        run: bun run typecheck
 
       - name: Check npm version
         run: npm --version

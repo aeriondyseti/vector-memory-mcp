@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { serve as nodeServe } from "@hono/node-server";
 import { createServer } from "net";
 import { writeFileSync, mkdirSync, unlinkSync } from "fs";
 import { join } from "path";
@@ -9,9 +8,6 @@ import type { Config } from "../config/index.js";
 import { isDeleted } from "../types/memory.js";
 import { createMcpRoutes } from "./mcp-transport.js";
 import type { Memory, SearchIntent } from "../types/memory.js";
-
-// Detect runtime
-const isBun = typeof globalThis.Bun !== "undefined";
 
 /**
  * Check if a port is available by attempting to bind to it
@@ -273,39 +269,19 @@ export async function startHttpServer(
   // Find an available port (uses configured port if available, otherwise picks a random one)
   const actualPort = await findAvailablePort(config.httpPort, config.httpHost);
 
-  if (isBun) {
-    // Use Bun's native server
-    const server = Bun.serve({
-      port: actualPort,
-      hostname: config.httpHost,
-      fetch: app.fetch,
-    });
+  const server = Bun.serve({
+    port: actualPort,
+    hostname: config.httpHost,
+    fetch: app.fetch,
+  });
 
-    writeLockfile(actualPort);
-    console.error(
-      `[vector-memory-mcp] HTTP server listening on http://${config.httpHost}:${actualPort}`
-    );
+  writeLockfile(actualPort);
+  console.error(
+    `[vector-memory-mcp] HTTP server listening on http://${config.httpHost}:${actualPort}`
+  );
 
-    return {
-      stop: () => { removeLockfile(); server.stop(); },
-      port: actualPort,
-    };
-  } else {
-    // Use Node.js server via @hono/node-server
-    const server = nodeServe({
-      fetch: app.fetch,
-      port: actualPort,
-      hostname: config.httpHost,
-    });
-
-    writeLockfile(actualPort);
-    console.error(
-      `[vector-memory-mcp] HTTP server listening on http://${config.httpHost}:${actualPort}`
-    );
-
-    return {
-      stop: () => { removeLockfile(); server.close(); },
-      port: actualPort,
-    };
-  }
+  return {
+    stop: () => { removeLockfile(); server.stop(); },
+    port: actualPort,
+  };
 }
