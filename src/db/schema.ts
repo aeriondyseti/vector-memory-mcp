@@ -20,7 +20,7 @@ export const vectorField = () =>
   );
 
 export const timestampField = (name: string, nullable = false) =>
-  new Field(name, new Timestamp(TimeUnit.MILLISECOND), nullable);
+  new Field(name, new Timestamp(TimeUnit.MILLISECOND, "UTC"), nullable);
 
 export const TABLE_NAME = "memories";
 

@@ -22,7 +22,7 @@ export const conversationSchema = new Schema([
   new Field("metadata", new Utf8(), false), // JSON string
   new Field(
     "created_at",
-    new Timestamp(TimeUnit.MILLISECOND),
+    new Timestamp(TimeUnit.MILLISECOND, "UTC"),
     false
   ),
   new Field("session_id", new Utf8(), false),

@@ -28,6 +28,23 @@ export function arrowVectorToArray(value: unknown): number[] {
 }
 
 /**
+ * Converts an Arrow Timestamp value to a JavaScript Date.
+ *
+ * LanceDB/Arrow can return timestamp column values as:
+ *   - number  (most common: raw int64 ms since epoch, fits in JS float64)
+ *   - BigInt  (large int64 values that overflow float64 — rare for timestamps)
+ *   - Date    (hypothetical: some future Arrow-JS build may decode for us)
+ *
+ * Doing `new Date(row.ts as number)` is a TypeScript lie that silently breaks
+ * when Arrow returns a BigInt. This helper handles all three cases safely.
+ */
+export function arrowTimestampToDate(value: unknown): Date {
+  if (value instanceof Date) return new Date(value.getTime());
+  if (typeof value === "bigint") return new Date(Number(value));
+  return new Date(value as number);
+}
+
+/**
  * Safely parse a JSON string into an object, returning an empty object on failure.
  */
 export function safeParseJsonObject(raw: string): Record<string, unknown> {

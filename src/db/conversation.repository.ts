@@ -4,6 +4,7 @@ import {
   CONVERSATION_TABLE_NAME,
   conversationSchema,
 } from "./conversation.schema.js";
+import { arrowTimestampToDate } from "./lancedb-utils.js";
 import type {
   ConversationHybridRow,
   HistoryFilters,
@@ -49,7 +50,7 @@ export class ConversationRepository {
       id: row.id as string,
       content: row.content as string,
       metadata,
-      createdAt: new Date(row.created_at as number),
+      createdAt: arrowTimestampToDate(row.created_at),
       rrfScore: (row._relevance_score as number) ?? 0,
     };
   }
