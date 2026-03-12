@@ -9,12 +9,13 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'npm tag (dev or latest)'
+        description: 'npm tag (dev, rc, or latest)'
         required: true
         default: 'dev'
         type: choice
         options:
           - dev
+          - rc
           - latest
 
 permissions:
@@ -33,7 +34,9 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref_name }}" =~ -dev|-alpha|-beta|-rc ]]; then
+          elif [[ "${{ github.ref_name }}" =~ -rc ]]; then
+            echo "tag=rc" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref_name }}" =~ -dev|-alpha|-beta ]]; then
             echo "tag=dev" >> $GITHUB_OUTPUT
           else
             echo "tag=latest" >> $GITHUB_OUTPUT
