@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve as nodeServe } from "@hono/node-server";
 import { createServer } from "net";
+import { writeFileSync, mkdirSync, unlinkSync } from "fs";
+import { join } from "path";
 import type { MemoryService } from "../services/memory.service.js";
 import type { Config } from "../config/index.js";
 import { isDeleted } from "../types/memory.js";
@@ -54,6 +56,31 @@ async function findAvailablePort(
     });
     server.listen(0, host);
   });
+}
+
+/**
+ * Write a lockfile so hooks can discover which port this server bound to.
+ * Written atomically after the HTTP server successfully binds.
+ */
+function writeLockfile(port: number): void {
+  const dir = join(process.cwd(), ".vector-memory");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "server.lock"),
+    JSON.stringify({ port, pid: process.pid }),
+    "utf8"
+  );
+}
+
+/**
+ * Remove the lockfile on clean shutdown so stale files don't linger.
+ */
+export function removeLockfile(): void {
+  try {
+    unlinkSync(join(process.cwd(), ".vector-memory", "server.lock"));
+  } catch {
+    // already gone — fine
+  }
 }
 
 export interface HttpServerOptions {
@@ -254,12 +281,13 @@ export async function startHttpServer(
       fetch: app.fetch,
     });
 
+    writeLockfile(actualPort);
     console.error(
       `[vector-memory-mcp] HTTP server listening on http://${config.httpHost}:${actualPort}`
     );
 
     return {
-      stop: () => server.stop(),
+      stop: () => { removeLockfile(); server.stop(); },
       port: actualPort,
     };
   } else {
@@ -270,12 +298,13 @@ export async function startHttpServer(
       hostname: config.httpHost,
     });
 
+    writeLockfile(actualPort);
     console.error(
       `[vector-memory-mcp] HTTP server listening on http://${config.httpHost}:${actualPort}`
     );
 
     return {
-      stop: () => server.close(),
+      stop: () => { removeLockfile(); server.close(); },
       port: actualPort,
     };
   }

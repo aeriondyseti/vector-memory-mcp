@@ -28,7 +28,7 @@ export class ConversationRepository {
 
   constructor(private db: lancedb.Connection) {}
 
-  private getTable(): Promise<Table> {
+  private async getTable(): Promise<Table> {
     if (!this.tablePromise) {
       this.tablePromise = getOrCreateTable(
         this.db,
@@ -39,7 +39,10 @@ export class ConversationRepository {
         throw err;
       });
     }
-    return this.tablePromise;
+    const table = await this.tablePromise;
+    // Refresh to see writes from other processes sharing this DB
+    await table.checkoutLatest();
+    return table;
   }
 
   private rowToConversationHybridRow(

@@ -8,7 +8,7 @@ import { EmbeddingsService } from "./services/embeddings.service.js";
 import { MemoryService } from "./services/memory.service.js";
 import { ConversationHistoryService } from "./services/conversation.service.js";
 import { startServer } from "./mcp/server.js";
-import { startHttpServer } from "./http/server.js";
+import { startHttpServer, removeLockfile } from "./http/server.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -51,6 +51,7 @@ async function main(): Promise<void> {
   // Graceful shutdown handler
   const shutdown = () => {
     console.error("[vector-memory-mcp] Shutting down...");
+    removeLockfile();
     if (httpStop) httpStop();
     db.close();
     process.exit(0);

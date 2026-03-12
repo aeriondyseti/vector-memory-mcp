@@ -26,6 +26,8 @@ export class MemoryRepository {
     const names = await this.db.tableNames();
     if (names.includes(TABLE_NAME)) {
       const table = await this.db.openTable(TABLE_NAME);
+      // Refresh to see writes from other processes sharing this DB
+      await table.checkoutLatest();
       await this.ensureMigration(table);
       return table;
     }
