@@ -8,10 +8,11 @@ import {
 import { tools } from "./tools.js";
 import { handleToolCall } from "./handlers.js";
 import type { MemoryService } from "../services/memory.service.js";
+import { VERSION } from "../config/index.js";
 
 export function createServer(memoryService: MemoryService): Server {
   const server = new Server(
-    { name: "vector-memory-mcp", version: "0.6.0" },
+    { name: "vector-memory-mcp", version: VERSION },
     { capabilities: { tools: {} } }
   );
 
