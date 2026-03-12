@@ -17,7 +17,8 @@ import { tmpdir } from "os";
 const isCI = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true";
 const describeE2E = isCI ? describe.skip : describe;
 
-const SERVER_PATH = join(import.meta.dir, "../dist/src/index.js");
+// Use source directly with bun — bun:sqlite requires the Bun runtime
+const SERVER_PATH = join(import.meta.dir, "../src/index.ts");
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -140,7 +141,7 @@ describeE2E("E2E: Stdio Transport", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-e2e-stdio-"));
     const dbPath = join(tmpDir, "test.db");
 
-    proc = spawn(["node", SERVER_PATH, "--db-file", dbPath, "--no-http"], {
+    proc = spawn(["bun", "run", SERVER_PATH, "--db-file", dbPath, "--no-http"], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -230,7 +231,7 @@ describeE2E("E2E: HTTP Transport", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-e2e-http-"));
     dbPath = join(tmpDir, "test.db");
 
-    proc = spawn(["node", SERVER_PATH, "--db-file", dbPath, "--port", String(port)], {
+    proc = spawn(["bun", "run", SERVER_PATH, "--db-file", dbPath, "--port", String(port)], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",

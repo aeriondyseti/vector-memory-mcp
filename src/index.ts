@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 import { loadConfig, parseCliArgs } from "./config/index.js";
 import { connectToDatabase } from "./db/connection.js";
@@ -9,6 +9,18 @@ import { MemoryService } from "./services/memory.service.js";
 import { ConversationHistoryService } from "./services/conversation.service.js";
 import { startServer } from "./mcp/server.js";
 import { startHttpServer, removeLockfile } from "./http/server.js";
+import { isLanceDbDirectory, migrate, formatMigrationSummary } from "./migration.js";
+
+async function runMigrate(args: string[]): Promise<void> {
+  const overrides = parseCliArgs(args.slice(1)); // skip "migrate"
+  const config = loadConfig(overrides);
+
+  const source = config.dbPath;
+  const target = source + ".sqlite";
+
+  const result = await migrate({ source, target });
+  console.error(formatMigrationSummary(source, target, result));
+}
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -20,9 +32,26 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Check for migrate command
+  if (args[0] === "migrate") {
+    await runMigrate(args);
+    return;
+  }
+
   // Parse CLI args and load config
   const overrides = parseCliArgs(args);
   const config = loadConfig(overrides);
+
+  // Detect legacy LanceDB data and warn
+  if (isLanceDbDirectory(config.dbPath)) {
+    console.error(
+      `[vector-memory-mcp] ⚠️  Legacy LanceDB data detected at ${config.dbPath}\n` +
+      `  Your data must be migrated to the new SQLite format.\n` +
+      `  Run: vector-memory-mcp migrate\n` +
+      `  Or:  bun run src/index.ts migrate\n`
+    );
+    process.exit(1);
+  }
 
   // Initialize database
   const db = connectToDatabase(config.dbPath);

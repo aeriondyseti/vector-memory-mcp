@@ -3,12 +3,11 @@
   "version": "1.1.0",
   "description": "A zero-configuration RAG memory server for MCP clients",
   "type": "module",
-  "main": "dist/src/index.js",
+  "main": "src/index.ts",
   "bin": {
-    "vector-memory-mcp": "dist/src/index.js"
+    "vector-memory-mcp": "src/index.ts"
   },
   "files": [
-    "dist",
     "src",
     "scripts",
     "README.md",
@@ -24,11 +23,8 @@
   },
   "homepage": "https://github.com/aeriondyseti/vector-memory-mcp#readme",
   "scripts": {
-    "start": "node dist/src/index.js",
-    "start:bun": "bun run src/index.ts",
+    "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
-    "build": "tsc",
-    "prebuild": "rm -rf dist",
     "typecheck": "bunx tsc --noEmit",
     "test": "bun run scripts/test-runner.ts",
     "test:raw": "bun test --preload ./tests/preload.ts",
@@ -38,7 +34,7 @@
     "test:preload": "bun run tests/preload.ts",
     "warmup": "bun run scripts/warmup.ts",
     "postinstall": "bun run scripts/warmup.ts",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bunx tsc --noEmit"
   },
   "keywords": [
     "mcp",
@@ -51,15 +47,15 @@
   "dependencies": {
     "@hono/node-server": "^1.19.9",
     "@huggingface/transformers": "^3.8.0",
+    "@lancedb/lancedb": "^0.26.2",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "apache-arrow": "^21.1.0",
     "arg": "^5.0.2",
     "hono": "^4.11.3",
     "sqlite-vec": "^0.1.6"
   },
   "devDependencies": {
-    "@lancedb/lancedb": "^0.26.2",
     "@types/bun": "latest",
-    "apache-arrow": "^21.1.0",
     "typescript": "^5.0.0"
   },
   "trustedDependencies": [
