@@ -138,7 +138,7 @@ describeE2E("E2E: Stdio Transport", () => {
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-e2e-stdio-"));
-    const dbPath = join(tmpDir, "test.lancedb");
+    const dbPath = join(tmpDir, "test.db");
 
     proc = spawn(["node", SERVER_PATH, "--db-file", dbPath, "--no-http"], {
       stdin: "pipe",
@@ -228,7 +228,7 @@ describeE2E("E2E: HTTP Transport", () => {
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-e2e-http-"));
-    dbPath = join(tmpDir, "test.lancedb");
+    dbPath = join(tmpDir, "test.db");
 
     proc = spawn(["node", SERVER_PATH, "--db-file", dbPath, "--port", String(port)], {
       stdin: "pipe",

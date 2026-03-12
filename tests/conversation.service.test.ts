@@ -77,7 +77,7 @@ describe("ConversationHistoryService", () => {
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "conv-service-test-"));
-    dbPath = join(tmpDir, "test.lancedb");
+    dbPath = join(tmpDir, "test.db");
   });
 
   afterEach(() => {

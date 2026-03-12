@@ -2,14 +2,14 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import * as lancedb from "@lancedb/lancedb";
+import type { Database } from "bun:sqlite";
 import { connectToDatabase } from "../src/db/connection";
 import { MemoryRepository } from "../src/db/memory.repository";
 import { EmbeddingsService } from "../src/services/embeddings.service";
 import { MemoryService } from "../src/services/memory.service";
 
 describe("MemoryService - Access Tracking", () => {
-  let db: lancedb.Connection;
+  let db: Database;
   let repository: MemoryRepository;
   let embeddings: EmbeddingsService;
   let service: MemoryService;
@@ -17,8 +17,8 @@ describe("MemoryService - Access Tracking", () => {
 
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-mcp-test-access-"));
-    const dbPath = join(tmpDir, "test.lancedb");
-    db = await connectToDatabase(dbPath);
+    const dbPath = join(tmpDir, "test.db");
+    db = connectToDatabase(dbPath);
     repository = new MemoryRepository(db);
     embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     service = new MemoryService(repository, embeddings);

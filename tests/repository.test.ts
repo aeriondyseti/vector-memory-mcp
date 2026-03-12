@@ -2,21 +2,21 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import * as lancedb from "@lancedb/lancedb";
+import type { Database } from "bun:sqlite";
 import { connectToDatabase } from "../src/db/connection";
 import { MemoryRepository } from "../src/db/memory.repository";
 import { fakeEmbedding } from "./utils/test-helpers";
 import type { Memory } from "../src/types/memory";
 
 describe("MemoryRepository - Hybrid Search", () => {
-  let db: lancedb.Connection;
+  let db: Database;
   let repository: MemoryRepository;
   let tmpDir: string;
 
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-repo-test-"));
-    const dbPath = join(tmpDir, "test.lancedb");
-    db = await connectToDatabase(dbPath);
+    const dbPath = join(tmpDir, "test.db");
+    db = connectToDatabase(dbPath);
     repository = new MemoryRepository(db);
   });
 

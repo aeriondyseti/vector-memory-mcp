@@ -25,7 +25,7 @@ async function main(): Promise<void> {
   const config = loadConfig(overrides);
 
   // Initialize database
-  const db = await connectToDatabase(config.dbPath);
+  const db = connectToDatabase(config.dbPath);
 
   // Initialize layers
   const repository = new MemoryRepository(db);

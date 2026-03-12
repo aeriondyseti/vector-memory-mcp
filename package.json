@@ -45,27 +45,23 @@
     "memory",
     "rag",
     "embeddings",
-    "lancedb"
+    "sqlite-vec"
   ],
   "license": "MIT",
   "dependencies": {
     "@hono/node-server": "^1.19.9",
     "@huggingface/transformers": "^3.8.0",
-    "@lancedb/lancedb": "^0.22.3",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "arg": "^5.0.2",
-    "hono": "^4.11.3"
+    "hono": "^4.11.3",
+    "sqlite-vec": "^0.1.6"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "^5.0.0"
   },
   "trustedDependencies": [
-    "onnxruntime-node",
     "protobufjs",
     "sharp"
-  ],
-  "overrides": {
-    "onnxruntime-node": "1.23.2"
-  }
+  ]
 }

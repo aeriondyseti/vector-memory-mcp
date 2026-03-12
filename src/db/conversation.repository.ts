@@ -1,62 +1,18 @@
-import * as lancedb from "@lancedb/lancedb";
-import { type Table } from "@lancedb/lancedb";
-import {
-  CONVERSATION_TABLE_NAME,
-  conversationSchema,
-} from "./conversation.schema.js";
-import { arrowTimestampToDate } from "./lancedb-utils.js";
+import type { Database } from "bun:sqlite";
 import type {
   ConversationHybridRow,
   HistoryFilters,
 } from "../types/conversation.js";
 import {
-  getOrCreateTable,
-  createFtsMutex,
-  createRerankerMutex,
-  escapeSql,
+  serializeVector,
   safeParseJsonObject,
-} from "./lancedb-utils.js";
+  sanitizeFtsQuery,
+  hybridRRF,
+  topByRRF,
+} from "./sqlite-utils.js";
 
 export class ConversationRepository {
-  private tablePromise: Promise<Table> | null = null;
-
-  // FTS index mutex — recreated after data mutations to force re-check
-  private ensureFtsIndex = createFtsMutex(() => this.getTable());
-
-  // Cached reranker — k=60 is constant, no need to recreate per search
-  private getReranker = createRerankerMutex();
-
-  constructor(private db: lancedb.Connection) {}
-
-  private async getTable(): Promise<Table> {
-    if (!this.tablePromise) {
-      this.tablePromise = getOrCreateTable(
-        this.db,
-        CONVERSATION_TABLE_NAME,
-        conversationSchema,
-      ).catch((err) => {
-        this.tablePromise = null;
-        throw err;
-      });
-    }
-    const table = await this.tablePromise;
-    // Refresh to see writes from other processes sharing this DB
-    await table.checkoutLatest();
-    return table;
-  }
-
-  private rowToConversationHybridRow(
-    row: Record<string, unknown>
-  ): ConversationHybridRow {
-    const metadata = safeParseJsonObject(row.metadata as string);
-    return {
-      id: row.id as string,
-      content: row.content as string,
-      metadata,
-      createdAt: arrowTimestampToDate(row.created_at),
-      rrfScore: (row._relevance_score as number) ?? 0,
-    };
-  }
+  constructor(private db: Database) {}
 
   async insertBatch(
     rows: Array<{
@@ -73,16 +29,79 @@ export class ConversationRepository {
     }>
   ): Promise<void> {
     if (rows.length === 0) return;
-    const table = await this.getTable();
-    await table.add(rows);
-    // Reset FTS mutex so index existence is re-verified after new data
-    this.ensureFtsIndex = createFtsMutex(() => this.getTable());
+
+    const insertMain = this.db.prepare(
+      `INSERT OR REPLACE INTO conversation_history
+        (id, content, metadata, created_at, session_id, role, message_index_start, message_index_end, project)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const deleteVec = this.db.prepare(
+      `DELETE FROM conversation_history_vec WHERE id = ?`
+    );
+    const insertVec = this.db.prepare(
+      `INSERT INTO conversation_history_vec (id, vector) VALUES (?, ?)`
+    );
+    const deleteFts = this.db.prepare(
+      `DELETE FROM conversation_history_fts WHERE id = ?`
+    );
+    const insertFts = this.db.prepare(
+      `INSERT INTO conversation_history_fts (id, content) VALUES (?, ?)`
+    );
+
+    const tx = this.db.transaction(() => {
+      for (const row of rows) {
+        insertMain.run(
+          row.id,
+          row.content,
+          row.metadata,
+          row.created_at,
+          row.session_id,
+          row.role,
+          row.message_index_start,
+          row.message_index_end,
+          row.project
+        );
+        deleteVec.run(row.id);
+        insertVec.run(row.id, serializeVector(row.vector));
+        deleteFts.run(row.id);
+        insertFts.run(row.id, row.content);
+      }
+    });
+
+    tx();
   }
 
   async deleteBySessionId(sessionId: string): Promise<void> {
-    const table = await this.getTable();
-    await table.delete(`session_id = '${escapeSql(sessionId)}'`);
-    this.ensureFtsIndex = createFtsMutex(() => this.getTable());
+    const tx = this.db.transaction(() => {
+      const idRows = this.db
+        .prepare(
+          `SELECT id FROM conversation_history WHERE session_id = ?`
+        )
+        .all(sessionId) as Array<{ id: string }>;
+
+      if (idRows.length === 0) return;
+
+      const ids = idRows.map((r) => r.id);
+      const placeholders = ids.map(() => "?").join(", ");
+
+      this.db
+        .prepare(
+          `DELETE FROM conversation_history_vec WHERE id IN (${placeholders})`
+        )
+        .run(...ids);
+
+      this.db
+        .prepare(
+          `DELETE FROM conversation_history_fts WHERE id IN (${placeholders})`
+        )
+        .run(...ids);
+
+      this.db
+        .prepare(`DELETE FROM conversation_history WHERE session_id = ?`)
+        .run(sessionId);
+    });
+
+    tx();
   }
 
   async findHybrid(
@@ -91,34 +110,97 @@ export class ConversationRepository {
     limit: number,
     filters?: HistoryFilters
   ): Promise<ConversationHybridRow[]> {
-    await this.ensureFtsIndex();
-    const table = await this.getTable();
-    const reranker = await this.getReranker();
+    const candidateCount = limit * 3;
 
-    let queryBuilder = table
-      .query()
-      .nearestTo(embedding)
-      .fullTextSearch(query)
-      .rerank(reranker);
+    // Vector KNN search
+    const vecResults = this.db
+      .prepare(
+        `SELECT id FROM conversation_history_vec
+         WHERE vector MATCH ? AND k = ?
+         ORDER BY distance`
+      )
+      .all(serializeVector(embedding), candidateCount) as Array<{ id: string }>;
 
+    // FTS5 search
+    const ftsQuery = sanitizeFtsQuery(query);
+    const ftsResults = this.db
+      .prepare(
+        `SELECT id FROM conversation_history_fts
+         WHERE conversation_history_fts MATCH ?
+         ORDER BY rank
+         LIMIT ?`
+      )
+      .all(ftsQuery, candidateCount) as Array<{ id: string }>;
+
+    // Compute RRF scores and get top ids
+    const rrfScores = hybridRRF(vecResults, ftsResults);
+    const topIds = topByRRF(rrfScores, limit);
+
+    if (topIds.length === 0) return [];
+
+    // Build filtered query for full rows
     const conditions: string[] = [];
-    if (filters?.sessionId)
-      conditions.push(`session_id = '${escapeSql(filters.sessionId)}'`);
-    if (filters?.role) conditions.push(`role = '${escapeSql(filters.role)}'`);
-    if (filters?.project)
-      conditions.push(`project = '${escapeSql(filters.project)}'`);
-    if (filters?.after)
-      conditions.push(`created_at > ${filters.after.getTime()}`);
-    if (filters?.before)
-      conditions.push(`created_at < ${filters.before.getTime()}`);
+    const params: (string | number)[] = [];
 
-    if (conditions.length > 0) {
-      queryBuilder = queryBuilder.where(conditions.join(" AND "));
+    // IN clause for top ids
+    const placeholders = topIds.map(() => "?").join(", ");
+    conditions.push(`id IN (${placeholders})`);
+    params.push(...topIds);
+
+    // Apply filters
+    if (filters?.sessionId) {
+      conditions.push("session_id = ?");
+      params.push(filters.sessionId);
+    }
+    if (filters?.role) {
+      conditions.push("role = ?");
+      params.push(filters.role);
+    }
+    if (filters?.project) {
+      conditions.push("project = ?");
+      params.push(filters.project);
+    }
+    if (filters?.after) {
+      conditions.push("created_at > ?");
+      params.push(filters.after.getTime());
+    }
+    if (filters?.before) {
+      conditions.push("created_at < ?");
+      params.push(filters.before.getTime());
     }
 
-    const results = await queryBuilder.limit(limit).toArray();
-    return results.map((row) =>
-      this.rowToConversationHybridRow(row as Record<string, unknown>)
-    );
+    const whereClause = conditions.join(" AND ");
+
+    const fullRows = this.db
+      .prepare(
+        `SELECT id, content, metadata, created_at, session_id, role,
+                message_index_start, message_index_end, project
+         FROM conversation_history
+         WHERE ${whereClause}`
+      )
+      .all(...params) as Array<{
+      id: string;
+      content: string;
+      metadata: string;
+      created_at: number;
+      session_id: string;
+      role: string;
+      message_index_start: number;
+      message_index_end: number;
+      project: string;
+    }>;
+
+    // Build a lookup for ordering by RRF score
+    const scoreMap = new Map(topIds.map((id) => [id, rrfScores.get(id)!]));
+
+    return fullRows
+      .map((row) => ({
+        id: row.id,
+        content: row.content,
+        metadata: safeParseJsonObject(row.metadata),
+        createdAt: new Date(row.created_at),
+        rrfScore: scoreMap.get(row.id) ?? 0,
+      }))
+      .sort((a, b) => b.rrfScore - a.rrfScore);
   }
 }

@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach, mock } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import * as lancedb from "@lancedb/lancedb";
+import type { Database } from "bun:sqlite";
 import { tools } from "../src/mcp/tools";
 import {
   handleToolCall,
@@ -27,14 +27,14 @@ import type { ConversationHistoryService } from "../src/services/conversation.se
 import type { IndexedSession, ConversationHybridRow } from "../src/types/conversation";
 
 describe("mcp", () => {
-  let db: lancedb.Connection;
+  let db: Database;
   let service: MemoryService;
   let tmpDir: string;
 
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-mcp-test-"));
-    const dbPath = join(tmpDir, "test.lancedb");
-    db = await connectToDatabase(dbPath);
+    const dbPath = join(tmpDir, "test.db");
+    db = connectToDatabase(dbPath);
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     service = new MemoryService(repository, embeddings);

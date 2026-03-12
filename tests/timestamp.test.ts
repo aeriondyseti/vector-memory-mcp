@@ -12,7 +12,7 @@ import { describe, expect, test, beforeEach, afterEach, beforeAll, afterAll } fr
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import * as lancedb from "@lancedb/lancedb";
+import type { Database } from "bun:sqlite";
 import { connectToDatabase } from "../src/db/connection";
 import { MemoryRepository } from "../src/db/memory.repository";
 import { EmbeddingsService } from "../src/services/embeddings.service";
@@ -27,7 +27,7 @@ const KNOWN_UTC_MS = new Date("2026-01-15T09:30:00.000Z").getTime();
 const KNOWN_UTC_ISO = "2026-01-15T09:30:00.000Z";
 
 describe("Timestamp round-trip — LanceDB UTC preservation", () => {
-  let db: lancedb.Connection;
+  let db: Database;
   let repository: MemoryRepository;
   let tmpDir: string;
 
@@ -46,7 +46,7 @@ describe("Timestamp round-trip — LanceDB UTC preservation", () => {
 
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-ts-test-"));
-    db = await connectToDatabase(join(tmpDir, "test.lancedb"));
+    db = connectToDatabase(join(tmpDir, "test.db"));
     repository = new MemoryRepository(db);
   });
 
@@ -150,11 +150,11 @@ describe("GET /waypoint — updatedAt UTC serialization", () => {
 
   beforeAll(async () => {
     httpTmpDir = mkdtempSync(join(tmpdir(), "vector-memory-http-ts-test-"));
-    const db = await connectToDatabase(join(httpTmpDir, "test.lancedb"));
+    const db = connectToDatabase(join(httpTmpDir, "test.db"));
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     memoryService = new MemoryService(repository, embeddings);
-    app = createHttpApp(memoryService, makeHttpConfig(join(httpTmpDir, "test.lancedb")));
+    app = createHttpApp(memoryService, makeHttpConfig(join(httpTmpDir, "test.db")));
   });
 
   afterAll(() => {

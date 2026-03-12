@@ -2,16 +2,15 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import * as lancedb from "@lancedb/lancedb";
+import type { Database } from "bun:sqlite";
 import { connectToDatabase } from "../src/db/connection";
 import { MemoryRepository } from "../src/db/memory.repository";
 import { EmbeddingsService } from "../src/services/embeddings.service";
 import { MemoryService } from "../src/services/memory.service";
 import { DELETED_TOMBSTONE } from "../src/types/memory";
-import { TABLE_NAME } from "../src/db/schema";
 
 describe("MemoryService", () => {
-  let db: lancedb.Connection;
+  let db: Database;
   let repository: MemoryRepository;
   let embeddings: EmbeddingsService;
   let service: MemoryService;
@@ -20,8 +19,8 @@ describe("MemoryService", () => {
 
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-mcp-test-"));
-    dbPath = join(tmpDir, "test.lancedb");
-    db = await connectToDatabase(dbPath);
+    dbPath = join(tmpDir, "test.db");
+    db = connectToDatabase(dbPath);
     repository = new MemoryRepository(db);
     embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     service = new MemoryService(repository, embeddings);
@@ -32,15 +31,11 @@ describe("MemoryService", () => {
   });
 
   describe("createDatabase", () => {
-    test("creates database directory", async () => {
+    test("creates database file", async () => {
       // connectToDatabase was called in beforeEach
-      const file = Bun.file(dbPath);
-      // LanceDB creates a directory
-      expect(await file.exists()).toBe(false); // It's a directory, not a file, wait Bun.file checks files?
-      // Check directory existence using fs
       const { existsSync, statSync } = await import("fs");
       expect(existsSync(dbPath)).toBe(true);
-      expect(statSync(dbPath).isDirectory()).toBe(true);
+      expect(statSync(dbPath).isFile()).toBe(true);
     });
   });
 
@@ -213,14 +208,14 @@ describe("MemoryService", () => {
 });
 
 describe("MemoryRepository", () => {
-  let db: lancedb.Connection;
+  let db: Database;
   let repository: MemoryRepository;
   let tmpDir: string;
 
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-mcp-test-"));
-    const dbPath = join(tmpDir, "test.lancedb");
-    db = await connectToDatabase(dbPath);
+    const dbPath = join(tmpDir, "test.db");
+    db = connectToDatabase(dbPath);
     repository = new MemoryRepository(db);
   });
 

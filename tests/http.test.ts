@@ -37,9 +37,9 @@ describe("HTTP API", () => {
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-http-test-"));
-    const dbPath = join(tmpDir, "test.lancedb");
+    const dbPath = join(tmpDir, "test.db");
     testConfig = createTestConfig(dbPath);
-    const db = await connectToDatabase(dbPath);
+    const db = connectToDatabase(dbPath);
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     memoryService = new MemoryService(repository, embeddings);
@@ -262,9 +262,9 @@ describe("MCP Transport", () => {
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-mcp-transport-test-"));
-    const dbPath = join(tmpDir, "test.lancedb");
+    const dbPath = join(tmpDir, "test.db");
     const testConfig = createTestConfig(dbPath);
-    const db = await connectToDatabase(dbPath);
+    const db = connectToDatabase(dbPath);
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     memoryService = new MemoryService(repository, embeddings);
@@ -474,9 +474,9 @@ describe("HTTP API Integration", () => {
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-http-integration-"));
-    const dbPath = join(tmpDir, "test.lancedb");
+    const dbPath = join(tmpDir, "test.db");
     const testConfig = createTestConfig(dbPath);
-    const db = await connectToDatabase(dbPath);
+    const db = connectToDatabase(dbPath);
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     memoryService = new MemoryService(repository, embeddings);
@@ -544,8 +544,8 @@ describe("startHttpServer", () => {
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-start-test-"));
-    const dbPath = join(tmpDir, "test.lancedb");
-    const db = await connectToDatabase(dbPath);
+    const dbPath = join(tmpDir, "test.db");
+    const db = connectToDatabase(dbPath);
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     memoryService = new MemoryService(repository, embeddings);
@@ -556,7 +556,7 @@ describe("startHttpServer", () => {
   });
 
   test("starts server on configured port and stops cleanly", async () => {
-    const config = createTestConfig(join(tmpDir, "test.lancedb"));
+    const config = createTestConfig(join(tmpDir, "test.db"));
     config.httpPort = 49152 + Math.floor(Math.random() * 1000);
 
     const { stop, port } = await startHttpServer(memoryService, config);
@@ -570,7 +570,7 @@ describe("startHttpServer", () => {
   });
 
   test("finds alternative port when preferred is in use", async () => {
-    const config = createTestConfig(join(tmpDir, "test.lancedb"));
+    const config = createTestConfig(join(tmpDir, "test.db"));
     config.httpPort = 49152 + Math.floor(Math.random() * 1000);
 
     // Start first server on that port
@@ -593,9 +593,9 @@ describe("HTTP error handling", () => {
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-error-test-"));
-    const dbPath = join(tmpDir, "test.lancedb");
+    const dbPath = join(tmpDir, "test.db");
     const testConfig = createTestConfig(dbPath);
-    const db = await connectToDatabase(dbPath);
+    const db = connectToDatabase(dbPath);
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
 
