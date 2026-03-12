@@ -134,7 +134,7 @@ async function mcpCall(
     }),
   });
 
-  const response: JsonRpcResponse = await res.json();
+  const response = (await res.json()) as JsonRpcResponse;
 
   if (response.error) {
     return `ERROR: ${response.error.message}`;
@@ -267,7 +267,7 @@ async function main(): Promise<void> {
 
     // Health check
     const healthRes = await httpGet(baseUrl, "/health");
-    const health = await healthRes.json();
+    const health = await healthRes.json() as any;
 
     assert(health.status === "ok", "GET /health returns status: ok");
     assert(health.config.historyEnabled === true, "Health reports historyEnabled: true");
@@ -287,7 +287,7 @@ async function main(): Promise<void> {
       content: "The velocity of an unladen swallow is approximately 11 m/s",
       metadata: { category: "ornithology", source: "smoke-test" },
     });
-    const storeBody = await storeRes.json();
+    const storeBody = await storeRes.json() as any;
     assert(storeBody.id !== undefined, "POST /store returns memory ID");
     storedMemoryId = storeBody.id;
 
@@ -296,7 +296,7 @@ async function main(): Promise<void> {
       query: "unladen swallow velocity",
       intent: "fact_check",
     });
-    const searchBody = await searchRes.json();
+    const searchBody = await searchRes.json() as any;
     assert(searchBody.count > 0, "POST /search finds stored memory");
     assert(
       searchBody.results.some((r: any) => r.id === storedMemoryId),
@@ -305,7 +305,7 @@ async function main(): Promise<void> {
 
     // Get via HTTP
     const getRes = await httpGet(baseUrl, `/memories/${storedMemoryId}`);
-    const getBody = await getRes.json();
+    const getBody = await getRes.json() as any;
     assert(getBody.id === storedMemoryId, "GET /memories/:id returns correct memory");
     assertContains(
       getBody.content,
@@ -315,7 +315,7 @@ async function main(): Promise<void> {
 
     // Delete via HTTP
     const deleteRes = await httpDelete(baseUrl, `/memories/${storedMemoryId}`);
-    const deleteBody = await deleteRes.json();
+    const deleteBody = await deleteRes.json() as any;
     assert(deleteBody.deleted === true, "DELETE /memories/:id returns deleted: true");
 
     // Search should NOT find deleted memory
@@ -323,7 +323,7 @@ async function main(): Promise<void> {
       query: "unladen swallow velocity",
       intent: "fact_check",
     });
-    const afterDeleteBody = await searchAfterDelete.json();
+    const afterDeleteBody = await searchAfterDelete.json() as any;
     const foundDeleted = afterDeleteBody.results.some(
       (r: any) => r.id === storedMemoryId
     );
@@ -384,7 +384,7 @@ async function main(): Promise<void> {
 
     // Get waypoint via HTTP
     const wpHttpRes = await httpGet(baseUrl, "/waypoint");
-    const wpHttpBody = await wpHttpRes.json();
+    const wpHttpBody = await wpHttpRes.json() as any;
     assert(wpHttpRes.status === 200, "GET /waypoint returns 200");
     assert(
       wpHttpBody.referencedMemories?.length > 0,
@@ -499,7 +499,7 @@ async function main(): Promise<void> {
     const httpIndexRes = await httpPost(baseUrl, "/index-conversations", {
       path: sessionsPath,
     });
-    const httpIndexBody = await httpIndexRes.json();
+    const httpIndexBody = await httpIndexRes.json() as any;
     assert(httpIndexRes.status === 200, "POST /index-conversations returns 200");
     assert(httpIndexBody.indexed >= 1, "POST /index-conversations indexed at least 1 new session");
 
