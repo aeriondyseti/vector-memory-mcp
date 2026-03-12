@@ -57,7 +57,9 @@
     "sqlite-vec": "^0.1.6"
   },
   "devDependencies": {
+    "@lancedb/lancedb": "^0.26.2",
     "@types/bun": "latest",
+    "apache-arrow": "^21.1.0",
     "typescript": "^5.0.0"
   },
   "trustedDependencies": [
