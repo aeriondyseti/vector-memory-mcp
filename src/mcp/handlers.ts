@@ -4,15 +4,35 @@ import type { ConversationHistoryService } from "../services/conversation.servic
 import type { SearchIntent } from "../types/memory.js";
 import type { HistoryFilters, SearchResult } from "../types/conversation.js";
 
+/**
+ * Safely coerce a tool argument to an array. Handles the case where the MCP
+ * transport delivers a JSON-serialized string instead of a parsed array.
+ */
+function asArray<T>(value: unknown, fieldName: string): T[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+    } catch { /* fall through */ }
+  }
+  throw new Error(`${fieldName} must be an array`);
+}
+
 export async function handleStoreMemories(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const memories = args?.memories as Array<{
+  let memories: Array<{
     content: string;
     embedding_text?: string;
     metadata?: Record<string, unknown>;
   }>;
+  try {
+    memories = asArray(args?.memories, "memories");
+  } catch (e) {
+    return { content: [{ type: "text", text: (e as Error).message }] };
+  }
 
   const ids: string[] = [];
   for (const item of memories) {
@@ -41,7 +61,12 @@ export async function handleDeleteMemories(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const ids = args?.ids as string[];
+  let ids: string[];
+  try {
+    ids = asArray(args?.ids, "ids");
+  } catch (e) {
+    return { content: [{ type: "text", text: (e as Error).message }] };
+  }
   const results: string[] = [];
 
   for (const id of ids) {
@@ -66,16 +91,26 @@ export async function handleUpdateMemories(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const updates = args?.updates as Array<{
+  let updates: Array<{
     id: string;
     content?: string;
     embedding_text?: string;
     metadata?: Record<string, unknown>;
   }>;
+  try {
+    updates = asArray(args?.updates, "updates");
+  } catch (e) {
+    return { content: [{ type: "text", text: (e as Error).message }] };
+  }
 
   const results: string[] = [];
 
   for (const update of updates) {
+    if (!update.id || typeof update.id !== "string") {
+      results.push("Skipped update: missing required id field");
+      continue;
+    }
+
     const memory = await service.update(update.id, {
       content: update.content,
       embeddingText: update.embedding_text,
