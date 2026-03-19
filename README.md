@@ -114,6 +114,37 @@ CLI flags:
 
 ---
 
+## Release Channels
+
+The stable release is what you get by default:
+
+```bash
+bun install -g @aeriondyseti/vector-memory-mcp
+```
+
+Pre-release channels are available for testing upcoming changes. **These are unstable and may break without notice — use at your own risk.**
+
+| Channel | Install | Description |
+|---------|---------|-------------|
+| `@latest` | *(default)* | Stable releases |
+| `@rc` | `@aeriondyseti/vector-memory-mcp@rc` | Release candidates — final testing before stable |
+| `@dev` | `@aeriondyseti/vector-memory-mcp@dev` | Development builds — latest features, least stable |
+
+```bash
+# Install the dev channel
+bun install -g @aeriondyseti/vector-memory-mcp@dev
+
+# Pin to a specific pre-release version
+bun install -g @aeriondyseti/vector-memory-mcp@2.1.0-dev.1
+
+# Go back to stable
+bun install -g @aeriondyseti/vector-memory-mcp@latest
+```
+
+> **Warning:** Pre-release versions may include breaking changes, incomplete features, or data migration requirements that haven't been finalized. Do not use them in production workflows you depend on.
+
+---
+
 ## Migrating from 1.x (LanceDB)
 
 Version 2.0 replaced LanceDB with SQLite (sqlite-vec) for storage. If you have existing data from 1.x, the server will detect it automatically and prompt you to migrate:
