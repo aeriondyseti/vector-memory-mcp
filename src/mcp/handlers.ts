@@ -3,16 +3,55 @@ import type { MemoryService } from "../services/memory.service.js";
 import type { ConversationHistoryService } from "../services/conversation.service.js";
 import type { SearchIntent } from "../types/memory.js";
 import type { HistoryFilters, SearchResult } from "../types/conversation.js";
+import { DEBUG } from "../config/index.js";
+
+/**
+ * Safely coerce a tool argument to an array. Handles the case where the MCP
+ * transport delivers a JSON-serialized string instead of a parsed array.
+ */
+function asArray<T>(value: unknown, fieldName: string): T[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    if (DEBUG) {
+      console.error(
+        `[vector-memory-mcp] DEBUG: ${fieldName} received as string (${value.length} chars) instead of array — parsing`
+      );
+    }
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+      if (DEBUG) {
+        console.error(
+          `[vector-memory-mcp] DEBUG: ${fieldName} parsed as ${typeof parsed}, not array`
+        );
+      }
+    } catch { /* fall through */ }
+  } else if (DEBUG) {
+    console.error(
+      `[vector-memory-mcp] DEBUG: ${fieldName} has unexpected type: ${typeof value}`
+    );
+  }
+  throw new Error(`${fieldName} must be an array`);
+}
+
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
 
 export async function handleStoreMemories(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const memories = args?.memories as Array<{
+  let memories: Array<{
     content: string;
     embedding_text?: string;
     metadata?: Record<string, unknown>;
   }>;
+  try {
+    memories = asArray(args?.memories, "memories");
+  } catch (e) {
+    return { isError: true, content: [{ type: "text", text: errorText(e) }] };
+  }
 
   const ids: string[] = [];
   for (const item of memories) {
@@ -41,7 +80,12 @@ export async function handleDeleteMemories(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const ids = args?.ids as string[];
+  let ids: string[];
+  try {
+    ids = asArray(args?.ids, "ids");
+  } catch (e) {
+    return { isError: true, content: [{ type: "text", text: errorText(e) }] };
+  }
   const results: string[] = [];
 
   for (const id of ids) {
@@ -66,16 +110,26 @@ export async function handleUpdateMemories(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const updates = args?.updates as Array<{
+  let updates: Array<{
     id: string;
     content?: string;
     embedding_text?: string;
     metadata?: Record<string, unknown>;
   }>;
+  try {
+    updates = asArray(args?.updates, "updates");
+  } catch (e) {
+    return { isError: true, content: [{ type: "text", text: errorText(e) }] };
+  }
 
   const results: string[] = [];
 
   for (const update of updates) {
+    if (!update.id || typeof update.id !== "string") {
+      results.push("Skipped update: missing required id field");
+      continue;
+    }
+
     const memory = await service.update(update.id, {
       content: update.content,
       embeddingText: update.embedding_text,
@@ -166,7 +220,12 @@ export async function handleGetMemories(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const ids = args?.ids as string[];
+  let ids: string[];
+  try {
+    ids = asArray(args?.ids, "ids");
+  } catch (e) {
+    return { isError: true, content: [{ type: "text", text: errorText(e) }] };
+  }
 
   const memories = await service.getMultiple(ids);
   const memoryMap = new Map(memories.map((m) => [m.id, m]));

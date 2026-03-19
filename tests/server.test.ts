@@ -229,6 +229,34 @@ describe("mcp", () => {
       expect(response.content[0].text).toContain(`Memory ${a.id} updated successfully`);
       expect(response.content[0].text).toContain(`Memory ${b.id} updated successfully`);
     });
+
+    test("handles updates passed as JSON string instead of array", async () => {
+      const mem = await service.store("original");
+      // Simulate MCP transport sending updates as a serialized JSON string
+      const response = await handleUpdateMemories(
+        { updates: JSON.stringify([{ id: mem.id, content: "updated" }]) as unknown },
+        service
+      );
+
+      // Should return a clear error, not iterate over characters
+      const text = response.content[0].text;
+      expect(text).not.toContain("Memory undefined not found");
+      // Should either succeed (by parsing the string) or return a validation error
+      expect(
+        text.includes("updated successfully") || text.includes("must be an array")
+      ).toBe(true);
+    });
+
+    test("handles updates with missing id field", async () => {
+      const response = await handleUpdateMemories(
+        { updates: [{ content: "no id" }] as unknown },
+        service
+      );
+
+      const text = response.content[0].text;
+      expect(text).not.toContain("Memory undefined");
+      expect(text).toContain("missing required id");
+    });
   });
 
   describe("handleSearchMemories", () => {
