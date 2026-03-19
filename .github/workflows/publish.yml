@@ -100,39 +100,17 @@ jobs:
         if: steps.check-version.outputs.skip != 'true'
         run: npm publish --access public --provenance --tag ${{ steps.npm-tag.outputs.tag }}
 
-      # npm dist-tag doesn't support OIDC (npm/cli#8547). OIDC-exchanged tokens
-      # are publish-scoped and can't modify dist-tags. Requires NPM_TOKEN secret
-      # (granular access token with read-write permission on this package).
-      # If NPM_TOKEN is not set, dist-tag steps are skipped with a warning.
-      - name: Cascade dist-tags
-        if: steps.npm-tag.outputs.tag == 'latest' && env.NPM_TOKEN != ''
+      # Cascade dist-tags via shadow publishes. OIDC tokens are publish-scoped
+      # and can't run `npm dist-tag add` (npm/cli#8547), so we publish a shadow
+      # prerelease version under the target tag instead. This ensures @dev and
+      # @rc always point to content >= @latest without needing an NPM_TOKEN.
+      - name: Publish shadow @dev version
+        if: steps.npm-tag.outputs.tag == 'latest' && steps.check-version.outputs.skip != 'true'
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          npm dist-tag add "@aeriondyseti/vector-memory-mcp@$VERSION" dev
-          npm dist-tag add "@aeriondyseti/vector-memory-mcp@$VERSION" rc
-          echo "Also tagged $VERSION as @dev and @rc"
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Also tag as dev (RC is the latest pre-release)
-        if: steps.npm-tag.outputs.tag == 'rc' && env.NPM_TOKEN != ''
-        run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"
-          npm dist-tag add "@aeriondyseti/vector-memory-mcp@${VERSION}" dev
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Warn if dist-tag cascade skipped
-        if: (steps.npm-tag.outputs.tag == 'latest' || steps.npm-tag.outputs.tag == 'rc') && env.NPM_TOKEN == ''
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          echo "::warning::Dist-tag cascade skipped — NPM_TOKEN secret not set."
-          echo "::warning::Run manually: npm dist-tag add @aeriondyseti/vector-memory-mcp@${VERSION} latest dev rc"
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          npm version "${VERSION}-dev.0" --no-git-tag-version
+          npm publish --access public --provenance --tag dev
+          echo "Published ${VERSION}-dev.0 as @dev"
 
       - name: Extract changelog for this version
         if: steps.npm-tag.outputs.tag == 'latest'
