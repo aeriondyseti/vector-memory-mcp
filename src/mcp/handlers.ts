@@ -3,6 +3,7 @@ import type { MemoryService } from "../services/memory.service.js";
 import type { ConversationHistoryService } from "../services/conversation.service.js";
 import type { SearchIntent } from "../types/memory.js";
 import type { HistoryFilters, SearchResult } from "../types/conversation.js";
+import { DEBUG } from "../config/index.js";
 
 /**
  * Safely coerce a tool argument to an array. Handles the case where the MCP
@@ -11,10 +12,20 @@ import type { HistoryFilters, SearchResult } from "../types/conversation.js";
 function asArray<T>(value: unknown, fieldName: string): T[] {
   if (Array.isArray(value)) return value;
   if (typeof value === "string") {
+    if (DEBUG) {
+      console.error(
+        `[vector-memory-mcp] DEBUG: ${fieldName} received as string (${value.length} chars) instead of array — parsing`
+      );
+    }
     try {
       const parsed = JSON.parse(value);
       if (Array.isArray(parsed)) return parsed;
     } catch { /* fall through */ }
+  }
+  if (DEBUG) {
+    console.error(
+      `[vector-memory-mcp] DEBUG: ${fieldName} has unexpected type: ${typeof value}`
+    );
   }
   throw new Error(`${fieldName} must be an array`);
 }
