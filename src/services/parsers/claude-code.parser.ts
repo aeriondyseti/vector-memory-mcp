@@ -227,6 +227,7 @@ export class ClaudeCodeSessionParser implements SessionLogParser {
       if (since && lastModified <= since) continue;
 
       const sessionId = basename(entry, ".jsonl");
+      if (!UUID_PATTERN.test(sessionId)) continue;
       const project = extractProjectFromDir(projectDir);
 
       files.push({

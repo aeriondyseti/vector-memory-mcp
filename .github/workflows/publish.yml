@@ -85,7 +85,6 @@ jobs:
         run: bun run test
 
       - name: Typecheck
-        if: steps.npm-tag.outputs.tag != 'dev'
         run: bun run typecheck
 
       - name: Check if version already published
@@ -111,6 +110,8 @@ jobs:
           npm dist-tag add "@aeriondyseti/vector-memory-mcp@$VERSION" dev
           npm dist-tag add "@aeriondyseti/vector-memory-mcp@$VERSION" rc
           echo "Also tagged $VERSION as @dev and @rc"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Extract changelog for this version
         if: steps.npm-tag.outputs.tag == 'latest'

@@ -29,7 +29,7 @@ export function sanitizeFtsQuery(query: string): string {
 
 /**
  * Compute hybrid RRF scores from two ranked result lists.
- * Returns a map of id -> combined RRF score, sorted descending.
+ * Returns a map of id -> combined RRF score.
  */
 export function hybridRRF(
   vectorResults: Array<{ id: string }>,

@@ -237,6 +237,7 @@ export class MemoryService {
                 updatedAt: row.createdAt,
                 source: "conversation_history" as const,
                 score: row.rrfScore * historyWeight,
+                supersededBy: null,
                 sessionId: (row.metadata?.session_id as string) ?? "",
                 role: (row.metadata?.role as string) ?? "unknown",
                 messageIndexStart: (row.metadata?.message_index_start as number) ?? 0,

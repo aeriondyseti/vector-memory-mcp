@@ -198,7 +198,9 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
       // Fetch referenced memories in a single query
       const memoryIds = (waypoint.metadata.memory_ids as string[] | undefined) ?? [];
       const memories = await memoryService.getMultiple(memoryIds);
-      const referencedMemories = memories.map((m) => ({ id: m.id, content: m.content }));
+      const referencedMemories = memories
+        .filter((m) => !isDeleted(m))
+        .map((m) => ({ id: m.id, content: m.content }));
 
       return c.json({
         content: waypoint.content,
@@ -221,7 +223,13 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
       }
 
       const body = await c.req.json().catch(() => ({}));
-      const since = body.since ? new Date(body.since as string) : undefined;
+      let since: Date | undefined;
+      if (body.since) {
+        since = new Date(body.since as string);
+        if (isNaN(since.getTime())) {
+          return c.json({ error: "Invalid 'since' date format" }, 400);
+        }
+      }
       const result = await conversationService.indexConversations(
         body.path as string | undefined,
         since

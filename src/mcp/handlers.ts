@@ -38,6 +38,15 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+function parseDate(value: unknown, fieldName: string): Date | undefined {
+  if (value === undefined) return undefined;
+  const date = new Date(value as string);
+  if (isNaN(date.getTime())) {
+    throw new Error(`${fieldName} is not a valid date`);
+  }
+  return date;
+}
+
 export async function handleStoreMemories(
   args: Record<string, unknown> | undefined,
   service: MemoryService
@@ -157,7 +166,10 @@ export async function handleSearchMemories(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const query = args?.query as string;
+  const query = args?.query;
+  if (typeof query !== "string" || query.trim() === "") {
+    return { isError: true, content: [{ type: "text", text: "query is required and must be a non-empty string" }] };
+  }
   const intent = (args?.intent as SearchIntent) ?? "fact_check";
   const limit = (args?.limit as number) ?? 10;
   const includeDeleted = (args?.include_deleted as boolean) ?? false;
@@ -165,10 +177,17 @@ export async function handleSearchMemories(
   // history_only implies include_history
   const includeHistory = historyOnly ? true : (args?.include_history as boolean | undefined);
 
+  let historyFilters: HistoryFilters;
+  try {
+    historyFilters = parseHistoryFilters(args);
+  } catch (e) {
+    return { isError: true, content: [{ type: "text", text: errorText(e) }] };
+  }
+
   const results = await service.search(query, intent, limit, includeDeleted, {
     includeHistory,
     historyOnly,
-    historyFilters: parseHistoryFilters(args),
+    historyFilters,
   });
 
   if (results.length === 0) {
@@ -320,12 +339,8 @@ function parseHistoryFilters(
   return {
     sessionId: args?.session_id as string | undefined,
     role: args?.role_filter as string | undefined,
-    after: args?.history_after
-      ? new Date(args.history_after as string)
-      : undefined,
-    before: args?.history_before
-      ? new Date(args.history_before as string)
-      : undefined,
+    after: parseDate(args?.history_after, "history_after"),
+    before: parseDate(args?.history_before, "history_before"),
   };
 }
 
@@ -360,6 +375,9 @@ export async function handleIndexConversations(
   const path = args?.path as string | undefined;
   const sinceStr = args?.since as string | undefined;
   const since = sinceStr ? new Date(sinceStr) : undefined;
+  if (since && isNaN(since.getTime())) {
+    return { isError: true, content: [{ type: "text", text: "Invalid 'since' date format" }] };
+  }
 
   const result = await conversationService.indexConversations(path, since);
 

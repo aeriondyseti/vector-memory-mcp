@@ -181,11 +181,13 @@ export class MemoryRepository {
 
     // Full-text search
     const ftsQuery = sanitizeFtsQuery(query);
-    const ftsResults = this.db
-      .prepare(
-        "SELECT id FROM memories_fts WHERE memories_fts MATCH ? LIMIT ?",
-      )
-      .all(ftsQuery, candidateLimit) as Array<{ id: string }>;
+    const ftsResults: Array<{ id: string }> = ftsQuery
+      ? (this.db
+          .prepare(
+            "SELECT id FROM memories_fts WHERE memories_fts MATCH ? LIMIT ?",
+          )
+          .all(ftsQuery, candidateLimit) as Array<{ id: string }>)
+      : [];
 
     // Compute RRF scores and pick top ids
     const rrfScores = hybridRRF(vectorResults, ftsResults);

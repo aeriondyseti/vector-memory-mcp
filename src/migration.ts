@@ -18,6 +18,7 @@ function toEpochMs(value: unknown): number {
   if (typeof value === "number") return value;
   if (value instanceof Date) return value.getTime();
   if (typeof value === "bigint") return Number(value);
+  console.warn(`⚠️ Unexpected timestamp type: ${typeof value} (value: ${value}), using current time`);
   return Date.now();
 }
 
@@ -28,7 +29,10 @@ function toFloatArray(vec: unknown): number[] {
   if (vec && typeof (vec as any).toArray === "function") {
     return Array.from((vec as any).toArray());
   }
-  if (ArrayBuffer.isView(vec)) return Array.from(new Float32Array((vec as DataView).buffer));
+  if (ArrayBuffer.isView(vec)) {
+    const view = vec as DataView;
+    return Array.from(new Float32Array(view.buffer, view.byteOffset, view.byteLength / 4));
+  }
   return [];
 }
 
@@ -226,6 +230,7 @@ export async function migrate(opts: MigrateOptions): Promise<MigrateResult> {
   }
 
   // ── Finalize ────────────────────────────────────────────────────
+  await lanceDb.close?.();
   sqliteDb.close();
 
   const { size } = statSync(target);
@@ -247,8 +252,8 @@ export function formatMigrationSummary(
    ${result.memoriesMigrated} memories, ${result.conversationChunksMigrated} conversation chunks
 
 Next steps:
-   1. Backup:   mv ${source} ${source}.lance-backup
-   2. Activate: mv ${target} ${source}
+   1. Backup:   mv "${source}" "${source}.lance-backup"
+   2. Activate: mv "${target}" "${source}"
    3. Restart your MCP server
 `;
 }

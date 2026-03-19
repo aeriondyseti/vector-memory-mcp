@@ -60,7 +60,7 @@ This server is general-purpose: useful to developers, creative writers, worldbui
 
 ### Next — Phase 1 — High Impact, Low Effort
 
-No schema changes required. These are handler and query-layer additions.
+Minimal schema changes. Most are handler and query-layer additions; Feature 3 requires one column.
 
 #### 1. Date/Time Filtering in Search
 Add to `search_memories`:
@@ -335,7 +335,7 @@ Handoffs stored as structured JSON in a sidecar file alongside the SQLite databa
 
 #### 21. Formal Memory Type Taxonomy
 
-`metadata.type` is a free-form string today with no system-level meaning. Making it a validated set of types gives it semantic weight that feeds quality scoring, search filtering, consolidation priority, and — critically — typed edges in the association and lineage graphs (Features 19 and 25).
+`metadata.type` is a free-form string today with no system-level meaning. Making it a validated set of types gives it semantic weight that feeds quality scoring, search filtering, consolidation priority, and — critically — typed edges in the knowledge graph subsystem (Feature 19).
 
 Types are designed to be domain-agnostic: equally applicable to software development, creative writing, worldbuilding, project management, research, or any other collaborative work.
 

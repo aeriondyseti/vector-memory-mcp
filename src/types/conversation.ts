@@ -71,7 +71,7 @@ export interface SearchResult {
   source: "memory" | "conversation_history";
   score: number;
   // Memory-specific fields
-  supersededBy?: string | null;
+  supersededBy: string | null;
   usefulness?: number;
   accessCount?: number;
   lastAccessed?: Date | null;

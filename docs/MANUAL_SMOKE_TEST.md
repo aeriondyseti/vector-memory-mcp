@@ -14,6 +14,11 @@ Check off items as you go by editing this file or copying to a scratch pad.
 - Claude Code CLI installed and functional
 - (Optional) A repo with LanceDB 1.x data for Section E
 
+```bash
+# Set this to your local clone of vector-memory-mcp
+export PACKAGE_DIR="$HOME/Development/tools/vector-memory-mcp"
+```
+
 ---
 
 ## A. Fresh Install Experience
@@ -29,7 +34,7 @@ git init && echo '{}' > package.json
 
 ```bash
 # 2. Install the package (use link for local dev)
-cd ~/Development/tools/vector-memory-mcp
+cd $PACKAGE_DIR
 bun link
 cd "$FRESH"
 bun link @aeriondyseti/vector-memory-mcp
@@ -86,7 +91,7 @@ Tests the cc-plugins vector-memory plugin hooks (session-start banner, waypoint 
 
 ```bash
 # 1. Open a repo that has a .vector-memory/ directory
-cd ~/Development/tools/vector-memory-mcp   # or any repo with the plugin configured
+cd $PACKAGE_DIR   # or any repo with the plugin configured
 claude
 ```
 
@@ -120,7 +125,7 @@ Tests that conversation indexing captures real multi-turn sessions.
 ```bash
 # 1. Start server with history enabled (automated smoke test already verified this,
 #    but here we test with a REAL Claude Code conversation)
-cd ~/Development/tools/vector-memory-mcp
+cd $PACKAGE_DIR
 claude
 ```
 
@@ -161,7 +166,7 @@ Tests that two independent server instances don't collide.
 
 ```bash
 # Terminal 1: Start Claude Code in repo A
-cd ~/Development/tools/vector-memory-mcp
+cd $PACKAGE_DIR
 claude
 ```
 
@@ -175,7 +180,7 @@ claude
 
 ```bash
 # Terminal 3: Inspect lockfiles
-cat ~/Development/tools/vector-memory-mcp/.vector-memory/server.lock
+cat $PACKAGE_DIR/.vector-memory/server.lock
 cat /tmp/smoke-repo-b/.vector-memory/server.lock
 ```
 
@@ -197,7 +202,7 @@ cat /tmp/smoke-repo-b/.vector-memory/server.lock
 ```bash
 # Close Terminal 1's Claude Code session (Ctrl+C or /exit)
 # Then check:
-cat ~/Development/tools/vector-memory-mcp/.vector-memory/server.lock
+cat $PACKAGE_DIR/.vector-memory/server.lock
 ```
 
 - [ ] Lockfile for repo A is gone (cleaned up on exit)
@@ -223,7 +228,7 @@ ls -la <your-repo>/.vector-memory/memories.db/
 ```bash
 # 2. Attempt to start the 2.0 server against it
 cd <your-repo>
-bun run ~/Development/tools/vector-memory-mcp/src/index.ts
+bun run $PACKAGE_DIR/src/index.ts
 ```
 
 - [ ] Server refuses to start
@@ -232,7 +237,7 @@ bun run ~/Development/tools/vector-memory-mcp/src/index.ts
 
 ```bash
 # 3. Run the migration
-bun run ~/Development/tools/vector-memory-mcp/src/index.ts migrate
+bun run $PACKAGE_DIR/src/index.ts migrate
 ```
 
 - [ ] Progress output shows memory count and conversation chunk count
@@ -248,7 +253,7 @@ mv <your-repo>/.vector-memory/memories.db.sqlite <your-repo>/.vector-memory/memo
 ```bash
 # 5. Restart the server
 cd <your-repo>
-bun run ~/Development/tools/vector-memory-mcp/src/index.ts
+bun run $PACKAGE_DIR/src/index.ts
 ```
 
 - [ ] Server starts successfully with SQLite backend
@@ -274,7 +279,7 @@ Tests graceful handling of edge cases.
 ```bash
 # 1. Start a server, note its PID
 cd /tmp && mkdir smoke-resilience && cd smoke-resilience
-bun run ~/Development/tools/vector-memory-mcp/src/index.ts --port 3299 &
+bun run $PACKAGE_DIR/src/index.ts --port 3299 &
 SERVER_PID=$!
 cat .vector-memory/server.lock
 ```
@@ -293,7 +298,10 @@ cat .vector-memory/server.lock
 
 ```bash
 # 4. Start a new server — it should handle the stale lockfile
-bun run ~/Development/tools/vector-memory-mcp/src/index.ts --port 3299
+bun run $PACKAGE_DIR/src/index.ts --port 3299 &
+NEW_PID=$!
+sleep 1
+cat .vector-memory/server.lock
 ```
 
 - [ ] New server starts successfully (the port should be available since old process is dead)
@@ -301,7 +309,7 @@ bun run ~/Development/tools/vector-memory-mcp/src/index.ts --port 3299
 
 ```bash
 # Cleanup
-kill %1 2>/dev/null; rm -rf /tmp/smoke-resilience
+kill $NEW_PID 2>/dev/null; rm -rf /tmp/smoke-resilience
 ```
 
 ### F2. Port conflict auto-discovery
@@ -311,10 +319,10 @@ kill %1 2>/dev/null; rm -rf /tmp/smoke-resilience
 cd /tmp && mkdir smoke-port-a smoke-port-b
 
 cd /tmp/smoke-port-a
-bun run ~/Development/tools/vector-memory-mcp/src/index.ts --port 3299 &
+bun run $PACKAGE_DIR/src/index.ts --port 3299 &
 
 cd /tmp/smoke-port-b
-bun run ~/Development/tools/vector-memory-mcp/src/index.ts --port 3299 &
+bun run $PACKAGE_DIR/src/index.ts --port 3299 &
 ```
 
 - [ ] First server binds to port 3299
@@ -335,6 +343,10 @@ kill %1 %2 2>/dev/null; rm -rf /tmp/smoke-port-a /tmp/smoke-port-b
 ```
 
 ### F3. Empty query handling
+
+> **Note:** This test assumes a server is running on port 3271 (e.g., from Section D or E).
+> If no server is running, start one first:
+> `cd /tmp && mkdir -p smoke-f3 && cd smoke-f3 && bun run $PACKAGE_DIR/src/index.ts &`
 
 ```bash
 # Send an empty query to the search endpoint

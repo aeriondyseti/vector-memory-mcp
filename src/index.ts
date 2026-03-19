@@ -16,7 +16,7 @@ async function runMigrate(args: string[]): Promise<void> {
   const config = loadConfig(overrides);
 
   const source = config.dbPath;
-  const target = source + ".sqlite";
+  const target = source.endsWith(".sqlite") ? source.replace(/\.sqlite$/, "-migrated.sqlite") : source + ".sqlite";
 
   if (!isLanceDbDirectory(source)) {
     console.error(

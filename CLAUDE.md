@@ -13,6 +13,7 @@
 ```sh
 bun run test          # run all tests (via scripts/test-runner.ts)
 bun run test:quick    # fast tests without preload
+bun run test:coverage  # coverage reports
 bun run dev           # watch mode
 bun run typecheck     # bunx tsc --noEmit
 bun run smoke         # smoke tests (scripts/smoke-test.ts)

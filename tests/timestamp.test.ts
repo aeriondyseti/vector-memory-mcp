@@ -51,6 +51,7 @@ describe("Timestamp round-trip — LanceDB UTC preservation", () => {
   });
 
   afterEach(() => {
+    db.close();
     rmSync(tmpDir, { recursive: true });
   });
 
@@ -147,10 +148,11 @@ describe("GET /waypoint — updatedAt UTC serialization", () => {
   let app: ReturnType<typeof createHttpApp>;
   let memoryService: MemoryService;
   let httpTmpDir: string;
+  let db: Database;
 
   beforeAll(async () => {
     httpTmpDir = mkdtempSync(join(tmpdir(), "vector-memory-http-ts-test-"));
-    const db = connectToDatabase(join(httpTmpDir, "test.db"));
+    db = connectToDatabase(join(httpTmpDir, "test.db"));
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     memoryService = new MemoryService(repository, embeddings);
@@ -158,6 +160,7 @@ describe("GET /waypoint — updatedAt UTC serialization", () => {
   });
 
   afterAll(() => {
+    db.close();
     rmSync(httpTmpDir, { recursive: true });
   });
 

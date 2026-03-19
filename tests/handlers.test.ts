@@ -112,6 +112,7 @@ describe("handleSearchMemories", () => {
         score: 0.6,
         createdAt: new Date(),
         updatedAt: new Date(),
+        supersededBy: null,
         sessionId: "sess-1",
       },
     ];

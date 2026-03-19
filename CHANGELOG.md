@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0] - 2026-03-18
 
 ### Breaking Changes
-- **SQLite replaces LanceDB**: Storage backend migrated from LanceDB (~845-file directory) to a single SQLite file using [sqlite-vec](https://github.com/asg017/sqlite-vec) for vector search and FTS5 for full-text search. Dependencies reduced from 223MB to 24KB.
+- **SQLite replaces LanceDB**: Storage backend migrated from LanceDB (~845-file directory) to a single SQLite file using [sqlite-vec](https://github.com/asg017/sqlite-vec) for vector search and FTS5 for full-text search. Net new dependency footprint reduced to 24KB (sqlite-vec); LanceDB remains bundled temporarily for migration support (see Migration below).
 - **Bun runtime required**: Node.js support removed. The server now requires [Bun](https://bun.sh/) for `bun:sqlite` native SQLite bindings. The `dist/` build step and `@hono/node-server` dependency have been removed.
 - **Rename checkpoint to waypoint**: All "checkpoint" terminology renamed to "waypoint"
   - MCP tools: `store_checkpoint` → `set_waypoint`, `get_checkpoint` → `get_waypoint`
@@ -43,8 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Users upgrading from 1.x with existing data should run:
 ```bash
 vector-memory-mcp migrate
+# Verify .vector-memory/memories.db.sqlite exists and contains your data
 mv .vector-memory/memories.db .vector-memory/memories.db.lance-backup
 mv .vector-memory/memories.db.sqlite .vector-memory/memories.db
+```
+
+If migration fails, restore the backup:
+```bash
+mv .vector-memory/memories.db.lance-backup .vector-memory/memories.db
 ```
 
 LanceDB (`@lancedb/lancedb`, `apache-arrow`) ships as a production dependency in 2.0 solely to support migration. It will be removed in the next major version.
