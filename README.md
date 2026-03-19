@@ -103,14 +103,14 @@ Assistant: [calls search_memories with history_only: true, history_before/after 
 
 CLI flags:
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--db-file`, `-d` | `.vector-memory/memories.db` | Database location |
-| `--port`, `-p` | `3271` | HTTP server port |
-| `--no-http` | *(HTTP enabled)* | Disable HTTP/SSE transport |
-| `--enable-history` | *(disabled)* | Enable conversation history indexing |
-| `--history-path` | *(auto-detect)* | Path to session log directory |
-| `--history-weight` | `0.75` | Weight for history results in unified search |
+| Flag | Alias | Default | Description |
+|------|-------|---------|-------------|
+| `--db-file <path>` | `-d` | `.vector-memory/memories.db` | Database location (relative to cwd) |
+| `--port <number>` | `-p` | `3271` | HTTP server port |
+| `--no-http` | | *(HTTP enabled)* | Disable HTTP/SSE transport |
+| `--enable-history` | | *(disabled)* | Enable conversation history indexing |
+| `--history-path` | | *(auto-detect)* | Path to session log directory |
+| `--history-weight` | | `0.75` | Weight for history results in unified search |
 
 ---
 

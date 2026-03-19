@@ -59,10 +59,19 @@ export function loadConfig(overrides: ConfigOverrides = {}): Config {
   const enableHttp = overrides.enableHttp ?? true;
 
   return {
-    dbPath: resolvePath(overrides.dbPath ?? DEFAULT_DB_PATH),
+    dbPath: resolvePath(
+      overrides.dbPath
+      ?? process.env.VECTOR_MEMORY_DB_PATH
+      ?? DEFAULT_DB_PATH
+    ),
     embeddingModel: DEFAULT_EMBEDDING_MODEL,
     embeddingDimension: DEFAULT_EMBEDDING_DIMENSION,
-    httpPort: overrides.httpPort ?? DEFAULT_HTTP_PORT,
+    httpPort:
+      overrides.httpPort
+      ?? (process.env.VECTOR_MEMORY_HTTP_PORT
+        ? parseInt(process.env.VECTOR_MEMORY_HTTP_PORT, 10)
+        : undefined)
+      ?? DEFAULT_HTTP_PORT,
     httpHost: DEFAULT_HTTP_HOST,
     enableHttp,
     transportMode,

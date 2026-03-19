@@ -13,7 +13,7 @@
       "command": "bunx",
       "args": [
         "--bun",
-        "@aeriondyseti/vector-memory-mcp@dev",
+        "@aeriondyseti/vector-memory-mcp@rc",
         "--enable-history"
       ]
     },

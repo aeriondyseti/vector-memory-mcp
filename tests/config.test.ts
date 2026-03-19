@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { parseCliArgs, loadConfig } from "../src/config/index";
 
 describe("parseCliArgs", () => {
@@ -79,5 +79,41 @@ describe("loadConfig", () => {
     const config = loadConfig({ dbPath: "relative/path.db" });
     expect(config.dbPath).toContain("relative/path.db");
     expect(config.dbPath.startsWith("/")).toBe(true);
+  });
+});
+
+describe("environment variable fallbacks", () => {
+  afterEach(() => {
+    delete process.env.VECTOR_MEMORY_DB_PATH;
+    delete process.env.VECTOR_MEMORY_HTTP_PORT;
+  });
+
+  test("VECTOR_MEMORY_DB_PATH is used when no CLI flag is passed", () => {
+    process.env.VECTOR_MEMORY_DB_PATH = "/env/var/path.db";
+    const config = loadConfig();
+    expect(config.dbPath).toBe("/env/var/path.db");
+  });
+
+  test("VECTOR_MEMORY_HTTP_PORT is used when no CLI flag is passed", () => {
+    process.env.VECTOR_MEMORY_HTTP_PORT = "9999";
+    const config = loadConfig();
+    expect(config.httpPort).toBe(9999);
+  });
+
+  test("CLI flags take precedence over env vars", () => {
+    process.env.VECTOR_MEMORY_DB_PATH = "/env/var/path.db";
+    process.env.VECTOR_MEMORY_HTTP_PORT = "9999";
+    const config = loadConfig({
+      dbPath: "/cli/flag/path.db",
+      httpPort: 7777,
+    });
+    expect(config.dbPath).toBe("/cli/flag/path.db");
+    expect(config.httpPort).toBe(7777);
+  });
+
+  test("defaults are used when neither CLI flag nor env var is set", () => {
+    const config = loadConfig();
+    expect(config.dbPath).toContain(".vector-memory/memories.db");
+    expect(config.httpPort).toBe(3271);
   });
 });
