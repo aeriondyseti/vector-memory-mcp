@@ -189,7 +189,8 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
   // Get latest waypoint
   app.get("/waypoint", async (c) => {
     try {
-      const waypoint = await memoryService.getLatestWaypoint();
+      const project = c.req.query("project");
+      const waypoint = await memoryService.getLatestWaypoint(project);
 
       if (!waypoint) {
         return c.json({ error: "No waypoint found" }, 404);

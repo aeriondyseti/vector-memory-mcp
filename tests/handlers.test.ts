@@ -63,6 +63,7 @@ describe("handleSearchMemories", () => {
         after: undefined,
         before: undefined,
       },
+      offset: 0,
     });
   });
 
@@ -89,6 +90,7 @@ describe("handleSearchMemories", () => {
         after: undefined,
         before: undefined,
       },
+      offset: 0,
     });
   });
 

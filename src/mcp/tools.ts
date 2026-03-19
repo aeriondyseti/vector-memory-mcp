@@ -162,6 +162,11 @@ When in doubt, search. Missing context is costlier than an extra query.`,
         description: "Maximum results to return (default: 10).",
         default: 10,
       },
+      offset: {
+        type: "integer",
+        description: "Number of results to skip for pagination (default: 0).",
+        default: 0,
+      },
       include_deleted: {
         type: "boolean",
         description: "Include soft-deleted memories in results (default: false). Useful for recovering prior information.",
@@ -297,7 +302,13 @@ export const getWaypointTool: Tool = {
     "Load the current project waypoint snapshot. Call at conversation start or when resuming a project.",
   inputSchema: {
     type: "object",
-    properties: {},
+    properties: {
+      project: {
+        type: "string",
+        description:
+          "Project name to retrieve waypoint for. If omitted, retrieves the default (legacy) waypoint.",
+      },
+    },
   },
 };
 
