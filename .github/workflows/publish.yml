@@ -124,28 +124,26 @@ jobs:
             exit 1
           fi
           echo "::add-mask::$NPM_TOKEN"
-          # Write token to the setup-node .npmrc (NPM_CONFIG_USERCONFIG overrides ~/.npmrc)
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
-          echo "oidc_success=true" >> $GITHUB_OUTPUT
+          echo "npm_token=$NPM_TOKEN" >> $GITHUB_OUTPUT
 
       - name: Cascade dist-tags
-        if: steps.npm-tag.outputs.tag == 'latest' && steps.npm-oidc.outputs.oidc_success == 'true'
+        if: steps.npm-tag.outputs.tag == 'latest' && steps.npm-oidc.outputs.npm_token != ''
         run: |
           VERSION=$(node -p "require('./package.json').version")
           npm dist-tag add "@aeriondyseti/vector-memory-mcp@$VERSION" dev
           npm dist-tag add "@aeriondyseti/vector-memory-mcp@$VERSION" rc
           echo "Also tagged $VERSION as @dev and @rc"
         env:
-          NPM_CONFIG_USERCONFIG: ''
+          NODE_AUTH_TOKEN: ${{ steps.npm-oidc.outputs.npm_token }}
 
       - name: Also tag as dev (RC is the latest pre-release)
-        if: steps.npm-tag.outputs.tag == 'rc' && steps.npm-oidc.outputs.oidc_success == 'true'
+        if: steps.npm-tag.outputs.tag == 'rc' && steps.npm-oidc.outputs.npm_token != ''
         run: |
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#v}"
           npm dist-tag add "@aeriondyseti/vector-memory-mcp@${VERSION}" dev
         env:
-          NPM_CONFIG_USERCONFIG: ''
+          NODE_AUTH_TOKEN: ${{ steps.npm-oidc.outputs.npm_token }}
 
       - name: Extract changelog for this version
         if: steps.npm-tag.outputs.tag == 'latest'
