@@ -77,6 +77,13 @@ jobs:
       - name: Publish to npm
         run: npm publish --access public --tag ${{ steps.npm-tag.outputs.tag }}
 
+      - name: Also tag as dev (RC is the latest pre-release)
+        if: steps.npm-tag.outputs.tag == 'rc'
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          npm dist-tag add "@aeriondyseti/vector-memory-mcp@${VERSION}" dev
+
       - name: Extract changelog for this version
         if: steps.npm-tag.outputs.tag == 'latest'
         id: changelog
