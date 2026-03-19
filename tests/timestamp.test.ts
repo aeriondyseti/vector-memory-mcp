@@ -171,7 +171,7 @@ describe("GET /waypoint — updatedAt UTC serialization", () => {
       summary: "Timestamp serialization regression test",
     });
 
-    const res = await app.request("/waypoint");
+    const res = await app.request("/waypoint?project=tz-test");
     expect(res.status).toBe(200);
 
     const body = await res.json() as { updatedAt: string };
@@ -191,7 +191,7 @@ describe("GET /waypoint — updatedAt UTC serialization", () => {
     });
     const after = Date.now();
 
-    const res = await app.request("/waypoint");
+    const res = await app.request("/waypoint?project=tz-consumer-test");
     const body = await res.json() as { updatedAt: string };
 
     // Reproduce the consumer's exact calculation
@@ -210,7 +210,7 @@ describe("GET /waypoint — updatedAt UTC serialization", () => {
       summary: "Direct ms round-trip test",
     });
 
-    const res = await app.request("/waypoint");
+    const res = await app.request("/waypoint?project=tz-roundtrip-test");
     const body = await res.json() as { updatedAt: string };
 
     // getTime() on a correctly-parsed Z-suffixed string must be a valid UTC epoch ms

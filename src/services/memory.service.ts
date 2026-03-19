@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
 import type { Memory, SearchIntent, IntentProfile, HybridRow } from "../types/memory.js";
 import { isDeleted } from "../types/memory.js";
 import type { SearchResult, SearchOptions } from "../types/conversation.js";
@@ -185,6 +185,7 @@ export class MemoryService {
     const queryEmbedding = await this.embeddings.embed(query);
     const profile = INTENT_PROFILES[intent];
     const now = new Date();
+    const offset = Math.min(options?.offset ?? 0, 500);
 
     const hasConversationService = this.conversationService !== null;
     const historyOnly = (options?.historyOnly ?? false) && hasConversationService;
@@ -195,11 +196,14 @@ export class MemoryService {
       this.conversationService?.config.historyWeight ??
       0.75;
 
+    // Widen the candidate pool to account for offset
+    const effectiveLimit = offset + limit;
+
     // Run memory + history queries in parallel
     const memoryPromise =
       !historyOnly
         ? this.repository
-            .findHybrid(queryEmbedding, query, limit * 5)
+            .findHybrid(queryEmbedding, query, effectiveLimit * 5)
             .then((candidates) =>
               candidates
                 .filter((m) => includeDeleted || !isDeleted(m))
@@ -225,7 +229,7 @@ export class MemoryService {
             .searchHistory(
               query,
               queryEmbedding,
-              historyOnly ? limit * 5 : limit * 3,
+              historyOnly ? effectiveLimit * 5 : effectiveLimit * 3,
               options?.historyFilters
             )
             .then((historyRows) =>
@@ -255,7 +259,7 @@ export class MemoryService {
     const merged = [...memoryResults, ...historyResults];
     merged.sort((a, b) => b.score - a.score);
 
-    return merged.slice(0, limit);
+    return merged.slice(offset, offset + limit);
   }
 
   async trackAccess(ids: string[]): Promise<void> {
@@ -277,6 +281,19 @@ export class MemoryService {
 
   private static readonly UUID_ZERO =
     "00000000-0000-0000-0000-000000000000";
+
+  private static waypointId(project?: string): string {
+    if (!project?.length) return MemoryService.UUID_ZERO;
+    const hex = createHash("sha256").update(`waypoint:${project}`).digest("hex");
+    // Format as UUID: 8-4-4-4-12
+    return [
+      hex.slice(0, 8),
+      hex.slice(8, 12),
+      hex.slice(12, 16),
+      hex.slice(16, 20),
+      hex.slice(20, 32),
+    ].join("-");
+  }
 
   async setWaypoint(args: {
     project: string;
@@ -336,7 +353,7 @@ ${list(args.memory_ids)}`;
     };
 
     const memory: Memory = {
-      id: MemoryService.UUID_ZERO,
+      id: MemoryService.waypointId(args.project),
       content,
       embedding: new Array(this.embeddings.dimension).fill(0),
       metadata,
@@ -352,7 +369,7 @@ ${list(args.memory_ids)}`;
     return memory;
   }
 
-  async getLatestWaypoint(): Promise<Memory | null> {
-    return await this.get(MemoryService.UUID_ZERO);
+  async getLatestWaypoint(project?: string): Promise<Memory | null> {
+    return await this.get(MemoryService.waypointId(project));
   }
 }

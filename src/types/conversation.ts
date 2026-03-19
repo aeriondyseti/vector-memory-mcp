@@ -118,4 +118,5 @@ export interface SearchOptions {
   historyOnly?: boolean;
   historyWeight?: number;
   historyFilters?: HistoryFilters;
+  offset?: number;
 }

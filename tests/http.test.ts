@@ -195,7 +195,7 @@ describe("HTTP API", () => {
         next_steps: ["Task B"],
       });
 
-      const res = await app.request("/waypoint");
+      const res = await app.request("/waypoint?project=test-project");
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.content).toContain("test-project");
@@ -211,7 +211,7 @@ describe("HTTP API", () => {
         memory_ids: [mem.id],
       });
 
-      const res = await app.request("/waypoint");
+      const res = await app.request("/waypoint?project=ref-test");
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.referencedMemories).toBeArray();

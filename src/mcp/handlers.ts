@@ -38,6 +38,10 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+function errorResult(text: string): CallToolResult {
+  return { isError: true, content: [{ type: "text", text }] };
+}
+
 function parseDate(value: unknown, fieldName: string): Date | undefined {
   if (value === undefined) return undefined;
   const date = new Date(value as string);
@@ -59,7 +63,7 @@ export async function handleStoreMemories(
   try {
     memories = asArray(args?.memories, "memories");
   } catch (e) {
-    return { isError: true, content: [{ type: "text", text: errorText(e) }] };
+    return errorResult(errorText(e));
   }
 
   const ids: string[] = [];
@@ -93,7 +97,7 @@ export async function handleDeleteMemories(
   try {
     ids = asArray(args?.ids, "ids");
   } catch (e) {
-    return { isError: true, content: [{ type: "text", text: errorText(e) }] };
+    return errorResult(errorText(e));
   }
   const results: string[] = [];
 
@@ -128,7 +132,7 @@ export async function handleUpdateMemories(
   try {
     updates = asArray(args?.updates, "updates");
   } catch (e) {
-    return { isError: true, content: [{ type: "text", text: errorText(e) }] };
+    return errorResult(errorText(e));
   }
 
   const results: string[] = [];
@@ -168,10 +172,11 @@ export async function handleSearchMemories(
 ): Promise<CallToolResult> {
   const query = args?.query;
   if (typeof query !== "string" || query.trim() === "") {
-    return { isError: true, content: [{ type: "text", text: "query is required and must be a non-empty string" }] };
+    return errorResult("query is required and must be a non-empty string");
   }
   const intent = (args?.intent as SearchIntent) ?? "fact_check";
   const limit = (args?.limit as number) ?? 10;
+  const offset = (args?.offset as number) ?? 0;
   const includeDeleted = (args?.include_deleted as boolean) ?? false;
   const historyOnly = (args?.history_only as boolean) ?? false;
   // history_only implies include_history
@@ -181,13 +186,14 @@ export async function handleSearchMemories(
   try {
     historyFilters = parseHistoryFilters(args);
   } catch (e) {
-    return { isError: true, content: [{ type: "text", text: errorText(e) }] };
+    return errorResult(errorText(e));
   }
 
   const results = await service.search(query, intent, limit, includeDeleted, {
     includeHistory,
     historyOnly,
     historyFilters,
+    offset,
   });
 
   if (results.length === 0) {
@@ -243,7 +249,7 @@ export async function handleGetMemories(
   try {
     ids = asArray(args?.ids, "ids");
   } catch (e) {
-    return { isError: true, content: [{ type: "text", text: errorText(e) }] };
+    return errorResult(errorText(e));
   }
 
   const memories = await service.getMultiple(ids);
@@ -267,10 +273,7 @@ export async function handleReportMemoryUsefulness(
   const memory = await service.vote(memoryId, useful ? 1 : -1);
 
   if (!memory) {
-    return {
-      content: [{ type: "text", text: `Memory ${memoryId} not found` }],
-      isError: true,
-    };
+    return errorResult(`Memory ${memoryId} not found`);
   }
 
   return {
@@ -305,10 +308,11 @@ export async function handleSetWaypoint(
 }
 
 export async function handleGetWaypoint(
-  _args: Record<string, unknown> | undefined,
+  args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const waypoint = await service.getLatestWaypoint();
+  const project = args?.project as string | undefined;
+  const waypoint = await service.getLatestWaypoint(project);
 
   if (!waypoint) {
     return {
@@ -350,15 +354,9 @@ function requireConversationService(
   const conversationService = service.getConversationService();
   if (!conversationService) {
     return {
-      error: {
-        content: [
-          {
-            type: "text",
-            text: "Conversation history indexing is not enabled. Enable it with --enable-history.",
-          },
-        ],
-        isError: true,
-      },
+      error: errorResult(
+        "Conversation history indexing is not enabled. Enable it with --enable-history."
+      ),
     };
   }
   return { service: conversationService };
@@ -376,7 +374,7 @@ export async function handleIndexConversations(
   const sinceStr = args?.since as string | undefined;
   const since = sinceStr ? new Date(sinceStr) : undefined;
   if (since && isNaN(since.getTime())) {
-    return { isError: true, content: [{ type: "text", text: "Invalid 'since' date format" }] };
+    return errorResult("Invalid 'since' date format");
   }
 
   const result = await conversationService.indexConversations(path, since);
@@ -444,18 +442,12 @@ export async function handleReindexSession(
 
   const sessionId = args?.session_id as string | undefined;
   if (!sessionId) {
-    return {
-      content: [{ type: "text", text: "session_id is required" }],
-      isError: true,
-    };
+    return errorResult("session_id is required");
   }
   const result = await conversationService.reindexSession(sessionId);
 
   if (!result.success) {
-    return {
-      content: [{ type: "text", text: `Reindex failed: ${result.error}` }],
-      isError: true,
-    };
+    return errorResult(`Reindex failed: ${result.error}`);
   }
 
   return {
@@ -497,9 +489,6 @@ export async function handleToolCall(
     case "reindex_session":
       return handleReindexSession(args, service);
     default:
-      return {
-        content: [{ type: "text", text: `Unknown tool: ${name}` }],
-        isError: true,
-      };
+      return errorResult(`Unknown tool: ${name}`);
   }
 }
