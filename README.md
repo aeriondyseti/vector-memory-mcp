@@ -11,7 +11,7 @@ A local-first MCP server that provides vector-based memory storage. Uses local e
 
 ## Features
 
-- **Local & Private** - All embeddings generated locally, data stored in a single SQLite file
+- **Local & Private** - All embeddings generated locally ([all-MiniLM-L6-v2](https://huggingface.co/Xenova/all-MiniLM-L6-v2), 384-dim), data stored in a single SQLite file
 - **Semantic Search** - Hybrid vector + full-text search with intent-based ranking
 - **Batch Operations** - Store, update, delete, and retrieve multiple memories at once
 - **Session Waypoints** - Save and restore project context between sessions

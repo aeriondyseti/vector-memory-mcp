@@ -1,6 +1,6 @@
 # Roadmap
 
-Current version: **1.1.0**
+Current version: **2.0.0**
 
 ## Tech Debt
 
@@ -12,11 +12,19 @@ Current version: **1.1.0**
 
 - **N individual upserts for access tracking in `getMultiple()`**: `memory.service.ts:getMultiple()` batches the read via `findByIds` (single IN query), but fans out to N individual `repository.upsert()` calls for access tracking. Each upsert does a SELECT (existence check) + UPDATE — 2N queries total. A `bulkUpdateAccess(ids, now)` repository method using a single `UPDATE ... WHERE id IN (...)` would collapse this to 1 query. Same pattern applies to `trackAccess()`.
 
-- **Unbounded IN clause in `findByIds()`**: `memory.repository.ts:findByIds()` builds a SQL IN clause from an unbounded array of IDs. LanceDB/DataFusion may have query length limits. Add a size guard (e.g., 100 IDs) and batch if needed.
+- **Unbounded IN clause in `findByIds()`**: `memory.repository.ts:findByIds()` builds a SQL IN clause from an unbounded array of IDs. SQLite has a default SQLITE_MAX_VARIABLE_NUMBER limit (usually 999). Add a size guard (e.g., 100 IDs) and batch if needed.
 
 - **GitHub Actions Node.js 20 deprecation**: `actions/checkout@v4` and `actions/setup-node@v4` run on Node.js 20, which GitHub will force to Node.js 24 starting June 2, 2026. Update to newer action versions that support Node.js 24 before then.
 
 ## Completed
+
+### v2.0.0 - SQLite Migration & CI/CD
+- Migrated storage from LanceDB to SQLite with sqlite-vec for vector search and FTS5 for full-text search
+- Dropped Node.js support — Bun runtime required for bun:sqlite bindings
+- Renamed checkpoint to waypoint (tools, routes, metadata)
+- Added LanceDB-to-SQLite migration subcommand
+- Rewrote CI/CD for three-tier dist-tag model (@dev/@rc/@latest)
+- Fixed MCP string-serialized array handling (asArray helper)
 
 ### v1.1.0 - Conversation History Indexing (Feature 27)
 - Conversation history indexing from Claude Code JSONL session logs
@@ -59,7 +67,7 @@ Add to `search_memories`:
 - `after` / `before` — ISO date strings (`"2024-01-01"`)
 - `time_expr` — natural language (`"yesterday"`, `"last week"`, `"3 days ago"`)
 
-`created_at` is already a top-level LanceDB column; only a time parser and a WHERE predicate are needed.
+`created_at` is already a top-level SQLite column; only a time parser and a WHERE predicate are needed.
 
 #### 2. Flexible Deletion — Tags, Time Range, Dry Run
 Extend `delete_memories`:
@@ -71,20 +79,20 @@ Extend `delete_memories`:
 #### 3. Memory Pinning
 Add a `pinned` boolean column. Pinned memories are skipped by all delete and cleanup operations unless `force: true` is passed. Settable via `update_memories`. Reflected in search results.
 
-Schema: one `Int32` column — LanceDB `add_columns` migration required.
+Schema: one `Int32` column — SQLite schema migration required.
 
 #### 4. Result Pagination (Offset)
-Add `offset: integer` to `search_memories` and `get_memories`. LanceDB supports `.offset(n)` natively.
+Add `offset: integer` to `search_memories` and `get_memories`. SQLite supports `OFFSET` natively.
 
 #### 5. Health & Storage Stats as MCP Tools
 Two new read-only tools:
 - `memory_health` — total count, deleted count, average usefulness, DB path, backend info
 - `get_storage_stats` — table size on disk, record counts, fragmentation estimate
 
-Pure LanceDB table queries; no schema changes.
+Pure SQLite queries; no schema changes.
 
 #### 6. Database Maintenance Tools
-- `optimize_database` — calls LanceDB `table.optimize()` / `compact_files()` after bulk deletes
+- `optimize_database` — calls SQLite `VACUUM` / `ANALYZE` after bulk deletes
 - `cleanup_orphans` — surface inconsistencies in the table
 - `get_maintenance_history` — audit log stored as a sidecar JSON file
 
@@ -95,14 +103,14 @@ Add `max_response_chars: integer` to `search_memories`. Truncates at memory boun
 
 ### Phase 2 — High Impact, Medium Effort
 
-Require schema migrations (new LanceDB columns) or new retrieval logic.
+Require schema migrations (new SQLite columns) or new retrieval logic.
 
 #### 8. Memory Archiving
 Add `archived` boolean column. Archived memories are excluded from search by default. Expose:
 - `archive_memory(ids[])` / `unarchive_memory(ids[])`
 - `include_archived: boolean` flag on `search_memories` and `get_memories`
 
-Schema: one `Int32` column — LanceDB migration required.
+Schema: one `Int32` column — SQLite schema migration required.
 
 #### 9. Confidence & Importance Levels
 Add two fields to the memory model:
@@ -111,20 +119,20 @@ Add two fields to the memory model:
 
 Settable via `store_memories` and `update_memories`. `search_memories` gains `min_confidence` and `min_importance` filter params. `critical` importance implies pin-protection behavior for deletions.
 
-Schema: two `Utf8` columns — LanceDB migration required.
+Schema: two `Utf8` columns — SQLite schema migration required.
 
 #### 10. TTL (Auto-Expiry)
 Add `expires_at` nullable timestamp column. All `search_memories` calls automatically filter `WHERE expires_at IS NULL OR expires_at > now()`. A `expire_memories` maintenance tool tombstones expired entries on demand.
 
-Schema: one nullable `Timestamp` column — LanceDB migration required.
+Schema: one nullable `Timestamp` column — SQLite schema migration required.
 
 #### 11. Search Modes — Exact & Hybrid
 Add `mode` parameter to `search_memories`:
 - `semantic` — current default (vector similarity only)
-- `exact` — substring/keyword match via LanceDB FTS index (`create_fts_index`)
+- `exact` — substring/keyword match via FTS5 index
 - `hybrid` — `semantic_score × (1 - quality_boost) + usefulness × quality_boost`
 
-`usefulness` column already exists; hybrid ranking uses it immediately. FTS requires building a LanceDB full-text index.
+`usefulness` column already exists; hybrid ranking uses it immediately. FTS5 is already in use.
 
 #### 12. Tag-Based Search & Filtering
 - Add `tags` / `tag_match` filter to `search_memories` (JSON-path predicate on metadata)
@@ -152,7 +160,7 @@ New subsystems or sidecar tables. Scope each individually before starting.
 - `merge_duplicates(keep_id, merge_ids[], merge_strategy)` — strategies: `keep_content | combine_content | keep_newest`
 - `cleanup_duplicates()` — auto-deduplicate at a safe default threshold (0.92)
 
-Implementation: pairwise ANN search via LanceDB, cosine threshold grouping, then merge through existing `update_memories` + `delete_memories`.
+Implementation: pairwise ANN search via sqlite-vec, cosine threshold grouping, then merge through existing `update_memories` + `delete_memories`.
 
 #### 15. Quality Scoring System
 Add `quality_score: Float32` column (0.0–1.0). Score derives from:
@@ -162,7 +170,7 @@ Add `quality_score: Float32` column (0.0–1.0). Score derives from:
 
 Score is recalculated on `report_memory_usefulness` and via a `score_memories` maintenance pass. Feeds the `hybrid` search mode (Feature 11) and `find_stale_memories` (Feature 13).
 
-Schema: one `Float32` column — LanceDB migration required.
+Schema: one `Float32` column — SQLite schema migration required.
 
 #### 16. Tag Management System
 Full CRUD on the tag namespace:
@@ -323,7 +331,7 @@ Upgrade the current single-overwrite waypoint system to a proper history-aware h
 - `list_handoffs` — browse handoff history with timestamps and resume status
 - `get_startup_context(query, max_tokens)` — query-aware aggregation of recent handoffs + relevant memories for context injection at conversation start
 
-Handoffs stored as structured JSON in a sidecar file alongside the LanceDB store.
+Handoffs stored as structured JSON in a sidecar file alongside the SQLite database.
 
 #### 21. Formal Memory Type Taxonomy
 
@@ -376,7 +384,7 @@ New tools:
 - `get_episode(episode_id)` — retrieve all memories in an episode, ordered by sequence
 - `list_episodes(limit, offset)` — browse episodes by recency
 
-Schema: two nullable `Utf8` columns + one nullable `Int32` — LanceDB migration.
+Schema: two nullable `Utf8` columns + one nullable `Int32` — SQLite schema migration.
 
 ---
 
@@ -405,16 +413,16 @@ Absorbed into Feature 19 (Knowledge Graph Subsystem) — the memory graph's line
 
 #### 26. Backup & Restore
 **Source:** shodh-memory
-**Impact:** LanceDB files are opaque binary format. There is currently no way to take a snapshot, verify its integrity, or roll back after a bad consolidation run or accidental bulk delete.
+**Impact:** SQLite database is a single file. There is currently no way to take a snapshot, verify its integrity, or roll back after a bad consolidation run or accidental bulk delete.
 
 New tools:
-- `backup_create(description?)` — exports the LanceDB table to a portable format (Lance snapshot + metadata JSON), SHA-256 verifies the result, stores in a timestamped backup directory
+- `backup_create(description?)` — creates a SQLite backup, SHA-256 verifies the result, stores in a timestamped backup directory
 - `backup_list` — list backups with timestamps, sizes, and descriptions
 - `backup_verify(backup_id)` — check SHA-256 integrity without restoring
 - `backup_restore(backup_id)` — restore from a verified snapshot (requires explicit confirmation flag)
 - `backup_purge(keep_last_n)` — delete old backups beyond a retention count
 
-LanceDB supports `table.checkout_latest()` and `table.list_versions()` natively — backup/restore can leverage LanceDB's built-in versioning before falling back to full export.
+SQLite's single-file format makes backup straightforward — a file copy or `.backup` command is sufficient. Integrity verification via SHA-256 adds safety for automated restore.
 
 ---
 

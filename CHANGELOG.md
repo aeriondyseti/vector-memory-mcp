@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] - 2026-03-12
+## [2.0.0] - 2026-03-18
 
 ### Breaking Changes
 - **SQLite replaces LanceDB**: Storage backend migrated from LanceDB (~845-file directory) to a single SQLite file using [sqlite-vec](https://github.com/asg017/sqlite-vec) for vector search and FTS5 for full-text search. Dependencies reduced from 223MB to 24KB.
@@ -19,10 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **`migrate` subcommand**: Run `vector-memory-mcp migrate` to convert LanceDB data to SQLite. Auto-detects legacy data at startup and prompts for migration.
 - **Lockfile-based port discovery**: Server writes `.vector-memory/server.lock` with `{port, pid}` on startup, enabling hooks to discover the correct port in multi-session scenarios.
+- **Server instructions**: MCP server now declares itself as the canonical memory system in tool descriptions
+- **Smoke test script**: `bun run smoke` for manual testing checklist
+- **Version-based debug logging**: Auto-enabled for `-dev.N` and `-rc.N` versions, or via `VECTOR_MEMORY_DEBUG=1`
+
+### Fixed
+- **MCP string-serialized arrays**: Added `asArray()` helper to handle MCP transports delivering array arguments as JSON strings (e.g., `for..of` iterating character-by-character)
+- **`isError` flag on validation errors**: All validation error responses now include `isError: true` per MCP convention
+- **Server version in MCP info**: Uses `VERSION` from `package.json` instead of hardcoded `"0.6.0"`
+- **Migration guard**: `runMigrate` now guards against missing LanceDB source on fresh installs
 
 ### Changed
 - **Direct TypeScript execution**: Package now runs `.ts` source directly via Bun instead of compiling to `dist/`. Simplifies development and eliminates stale-build issues.
 - **Hybrid search rewritten**: KNN (sqlite-vec) + FTS5 queries with manual Reciprocal Rank Fusion (k=60) replace LanceDB's built-in reranker chain. Service layer unchanged.
+- **CI/CD rewrite**: Three-tier dist-tag model (`@dev`/`@rc`/`@latest`) with branch-based RC publish flow
 
 ### Removed
 - `dist/` build pipeline (`tsc` compilation, `prebuild`, `build` scripts)
@@ -158,6 +168,9 @@ LanceDB (`@lancedb/lancedb`, `apache-arrow`) ships as a production dependency in
 
 [2.0.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.0.2...v1.1.0
+[1.0.2]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v0.8.0...v1.0.0
 [0.8.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v0.5.0...v0.8.0
 [0.5.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v0.3.0...v0.4.0
