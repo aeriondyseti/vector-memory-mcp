@@ -7,12 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'npm dist-tag (dev or latest)'
+        description: 'npm dist-tag (dev, rc, or latest)'
         required: true
         default: 'dev'
         type: choice
         options:
           - dev
+          - rc
           - latest
 
 permissions:
@@ -28,8 +29,8 @@ jobs:
         with:
           fetch-depth: 0  # Full history needed for branch-tag validation
 
-      - name: Validate tag is on main
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Validate stable tag is on main
+        if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-dev.') && !contains(github.ref_name, '-rc.')
         run: |
           TAG="${{ github.ref_name }}"
           # Check that the tagged commit exists on main
@@ -37,13 +38,17 @@ jobs:
             echo "::error::Tag $TAG does not point to a commit on main. Stable releases must be tagged from main."
             exit 1
           fi
-          echo "Tag $TAG is on main"
+          echo "Stable tag $TAG is on main"
 
       - name: Determine npm tag
         id: npm-tag
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             TAG="${{ inputs.tag }}"
+          elif [[ "${{ github.ref_name }}" == *-dev.* ]]; then
+            TAG="dev"
+          elif [[ "${{ github.ref_name }}" == *-rc.* ]]; then
+            TAG="rc"
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG="latest"
           else
@@ -104,7 +109,8 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           npm dist-tag add "@aeriondyseti/vector-memory-mcp@$VERSION" dev
-          echo "Also tagged $VERSION as @dev"
+          npm dist-tag add "@aeriondyseti/vector-memory-mcp@$VERSION" rc
+          echo "Also tagged $VERSION as @dev and @rc"
 
       - name: Extract changelog for this version
         if: steps.npm-tag.outputs.tag == 'latest'
