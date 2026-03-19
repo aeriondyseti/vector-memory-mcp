@@ -114,13 +114,19 @@ jobs:
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" \
             | jq -r '.value')
           ENCODED_PKG=$(jq -rn --arg pkg "@aeriondyseti/vector-memory-mcp" '$pkg | @uri')
-          NPM_TOKEN=$(curl -sf -X POST \
+          RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bearer $OIDC_TOKEN" \
             -H "Content-Type: application/json" \
-            "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${ENCODED_PKG}" \
-            | jq -r '.token')
+            "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${ENCODED_PKG}")
+          NPM_TOKEN=$(echo "$RESPONSE" | jq -r '.token // empty')
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::OIDC token exchange failed. Response: $(echo "$RESPONSE" | jq -c 'del(.token)')"
+            exit 1
+          fi
           echo "::add-mask::$NPM_TOKEN"
-          echo "npm_token=$NPM_TOKEN" >> $GITHUB_OUTPUT
+          # Write token directly to .npmrc to avoid NODE_AUTH_TOKEN conflicts
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > "$HOME/.npmrc"
+          echo "oidc_success=true" >> $GITHUB_OUTPUT
 
       - name: Cascade dist-tags
         if: steps.npm-tag.outputs.tag == 'latest'
@@ -129,8 +135,6 @@ jobs:
           npm dist-tag add "@aeriondyseti/vector-memory-mcp@$VERSION" dev
           npm dist-tag add "@aeriondyseti/vector-memory-mcp@$VERSION" rc
           echo "Also tagged $VERSION as @dev and @rc"
-        env:
-          NODE_AUTH_TOKEN: ${{ steps.npm-oidc.outputs.npm_token }}
 
       - name: Also tag as dev (RC is the latest pre-release)
         if: steps.npm-tag.outputs.tag == 'rc'
@@ -138,8 +142,6 @@ jobs:
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#v}"
           npm dist-tag add "@aeriondyseti/vector-memory-mcp@${VERSION}" dev
-        env:
-          NODE_AUTH_TOKEN: ${{ steps.npm-oidc.outputs.npm_token }}
 
       - name: Extract changelog for this version
         if: steps.npm-tag.outputs.tag == 'latest'
