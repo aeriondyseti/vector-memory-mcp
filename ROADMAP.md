@@ -16,6 +16,16 @@ Current version: **2.0.0**
 
 - **GitHub Actions Node.js 20 deprecation**: `actions/checkout@v4` and `actions/setup-node@v4` run on Node.js 20, which GitHub will force to Node.js 24 starting June 2, 2026. Update to newer action versions that support Node.js 24 before then.
 
+- **Non-atomic delete-insert in conversation reindexing**: `conversation.service.ts` calls `deleteBySessionId()` before `embedBatch()`/`insertBatch()`. If embedding or insert fails after delete, the session's chunks are lost until the next re-index. Wrap in a SQLite transaction or insert-then-delete to make it crash-safe.
+
+- **ConversationChunk field duplication**: `ConversationChunk` duplicates `sessionId`, `role`, `messageIndexStart`, `messageIndexEnd`, and `project` at both the top level and inside `metadata`. Consolidate to one location to eliminate divergence risk.
+
+- **Conversation search filters applied post-candidate selection**: `conversation.repository.ts` runs KNN/FTS without applying session/role/date filters, then filters after RRF scoring. This can return fewer than `limit` results. Intentional performance tradeoff — document or push filters into candidate queries.
+
+- **`get_waypoint` missing optional `project` parameter**: `set_waypoint` accepts a `project` param but `get_waypoint` has no way to specify which project's waypoint to retrieve. Add an optional `project` parameter for explicit retrieval.
+
+- **Platform-dependent path separator in subagent detection**: `claude-code.parser.ts` uses hardcoded `/subagents/` check which won't match on Windows. Low priority since Bun runtime is Linux/macOS focused, but should use `path.sep` or a regex for correctness.
+
 ## Completed
 
 ### v2.0.0 - SQLite Migration & CI/CD

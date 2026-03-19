@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`isError` flag on validation errors**: All validation error responses now include `isError: true` per MCP convention
 - **Server version in MCP info**: Uses `VERSION` from `package.json` instead of hardcoded `"0.6.0"`
 - **Migration guard**: `runMigrate` now guards against missing LanceDB source on fresh installs
+- **Migration vector conversion**: Fixed `DataView` byteOffset/byteLength handling in `toFloatArray` — previously ignored view bounds, risking corrupted embeddings
+- **Migration hardening**: Warn on unexpected timestamp types instead of silent `Date.now()` fallback; close LanceDB connection after migration; quote paths in summary shell commands; handle `.sqlite` extension doubling
+- **Input validation**: Validate `query`, `history_after`, `history_before`, and `since` date parameters in MCP handlers and HTTP routes — reject malformed dates instead of passing `Invalid Date` downstream
+- **Empty FTS query guard**: Skip FTS MATCH when sanitized query is empty instead of crashing
+- **Waypoint soft-delete filter**: Exclude soft-deleted memories from waypoint `referencedMemories`
+- **Subagent UUID validation**: Validate subagent session filenames against UUID pattern (matching main session behavior)
+- **Publish workflow**: Add `NODE_AUTH_TOKEN` to dist-tag cascade step; always run typecheck for `@dev` publishes
 
 ### Changed
 - **Direct TypeScript execution**: Package now runs `.ts` source directly via Bun instead of compiling to `dist/`. Simplifies development and eliminates stale-build issues.
