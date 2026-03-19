@@ -20,14 +20,22 @@ function asArray<T>(value: unknown, fieldName: string): T[] {
     try {
       const parsed = JSON.parse(value);
       if (Array.isArray(parsed)) return parsed;
+      if (DEBUG) {
+        console.error(
+          `[vector-memory-mcp] DEBUG: ${fieldName} parsed as ${typeof parsed}, not array`
+        );
+      }
     } catch { /* fall through */ }
-  }
-  if (DEBUG) {
+  } else if (DEBUG) {
     console.error(
       `[vector-memory-mcp] DEBUG: ${fieldName} has unexpected type: ${typeof value}`
     );
   }
   throw new Error(`${fieldName} must be an array`);
+}
+
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 export async function handleStoreMemories(
@@ -42,7 +50,7 @@ export async function handleStoreMemories(
   try {
     memories = asArray(args?.memories, "memories");
   } catch (e) {
-    return { content: [{ type: "text", text: (e as Error).message }] };
+    return { content: [{ type: "text", text: errorText(e) }] };
   }
 
   const ids: string[] = [];
@@ -76,7 +84,7 @@ export async function handleDeleteMemories(
   try {
     ids = asArray(args?.ids, "ids");
   } catch (e) {
-    return { content: [{ type: "text", text: (e as Error).message }] };
+    return { content: [{ type: "text", text: errorText(e) }] };
   }
   const results: string[] = [];
 
@@ -111,7 +119,7 @@ export async function handleUpdateMemories(
   try {
     updates = asArray(args?.updates, "updates");
   } catch (e) {
-    return { content: [{ type: "text", text: (e as Error).message }] };
+    return { content: [{ type: "text", text: errorText(e) }] };
   }
 
   const results: string[] = [];
@@ -212,7 +220,12 @@ export async function handleGetMemories(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const ids = args?.ids as string[];
+  let ids: string[];
+  try {
+    ids = asArray(args?.ids, "ids");
+  } catch (e) {
+    return { content: [{ type: "text", text: errorText(e) }] };
+  }
 
   const memories = await service.getMultiple(ids);
   const memoryMap = new Map(memories.map((m) => [m.id, m]));
