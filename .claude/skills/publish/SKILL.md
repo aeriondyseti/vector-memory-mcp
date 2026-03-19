@@ -13,8 +13,8 @@ If the user passed an argument (`dev`, `rc`, or `release`), use that flow direct
 Otherwise, ask: **"Dev, RC, or stable release?"**
 
 - **dev**: Dev prerelease based on current stable version (e.g., `1.0.0` -> `1.0.0-dev.1`). Backward-looking — "stuff since last release."
-- **rc**: Release candidate declaring the next version (e.g., `1.1.0-rc.1`). Forward-looking — "this will become 1.1.0."
-- **release**: Full stable release. Merges dev to main, tags stable version.
+- **rc**: Release candidate. Creates or updates an `rc/X.Y.Z` branch for stabilization. Forward-looking — "this will become X.Y.Z." No new features — bugfixes and chores only.
+- **release**: Full stable release. Merges rc branch to main, tags stable version.
 
 ---
 
@@ -39,7 +39,7 @@ Dev versions are based on the **current stable version** (not the next one).
 
 ```bash
 # Get the stable base version from the latest stable tag (exclude dev and rc tags)
-BASE=$(git tag --list 'v*' --sort=-version:refname | grep -v -E '(-dev\.|--rc\.)' | head -1 | sed 's/^v//')
+BASE=$(git tag --list 'v*' --sort=-version:refname | grep -v -E '(-dev\.|-rc)' | head -1 | sed 's/^v//')
 
 # Find the latest dev tag for this base and increment
 LAST_DEV=$(git tag --list "v${BASE}-dev.*" --sort=-version:refname | head -1)
@@ -70,7 +70,9 @@ Monitor: https://github.com/AerionDyseti/vector-memory-mcp/actions
 
 ## RC Flow
 
-RC tags declare the **intended next version**. They are created on the `dev` branch when you're ready to start dogfooding a release candidate.
+RC uses **branches**, not tags. Pushing to an `rc/*` branch auto-publishes to `@rc`.
+The `rc/X.Y.Z` branch is a stabilization branch — **no new features, only bugfixes and chores**.
+The version in `package.json` on the rc branch determines the published version.
 
 ### RC1. Pre-flight
 
@@ -82,26 +84,29 @@ git fetch origin && git status -sb  # Must be up to date
 
 Must be on `dev` branch, clean, and up to date. If not, stop and fix first.
 
-### RC2. Analyze Commits and Determine Version
+### RC2. Check for Existing RC Branch
+
+```bash
+# Check if an rc/* branch already exists
+git branch --list 'rc/*'
+git branch -r --list 'origin/rc/*'
+```
+
+**If an RC branch exists:** The user should be on that branch iterating, not starting a new RC.
+Ask if they want to switch to the existing RC branch, or if they intend to supersede it.
+
+### RC3. Determine Version (new RC only)
 
 ```bash
 # Last stable tag (exclude dev and rc tags)
-LAST_STABLE=$(git tag --list 'v*' --sort=-version:refname | grep -v -E '(-dev\.|-rc\.)' | head -1)
+LAST_STABLE=$(git tag --list 'v*' --sort=-version:refname | grep -v -E '(-dev\.|-rc)' | head -1)
 echo "Last stable: $LAST_STABLE"
 
 # Commits since last stable
 git log ${LAST_STABLE}..HEAD --oneline
 ```
 
-Check if there's already an RC series for a version:
-
-```bash
-# Find any existing RC tags newer than last stable
-EXISTING_RC=$(git tag --list 'v*-rc.*' --sort=-version:refname | head -1)
-echo "Latest RC: $EXISTING_RC"
-```
-
-**If no existing RC:** Analyze commit messages to determine the semver bump:
+Analyze commit messages to determine the semver bump:
 
 | Bump | Trigger |
 |------|---------|
@@ -109,29 +114,47 @@ echo "Latest RC: $EXISTING_RC"
 | **MINOR** | `feat:` commits |
 | **PATCH** | `fix:`, `docs:`, `refactor:`, `perf:`, `test:`, `chore:` |
 
-Use the highest applicable level. Present the proposed version and ask for confirmation.
+Use the highest applicable level.
 
-**If existing RC:** Increment the RC number (e.g., `1.1.0-rc.1` -> `1.1.0-rc.2`).
-
-### RC3. Confirm with User
+### RC4. Confirm with User
 
 Present:
 - Current stable version -> Proposed RC version
 - Key commits being included
 
-Ask: "Tag v{VERSION}? (yes/no)"
+Ask: "Create rc/X.Y.Z with version X.Y.Z-rc.1? (yes/no)"
 
-### RC4. Tag and Push (triggers GHA)
+### RC5. Create Branch and Bump Version
 
 ```bash
-git tag "v${NEW_VERSION}"
-git push origin dev && git push --tags
+git checkout -b rc/X.Y.Z
+npm version X.Y.Z-rc.1 --no-git-tag-version
+git add package.json
+git commit -m "chore: begin rc X.Y.Z"
+git push -u origin rc/X.Y.Z
 ```
 
-### RC5. Report
+GHA will auto-publish to `@rc` on push.
+
+### RC6. Iterating on RC
+
+When fixing bugs on the RC branch, bump the RC number before pushing:
+
+```bash
+# Already on rc/X.Y.Z branch
+npm version X.Y.Z-rc.N --no-git-tag-version
+git add package.json
+git commit -m "chore: bump rc to X.Y.Z-rc.N"
+git push origin rc/X.Y.Z
+```
+
+Each push triggers a new `@rc` publish.
+
+### RC7. Report
 
 ```
-Pushed v$NEW_VERSION - GitHub Actions will publish to npm @rc
+Created rc/X.Y.Z with version X.Y.Z-rc.1
+GitHub Actions will publish to npm @rc on each push
 Monitor: https://github.com/AerionDyseti/vector-memory-mcp/actions
 ```
 
@@ -139,43 +162,39 @@ Monitor: https://github.com/AerionDyseti/vector-memory-mcp/actions
 
 ## Release Flow
 
-Stable releases merge `dev` into `main` and tag the stable version. The RC phase should have already determined the version.
+Stable releases merge the `rc/X.Y.Z` branch into `main` and tag the stable version.
 
 ### R1. Pre-flight
 
 ```bash
-git branch --show-current   # Must be dev
+git branch --show-current   # Must be on rc/* branch
 git status --short           # Must be clean
 git fetch origin && git status -sb  # Must be up to date
 ```
 
-Must be on `dev` branch, clean, and up to date. If not, stop and fix first.
+Must be on an `rc/*` branch, clean, and up to date. If not, stop and fix first.
 
 ### R2. Determine Version
 
-The version comes from the latest RC tag:
+The version comes from the branch name:
 
 ```bash
-# Find the latest RC tag to determine the release version
-LATEST_RC=$(git tag --list 'v*-rc.*' --sort=-version:refname | head -1)
-# Strip the -rc.N suffix to get the stable version
-RELEASE_VERSION=$(echo "$LATEST_RC" | sed 's/^v//; s/-rc\.[0-9]*$//')
+BRANCH=$(git branch --show-current)
+RELEASE_VERSION=${BRANCH#rc/}
 echo "Release version: $RELEASE_VERSION"
 ```
-
-If there's no RC tag, fall back to commit analysis (same as RC2/RC3 logic).
 
 ### R3. Confirm with User
 
 Present:
-- Latest RC tag -> Stable version
-- Commits being released
+- RC branch -> Stable version
+- Commits being released (since last stable tag)
 
 Ask: "Release v{VERSION}? (yes/no)"
 
 ### R4. Prepare Release Commit
 
-Update CHANGELOG and bump version on `dev`:
+Update CHANGELOG and set final version on the rc branch:
 
 ```markdown
 ## [X.Y.Z] - YYYY-MM-DD
@@ -194,13 +213,13 @@ Update CHANGELOG and bump version on `dev`:
 npm version X.Y.Z --no-git-tag-version
 git add CHANGELOG.md package.json
 git commit -m "chore: release vX.Y.Z"
-git push origin dev
+git push origin rc/X.Y.Z
 ```
 
-### R5. Create PR (dev -> main)
+### R5. Create PR (rc/X.Y.Z -> main)
 
 ```bash
-gh pr create --base main --head dev \
+gh pr create --base main --head rc/X.Y.Z \
   --title "Release vX.Y.Z" \
   --body "$(cat <<'PREOF'
 ## Release vX.Y.Z
@@ -220,12 +239,13 @@ git tag vX.Y.Z
 git push --tags
 ```
 
-Then reset dev to main and tag dev.0:
+Then update dev to include the release and clean up:
 
 ```bash
-git checkout dev && git reset --hard main
-git tag "vX.Y.Z-dev.0"
-git push origin dev --force && git push --tags
+git checkout dev && git merge main
+git push origin dev
+git branch -d rc/X.Y.Z
+git push origin --delete rc/X.Y.Z
 ```
 
 ### R7. Report

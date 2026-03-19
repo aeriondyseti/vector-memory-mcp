@@ -2,7 +2,7 @@ name: Publish to npm
 
 on:
   push:
-    branches: [dev]
+    branches: [dev, 'rc/*']
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -30,7 +30,7 @@ jobs:
           fetch-depth: 0  # Full history needed for branch-tag validation
 
       - name: Validate stable tag is on main
-        if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-dev.') && !contains(github.ref_name, '-rc.')
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           TAG="${{ github.ref_name }}"
           # Check that the tagged commit exists on main
@@ -45,9 +45,7 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             TAG="${{ inputs.tag }}"
-          elif [[ "${{ github.ref_name }}" == *-dev.* ]]; then
-            TAG="dev"
-          elif [[ "${{ github.ref_name }}" == *-rc.* ]]; then
+          elif [[ "${{ github.ref }}" == refs/heads/rc/* ]]; then
             TAG="rc"
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG="latest"
@@ -83,9 +81,11 @@ jobs:
         run: bun install
 
       - name: Run tests
+        if: steps.npm-tag.outputs.tag != 'dev'
         run: bun run test
 
       - name: Typecheck
+        if: steps.npm-tag.outputs.tag != 'dev'
         run: bun run typecheck
 
       - name: Check if version already published
