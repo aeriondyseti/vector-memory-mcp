@@ -103,6 +103,25 @@ jobs:
         if: steps.check-version.outputs.skip != 'true'
         run: npm publish --access public --provenance --tag ${{ steps.npm-tag.outputs.tag }}
 
+      - name: Get npm token via OIDC (for dist-tag operations)
+        if: steps.npm-tag.outputs.tag == 'latest' || steps.npm-tag.outputs.tag == 'rc'
+        id: npm-oidc
+        run: |
+          # npm dist-tag doesn't support OIDC natively (npm/cli#8547)
+          # Manually perform the same token exchange that npm publish does
+          OIDC_TOKEN=$(curl -sf \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" \
+            | jq -r '.value')
+          ENCODED_PKG=$(jq -rn --arg pkg "@aeriondyseti/vector-memory-mcp" '$pkg | @uri')
+          NPM_TOKEN=$(curl -sf -X POST \
+            -H "Authorization: Bearer $OIDC_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${ENCODED_PKG}" \
+            | jq -r '.token')
+          echo "::add-mask::$NPM_TOKEN"
+          echo "npm_token=$NPM_TOKEN" >> $GITHUB_OUTPUT
+
       - name: Cascade dist-tags
         if: steps.npm-tag.outputs.tag == 'latest'
         run: |
@@ -111,7 +130,7 @@ jobs:
           npm dist-tag add "@aeriondyseti/vector-memory-mcp@$VERSION" rc
           echo "Also tagged $VERSION as @dev and @rc"
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ steps.npm-oidc.outputs.npm_token }}
 
       - name: Also tag as dev (RC is the latest pre-release)
         if: steps.npm-tag.outputs.tag == 'rc'
@@ -119,6 +138,8 @@ jobs:
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#v}"
           npm dist-tag add "@aeriondyseti/vector-memory-mcp@${VERSION}" dev
+        env:
+          NODE_AUTH_TOKEN: ${{ steps.npm-oidc.outputs.npm_token }}
 
       - name: Extract changelog for this version
         if: steps.npm-tag.outputs.tag == 'latest'
