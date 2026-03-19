@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-03-19
+
+### Added
+- **`search_memories` offset pagination**: New `offset` parameter for paginating through search results. Candidate pool scales with offset; capped at 500 to prevent pathological queries.
+- **`get_waypoint` project parameter** (experimental): Optional `project` param on `get_waypoint` MCP tool and `GET /waypoint?project=` HTTP route. Waypoint IDs are now deterministic per project (SHA-256), allowing multiple projects to maintain independent waypoints. Legacy no-project path unchanged.
+
+### Changed
+- **`errorResult()` helper in handlers**: Replaced 11 inline error-response constructions with a shared `errorResult(text)` helper. No behavior change.
+
 ## [2.1.1] - 2026-03-19
 
 ### Fixed
