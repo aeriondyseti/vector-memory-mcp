@@ -90,6 +90,19 @@ export interface SessionFileInfo {
   lastModified: Date;
 }
 
+/** Outcome status for a single session during indexing */
+export type IndexStatus = "indexed" | "skipped" | "error";
+
+/** Per-session detail returned from indexConversations */
+export interface SessionIndexDetail {
+  sessionId: string;
+  project: string;
+  status: IndexStatus;
+  chunks?: number;
+  messages?: number;
+  error?: string;
+}
+
 /** Search filter options for conversation history */
 export interface HistoryFilters {
   sessionId?: string;
