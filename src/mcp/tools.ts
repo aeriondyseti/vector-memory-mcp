@@ -54,7 +54,7 @@ For long content (>1000 chars), provide embedding_text with a searchable summary
     },
     required: ["memories"],
   },
-};;
+};
 
 export const deleteMemoriesTool: Tool = {
   name: "delete_memories",
@@ -74,7 +74,7 @@ export const deleteMemoriesTool: Tool = {
     },
     required: ["ids"],
   },
-};;
+};
 
 
 const updateMemoriesTool: Tool = {
@@ -167,6 +167,35 @@ When in doubt, search. Missing context is costlier than an extra query.`,
         description: "Include soft-deleted memories in results (default: false). Useful for recovering prior information.",
         default: false,
       },
+      include_history: {
+        type: "boolean",
+        description:
+          "Include conversation history results (default: true when history indexing is enabled).",
+        default: true,
+      },
+      history_only: {
+        type: "boolean",
+        description:
+          "Search only conversation history, not explicit memories. Implies include_history: true (default: false).",
+        default: false,
+      },
+      session_id: {
+        type: "string",
+        description: "Filter conversation history results to a specific session ID.",
+      },
+      role_filter: {
+        type: "string",
+        enum: ["user", "assistant"],
+        description: "Filter conversation history results by message role.",
+      },
+      history_after: {
+        type: "string",
+        description: "Filter conversation history results after this ISO date.",
+      },
+      history_before: {
+        type: "string",
+        description: "Filter conversation history results before this ISO date.",
+      },
     },
     required: ["query", "intent", "reason_for_search"],
   },
@@ -187,7 +216,7 @@ export const getMemoriesTool: Tool = {
     },
     required: ["ids"],
   },
-};;
+};
 
 export const reportMemoryUsefulnessTool: Tool = {
   name: "report_memory_usefulness",
@@ -208,9 +237,9 @@ export const reportMemoryUsefulnessTool: Tool = {
   },
 };
 
-export const storeCheckpointTool: Tool = {
-  name: "store_checkpoint",
-  description: `Save session state for seamless resumption later. Use at end of work sessions or before context switches.
+export const setWaypointTool: Tool = {
+  name: "set_waypoint",
+  description: `Save session waypoint for seamless resumption later. Use at end of work sessions or before context switches.
 
 Creates a structured snapshot with:
 - summary: 2-3 sentences on goal and current status
@@ -220,7 +249,7 @@ Creates a structured snapshot with:
 - next_steps: concrete, actionable items
 - memory_ids: link to related memories stored this session
 
-Retrievable via get_checkpoint. Only one checkpoint per project—new checkpoints overwrite previous.`,
+Retrievable via get_waypoint. Only one waypoint per project—new waypoints overwrite previous.`,
   inputSchema: {
     type: "object",
     properties: {
@@ -250,7 +279,7 @@ Retrievable via get_checkpoint. Only one checkpoint per project—new checkpoint
       memory_ids: {
         type: "array",
         items: { type: "string" },
-        description: "Memory IDs referenced by this checkpoint.",
+        description: "Memory IDs referenced by this waypoint.",
       },
       metadata: {
         type: "object",
@@ -262,13 +291,73 @@ Retrievable via get_checkpoint. Only one checkpoint per project—new checkpoint
   },
 };
 
-export const getCheckpointTool: Tool = {
-  name: "get_checkpoint",
+export const getWaypointTool: Tool = {
+  name: "get_waypoint",
   description:
-    "Load the current project checkpoint snapshot. Call at conversation start or when resuming a project.",
+    "Load the current project waypoint snapshot. Call at conversation start or when resuming a project.",
   inputSchema: {
     type: "object",
     properties: {},
+  },
+};
+
+export const indexConversationsTool: Tool = {
+  name: "index_conversations",
+  description: `Scan session log directory for new or updated conversation sessions and index them as searchable history.
+
+Indexing is idempotent: sessions that haven't changed since last indexing are skipped.
+Requires conversation history indexing to be enabled in configuration (--enable-history).`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      path: {
+        type: "string",
+        description:
+          "Override session log directory path. Defaults to configured path or Claude Code's session directory.",
+      },
+      since: {
+        type: "string",
+        description:
+          "Only index sessions modified after this ISO date. Example: '2026-03-01'",
+      },
+    },
+  },
+};
+
+export const listIndexedSessionsTool: Tool = {
+  name: "list_indexed_sessions",
+  description:
+    "Browse indexed conversation sessions with timestamps and chunk counts.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      limit: {
+        type: "integer",
+        description: "Maximum sessions to return (default: 20).",
+        default: 20,
+      },
+      offset: {
+        type: "integer",
+        description: "Number of sessions to skip for pagination (default: 0).",
+        default: 0,
+      },
+    },
+  },
+};
+
+export const reindexSessionTool: Tool = {
+  name: "reindex_session",
+  description:
+    "Force reindex of a specific conversation session. Useful if the session was updated or indexing failed previously.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      session_id: {
+        type: "string",
+        description: "The session ID to reindex.",
+      },
+    },
+    required: ["session_id"],
   },
 };
 
@@ -279,6 +368,9 @@ export const tools: Tool[] = [
   searchMemoriesTool,
   getMemoriesTool,
   reportMemoryUsefulnessTool,
-  storeCheckpointTool,
-  getCheckpointTool,
+  setWaypointTool,
+  getWaypointTool,
+  indexConversationsTool,
+  listIndexedSessionsTool,
+  reindexSessionTool,
 ];

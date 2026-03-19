@@ -2,7 +2,7 @@
 
 > Semantic memory storage for AI assistants. Store decisions, patterns, and context that persists across sessions.
 
-A local-first MCP server that provides vector-based memory storage. Uses local embeddings and LanceDB for fast, private semantic search.
+A local-first MCP server that provides vector-based memory storage. Uses local embeddings and SQLite with sqlite-vec for fast, private semantic search — all in a single file.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![npm version](https://img.shields.io/npm/v/@aeriondyseti/vector-memory-mcp.svg)](https://www.npmjs.com/package/@aeriondyseti/vector-memory-mcp)
@@ -11,10 +11,11 @@ A local-first MCP server that provides vector-based memory storage. Uses local e
 
 ## Features
 
-- **Local & Private** - All embeddings generated locally, data stored in local LanceDB
-- **Semantic Search** - Vector similarity search with configurable scoring
+- **Local & Private** - All embeddings generated locally ([all-MiniLM-L6-v2](https://huggingface.co/Xenova/all-MiniLM-L6-v2), 384-dim), data stored in a single SQLite file
+- **Semantic Search** - Hybrid vector + full-text search with intent-based ranking
 - **Batch Operations** - Store, update, delete, and retrieve multiple memories at once
-- **Session Checkpoints** - Save and restore project context between sessions
+- **Session Waypoints** - Save and restore project context between sessions
+- **Conversation History** - Index and search Claude Code session transcripts
 - **MCP Native** - Standard protocol, works with any MCP-compatible client
 
 ---
@@ -61,8 +62,12 @@ Restart your MCP client. You now have access to:
 | `get_memories` | Retrieve memories by ID (accepts array) |
 | `update_memories` | Update existing memories |
 | `delete_memories` | Remove memories (accepts array) |
-| `store_checkpoint` | Save session context for later |
-| `get_checkpoint` | Restore session context |
+| `report_memory_usefulness` | Vote on whether a memory was useful |
+| `set_waypoint` | Save session context for later |
+| `get_waypoint` | Restore session context |
+| `index_conversations` | Index Claude Code session logs as searchable history |
+| `list_indexed_sessions` | Browse indexed conversation sessions |
+| `reindex_session` | Force reindex of a specific session |
 
 ---
 
@@ -80,49 +85,49 @@ You: "What did we decide about the database?"
 Assistant: [calls search_memories with relevant query]
 ```
 
-**Session checkpoints:**
+**Session waypoints:**
 ```
 You: "Save context for next session"
-Assistant: [calls store_checkpoint with summary, completed items, next steps]
+Assistant: [calls set_waypoint with summary, completed items, next steps]
+```
+
+**Conversation history** (requires `--enable-history`):
+```
+You: "What did we discuss about the API design last week?"
+Assistant: [calls search_memories with history_only: true, history_before/after filters]
 ```
 
 ---
 
 ## Configuration
 
-Configuration is resolved in order: **CLI flags > environment variables > defaults**.
-
-### CLI Flags
+CLI flags:
 
 | Flag | Alias | Default | Description |
 |------|-------|---------|-------------|
 | `--db-file <path>` | `-d` | `.vector-memory/memories.db` | Database location (relative to cwd) |
 | `--port <number>` | `-p` | `3271` | HTTP server port |
-| `--no-http` | | | Disable the HTTP server |
+| `--no-http` | | *(HTTP enabled)* | Disable HTTP/SSE transport |
+| `--enable-history` | | *(disabled)* | Enable conversation history indexing |
+| `--history-path` | | *(auto-detect)* | Path to session log directory |
+| `--history-weight` | | `0.75` | Weight for history results in unified search |
 
-### Environment Variables
+---
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VECTOR_MEMORY_DB_PATH` | `.vector-memory/memories.db` | Database location |
-| `VECTOR_MEMORY_HTTP_PORT` | `3271` | HTTP server port |
+## Migrating from 1.x (LanceDB)
 
-Environment variables are useful in MCP client configs where you can't pass CLI flags directly:
+Version 2.0 replaced LanceDB with SQLite (sqlite-vec) for storage. If you have existing data from 1.x, the server will detect it automatically and prompt you to migrate:
 
-```json
-{
-  "mcpServers": {
-    "vector-memory": {
-      "type": "stdio",
-      "command": "bunx",
-      "args": ["--bun", "@aeriondyseti/vector-memory-mcp"],
-      "env": {
-        "VECTOR_MEMORY_DB_PATH": "/home/user/.local/share/vector-memory-mcp/memories.db"
-      }
-    }
-  }
-}
+```bash
+vector-memory-mcp migrate
 ```
+
+This reads your LanceDB directory, writes a new SQLite file, and prints instructions to swap them. Your original data is preserved until you manually remove it.
+
+**What changed:**
+- Storage: LanceDB directory (~845 files) → single `.db` file
+- Dependencies: 223MB (`@lancedb/lancedb` + `apache-arrow`) → 24KB (`sqlite-vec`)
+- Runtime: Node.js support dropped, Bun required (for `bun:sqlite`)
 
 ---
 
@@ -152,4 +157,4 @@ MIT - see [LICENSE](LICENSE)
 
 ---
 
-Built with [MCP SDK](https://github.com/modelcontextprotocol/typescript-sdk), [LanceDB](https://lancedb.com/), and [Transformers.js](https://huggingface.co/docs/transformers.js)
+Built with [MCP SDK](https://github.com/modelcontextprotocol/typescript-sdk), [sqlite-vec](https://github.com/asg017/sqlite-vec), and [Transformers.js](https://huggingface.co/docs/transformers.js)

@@ -159,9 +159,10 @@ test_*.db
 node_modules/
 bun.lock
 package-lock.json
-# Claude Code (keep commands/, ignore the rest)
+# Claude Code (keep commands/ and skills/, ignore the rest)
 .claude/*
 !.claude/commands/
+!.claude/skills/
 .aider*
 
 # Git worktrees

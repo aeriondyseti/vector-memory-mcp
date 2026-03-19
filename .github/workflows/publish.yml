@@ -1,20 +1,19 @@
 name: Publish to npm
 
 on:
-  # Trigger on version tags
   push:
-    tags:
-      - 'v*'
-  # Allow manual trigger
+    branches: [dev, 'rc/*']
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
-        description: 'npm tag (dev or latest)'
+        description: 'npm dist-tag (dev, rc, or latest)'
         required: true
         default: 'dev'
         type: choice
         options:
           - dev
+          - rc
           - latest
 
 permissions:
@@ -27,25 +26,41 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for branch-tag validation
+
+      - name: Validate stable tag is on main
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${{ github.ref_name }}"
+          # Check that the tagged commit exists on main
+          if ! git branch -r --contains "${{ github.sha }}" | grep -q 'origin/main$'; then
+            echo "::error::Tag $TAG does not point to a commit on main. Stable releases must be tagged from main."
+            exit 1
+          fi
+          echo "Stable tag $TAG is on main"
 
       - name: Determine npm tag
         id: npm-tag
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref_name }}" =~ -dev|-alpha|-beta|-rc ]]; then
-            echo "tag=dev" >> $GITHUB_OUTPUT
+            TAG="${{ inputs.tag }}"
+          elif [[ "${{ github.ref }}" == refs/heads/rc/* ]]; then
+            TAG="rc"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="latest"
           else
-            echo "tag=latest" >> $GITHUB_OUTPUT
+            TAG="dev"
           fi
-          echo "Publishing with npm tag: $(cat $GITHUB_OUTPUT | grep tag | cut -d= -f2)"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Publishing with npm tag: $TAG"
 
       - name: Set version from git tag
-        if: github.event_name == 'push'
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#v}"
-          npm version "$VERSION" --no-git-tag-version
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
           echo "Set package.json version to $VERSION"
 
       - name: Setup Bun
@@ -66,16 +81,37 @@ jobs:
         run: bun install
 
       - name: Run tests
+        if: steps.npm-tag.outputs.tag != 'dev'
         run: bun run test
 
-      - name: Build
-        run: bun run build
+      - name: Typecheck
+        run: bun run typecheck
 
-      - name: Check npm version
-        run: npm --version
+      - name: Check if version already published
+        id: check-version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "@aeriondyseti/vector-memory-mcp@$VERSION" version 2>/dev/null; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Version $VERSION already published, skipping"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "Version $VERSION not yet published"
+          fi
 
       - name: Publish to npm
-        run: npm publish --access public --tag ${{ steps.npm-tag.outputs.tag }}
+        if: steps.check-version.outputs.skip != 'true'
+        run: npm publish --access public --provenance --tag ${{ steps.npm-tag.outputs.tag }}
+
+      - name: Cascade dist-tags
+        if: steps.npm-tag.outputs.tag == 'latest'
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          npm dist-tag add "@aeriondyseti/vector-memory-mcp@$VERSION" dev
+          npm dist-tag add "@aeriondyseti/vector-memory-mcp@$VERSION" rc
+          echo "Also tagged $VERSION as @dev and @rc"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Also tag as dev (RC is the latest pre-release)
         if: steps.npm-tag.outputs.tag == 'rc'

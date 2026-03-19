@@ -1,15 +1,13 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { serve as nodeServe } from "@hono/node-server";
 import { createServer } from "net";
+import { writeFileSync, mkdirSync, unlinkSync } from "fs";
+import { join } from "path";
 import type { MemoryService } from "../services/memory.service.js";
 import type { Config } from "../config/index.js";
 import { isDeleted } from "../types/memory.js";
 import { createMcpRoutes } from "./mcp-transport.js";
 import type { Memory, SearchIntent } from "../types/memory.js";
-
-// Detect runtime
-const isBun = typeof globalThis.Bun !== "undefined";
 
 /**
  * Check if a port is available by attempting to bind to it
@@ -56,6 +54,31 @@ async function findAvailablePort(
   });
 }
 
+/**
+ * Write a lockfile so hooks can discover which port this server bound to.
+ * Written atomically after the HTTP server successfully binds.
+ */
+function writeLockfile(port: number): void {
+  const dir = join(process.cwd(), ".vector-memory");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "server.lock"),
+    JSON.stringify({ port, pid: process.pid }),
+    "utf8"
+  );
+}
+
+/**
+ * Remove the lockfile on clean shutdown so stale files don't linger.
+ */
+export function removeLockfile(): void {
+  try {
+    unlinkSync(join(process.cwd(), ".vector-memory", "server.lock"));
+  } catch {
+    // already gone — fine
+  }
+}
+
 export interface HttpServerOptions {
   memoryService: MemoryService;
   config: Config;
@@ -85,6 +108,7 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
         dbPath: config.dbPath,
         embeddingModel: config.embeddingModel,
         embeddingDimension: config.embeddingDimension,
+        historyEnabled: config.conversationHistory.enabled,
       },
     });
   });
@@ -101,16 +125,17 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
         return c.json({ error: "Missing or invalid 'query' field" }, 400);
       }
 
-      const memories = await memoryService.search(query, intent, limit);
+      const results = await memoryService.search(query, intent, limit);
 
       return c.json({
-        memories: memories.map((m) => ({
-          id: m.id,
-          content: m.content,
-          metadata: m.metadata,
-          createdAt: m.createdAt.toISOString(),
+        results: results.map((r) => ({
+          id: r.id,
+          content: r.content,
+          metadata: r.metadata,
+          source: r.source,
+          createdAt: r.createdAt.toISOString(),
         })),
-        count: memories.length,
+        count: results.length,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -161,32 +186,56 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
     }
   });
 
-  // Get latest checkpoint
-  app.get("/checkpoint", async (c) => {
+  // Get latest waypoint
+  app.get("/waypoint", async (c) => {
     try {
-      const checkpoint = await memoryService.getLatestCheckpoint();
+      const waypoint = await memoryService.getLatestWaypoint();
 
-      if (!checkpoint) {
-        return c.json({ error: "No checkpoint found" }, 404);
+      if (!waypoint) {
+        return c.json({ error: "No waypoint found" }, 404);
       }
 
-      // Fetch referenced memories if any
-      const memoryIds = (checkpoint.metadata.memory_ids as string[] | undefined) ?? [];
-      const referencedMemories: Array<{ id: string; content: string }> = [];
-
-      for (const id of memoryIds) {
-        const memory = await memoryService.get(id);
-        if (memory && !isDeleted(memory)) {
-          referencedMemories.push({ id: memory.id, content: memory.content });
-        }
-      }
+      // Fetch referenced memories in a single query
+      const memoryIds = (waypoint.metadata.memory_ids as string[] | undefined) ?? [];
+      const memories = await memoryService.getMultiple(memoryIds);
+      const referencedMemories = memories
+        .filter((m) => !isDeleted(m))
+        .map((m) => ({ id: m.id, content: m.content }));
 
       return c.json({
-        content: checkpoint.content,
-        metadata: checkpoint.metadata,
+        content: waypoint.content,
+        metadata: waypoint.metadata,
         referencedMemories,
-        updatedAt: checkpoint.updatedAt.toISOString(),
+        updatedAt: waypoint.updatedAt.toISOString(),
       });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  // Index conversations (trigger incremental indexing)
+  app.post("/index-conversations", async (c) => {
+    try {
+      const conversationService = memoryService.getConversationService();
+      if (!conversationService) {
+        return c.json({ error: "Conversation history indexing is not enabled" }, 400);
+      }
+
+      const body = await c.req.json().catch(() => ({}));
+      let since: Date | undefined;
+      if (body.since) {
+        since = new Date(body.since as string);
+        if (isNaN(since.getTime())) {
+          return c.json({ error: "Invalid 'since' date format" }, 400);
+        }
+      }
+      const result = await conversationService.indexConversations(
+        body.path as string | undefined,
+        since
+      );
+
+      return c.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       return c.json({ error: message }, 500);
@@ -228,37 +277,19 @@ export async function startHttpServer(
   // Find an available port (uses configured port if available, otherwise picks a random one)
   const actualPort = await findAvailablePort(config.httpPort, config.httpHost);
 
-  if (isBun) {
-    // Use Bun's native server
-    const server = Bun.serve({
-      port: actualPort,
-      hostname: config.httpHost,
-      fetch: app.fetch,
-    });
+  const server = Bun.serve({
+    port: actualPort,
+    hostname: config.httpHost,
+    fetch: app.fetch,
+  });
 
-    console.error(
-      `[vector-memory-mcp] HTTP server listening on http://${config.httpHost}:${actualPort}`
-    );
+  writeLockfile(actualPort);
+  console.error(
+    `[vector-memory-mcp] HTTP server listening on http://${config.httpHost}:${actualPort}`
+  );
 
-    return {
-      stop: () => server.stop(),
-      port: actualPort,
-    };
-  } else {
-    // Use Node.js server via @hono/node-server
-    const server = nodeServe({
-      fetch: app.fetch,
-      port: actualPort,
-      hostname: config.httpHost,
-    });
-
-    console.error(
-      `[vector-memory-mcp] HTTP server listening on http://${config.httpHost}:${actualPort}`
-    );
-
-    return {
-      stop: () => server.close(),
-      port: actualPort,
-    };
-  }
+  return {
+    stop: () => { removeLockfile(); server.stop(); },
+    port: actualPort,
+  };
 }

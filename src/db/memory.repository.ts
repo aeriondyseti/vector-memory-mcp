@@ -1,6 +1,12 @@
-import * as lancedb from "@lancedb/lancedb";
-import { Index, rerankers, type Table } from "@lancedb/lancedb";
-import { TABLE_NAME, memorySchema } from "./schema.js";
+import type { Database } from "bun:sqlite";
+import {
+  serializeVector,
+  deserializeVector,
+  safeParseJsonObject,
+  sanitizeFtsQuery,
+  hybridRRF,
+  topByRRF,
+} from "./sqlite-utils.js";
 import {
   type Memory,
   type HybridRow,
@@ -8,245 +14,215 @@ import {
 } from "../types/memory.js";
 
 export class MemoryRepository {
-  // Mutex for FTS index creation - ensures only one index creation runs at a time
-  // Once set, this promise is never cleared (FTS index persists in the database)
-  private ftsIndexPromise: Promise<void> | null = null;
+  constructor(private db: Database) {}
 
-  // Mutex for schema migration - runs once per instance to add missing columns
-  private migrationPromise: Promise<void> | null = null;
-
-  constructor(private db: lancedb.Connection) { }
-
-  private async getTable() {
-    const names = await this.db.tableNames();
-    if (names.includes(TABLE_NAME)) {
-      const table = await this.db.openTable(TABLE_NAME);
-      await this.ensureMigration(table);
-      return table;
-    }
-    // Create with empty data to initialize schema
-    return await this.db.createTable(TABLE_NAME, [], { schema: memorySchema });
-  }
+  // ---------------------------------------------------------------------------
+  // Row mapping
+  // ---------------------------------------------------------------------------
 
   /**
-   * Ensures schema migration has run. Uses a mutex pattern identical to ensureFtsIndex.
-   * Adds columns introduced after the initial schema (usefulness, access_count, last_accessed).
+   * Converts a raw SQLite row from the `memories` table to a Memory object.
+   * Vector is fetched separately when needed; pass it in if available.
    */
-  private ensureMigration(table: Table): Promise<void> {
-    if (this.migrationPromise) {
-      return this.migrationPromise;
-    }
-
-    this.migrationPromise = this.migrateSchemaIfNeeded(table).catch((error) => {
-      this.migrationPromise = null;
-      throw error;
-    });
-
-    return this.migrationPromise;
-  }
-
-  /**
-   * Inspects the existing table schema and adds any missing columns with safe defaults.
-   * This handles databases created before the hybrid memory system was introduced.
-   */
-  private async migrateSchemaIfNeeded(table: Table): Promise<void> {
-    const schema = await table.schema();
-    const existingFields = new Set(schema.fields.map((f) => f.name));
-
-    const migrations: { name: string; valueSql: string }[] = [];
-
-    if (!existingFields.has("usefulness")) {
-      migrations.push({ name: "usefulness", valueSql: "cast(0.0 as float)" });
-    }
-    if (!existingFields.has("access_count")) {
-      migrations.push({ name: "access_count", valueSql: "cast(0 as int)" });
-    }
-    if (!existingFields.has("last_accessed")) {
-      migrations.push({ name: "last_accessed", valueSql: "cast(NULL as timestamp)" });
-    }
-
-    if (migrations.length > 0) {
-      await table.addColumns(migrations);
-    }
-  }
-
-  /**
-   * Ensures the FTS index exists on the content column.
-   * Uses a mutex pattern to prevent concurrent index creation.
-   * The key insight: we must capture the promise BEFORE any await.
-   */
-  private ensureFtsIndex(): Promise<void> {
-    // If there's already a pending or completed index creation, return that promise
-    if (this.ftsIndexPromise) {
-      return this.ftsIndexPromise;
-    }
-
-    // Synchronously set the promise BEFORE any await
-    // This is critical for proper mutex behavior in JS async code
-    this.ftsIndexPromise = this.createFtsIndexIfNeeded().catch((error) => {
-      // Reset on error so the next call can retry
-      this.ftsIndexPromise = null;
-      throw error;
-    });
-
-    return this.ftsIndexPromise;
-  }
-
-  /**
-   * Creates the FTS index if it doesn't already exist.
-   * Gets its own table reference to ensure consistent index state.
-   */
-  private async createFtsIndexIfNeeded(): Promise<void> {
-    const table = await this.getTable();
-    const indices = await table.listIndices();
-    const hasFtsIndex = indices.some(
-      (idx) => idx.columns.includes("content") && idx.indexType === "FTS"
-    );
-
-    if (!hasFtsIndex) {
-      await table.createIndex("content", {
-        config: Index.fts(),
-      });
-      // Wait for the index to be fully created and available
-      await table.waitForIndex(["content_idx"], 30);
-    }
-  }
-
-  /**
-   * Converts a raw LanceDB row to a Memory object.
-   */
-  private rowToMemory(row: Record<string, unknown>): Memory {
-    // Handle Arrow Vector type conversion
-    // LanceDB returns an Arrow Vector object which is iterable but not an array
-    const vectorData = row.vector as unknown;
-    const embedding = Array.isArray(vectorData)
-      ? vectorData
-      : Array.from(vectorData as Iterable<number>) as number[];
-
+  private rowToMemory(
+    row: Record<string, unknown>,
+    embedding: number[] = [],
+  ): Memory {
     return {
       id: row.id as string,
       content: row.content as string,
       embedding,
-      metadata: JSON.parse(row.metadata as string),
+      metadata: safeParseJsonObject(row.metadata),
       createdAt: new Date(row.created_at as number),
       updatedAt: new Date(row.updated_at as number),
-      supersededBy: row.superseded_by as string | null,
+      supersededBy: (row.superseded_by as string) ?? null,
       usefulness: (row.usefulness as number) ?? 0,
       accessCount: (row.access_count as number) ?? 0,
-      lastAccessed: row.last_accessed
-        ? new Date(row.last_accessed as number)
-        : null,
+      lastAccessed:
+        row.last_accessed != null
+          ? new Date(row.last_accessed as number)
+          : null,
     };
   }
 
+  /**
+   * Fetch the embedding vector for a memory id from the vec0 table.
+   */
+  private getEmbedding(id: string): number[] {
+    const row = this.db
+      .prepare("SELECT vector FROM memories_vec WHERE id = ?")
+      .get(id) as { vector: Buffer } | null;
+    return row ? deserializeVector(row.vector) : [];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Public API
+  // ---------------------------------------------------------------------------
+
   async insert(memory: Memory): Promise<void> {
-    const table = await this.getTable();
-    await table.add([
-      {
-        id: memory.id,
-        vector: memory.embedding,
-        content: memory.content,
-        metadata: JSON.stringify(memory.metadata),
-        created_at: memory.createdAt.getTime(),
-        updated_at: memory.updatedAt.getTime(),
-        superseded_by: memory.supersededBy,
-        usefulness: memory.usefulness,
-        access_count: memory.accessCount,
-        last_accessed: memory.lastAccessed?.getTime() ?? null,
-      },
-    ]);
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO memories (id, content, metadata, created_at, updated_at, superseded_by, usefulness, access_count, last_accessed)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          memory.id,
+          memory.content,
+          JSON.stringify(memory.metadata),
+          memory.createdAt.getTime(),
+          memory.updatedAt.getTime(),
+          memory.supersededBy,
+          memory.usefulness,
+          memory.accessCount,
+          memory.lastAccessed?.getTime() ?? null,
+        );
+
+      this.db
+        .prepare("INSERT INTO memories_vec (id, vector) VALUES (?, ?)")
+        .run(memory.id, serializeVector(memory.embedding));
+
+      this.db
+        .prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)")
+        .run(memory.id, memory.content);
+    });
+
+    tx();
   }
 
   async upsert(memory: Memory): Promise<void> {
-    const table = await this.getTable();
-    const existing = await table.query().where(`id = '${memory.id}'`).limit(1).toArray();
+    const tx = this.db.transaction(() => {
+      // Main table supports INSERT OR REPLACE
+      this.db
+        .prepare(
+          `INSERT OR REPLACE INTO memories (id, content, metadata, created_at, updated_at, superseded_by, usefulness, access_count, last_accessed)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          memory.id,
+          memory.content,
+          JSON.stringify(memory.metadata),
+          memory.createdAt.getTime(),
+          memory.updatedAt.getTime(),
+          memory.supersededBy,
+          memory.usefulness,
+          memory.accessCount,
+          memory.lastAccessed?.getTime() ?? null,
+        );
 
-    if (existing.length === 0) {
-      return await this.insert(memory);
-    }
+      // vec0 virtual tables don't support REPLACE — delete then insert
+      this.db.prepare("DELETE FROM memories_vec WHERE id = ?").run(memory.id);
+      this.db
+        .prepare("INSERT INTO memories_vec (id, vector) VALUES (?, ?)")
+        .run(memory.id, serializeVector(memory.embedding));
 
-    await table.update({
-      where: `id = '${memory.id}'`,
-      values: {
-        vector: memory.embedding,
-        content: memory.content,
-        metadata: JSON.stringify(memory.metadata),
-        created_at: memory.createdAt.getTime(),
-        updated_at: memory.updatedAt.getTime(),
-        superseded_by: memory.supersededBy,
-        usefulness: memory.usefulness,
-        access_count: memory.accessCount,
-        last_accessed: memory.lastAccessed?.getTime() ?? null,
-      },
+      // fts5 virtual tables don't support REPLACE — delete then insert
+      this.db.prepare("DELETE FROM memories_fts WHERE id = ?").run(memory.id);
+      this.db
+        .prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)")
+        .run(memory.id, memory.content);
     });
+
+    tx();
   }
 
   async findById(id: string): Promise<Memory | null> {
-    const table = await this.getTable();
-    const results = await table.query().where(`id = '${id}'`).limit(1).toArray();
+    const row = this.db
+      .prepare("SELECT * FROM memories WHERE id = ?")
+      .get(id) as Record<string, unknown> | null;
 
-    if (results.length === 0) {
-      return null;
-    }
+    if (!row) return null;
 
-    return this.rowToMemory(results[0] as Record<string, unknown>);
+    const embedding = this.getEmbedding(id);
+    return this.rowToMemory(row, embedding);
+  }
+
+  async findByIds(ids: string[]): Promise<Memory[]> {
+    if (ids.length === 0) return [];
+
+    const placeholders = ids.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(`SELECT * FROM memories WHERE id IN (${placeholders})`)
+      .all(...ids) as Array<Record<string, unknown>>;
+
+    return rows.map((row) => {
+      const embedding = this.getEmbedding(row.id as string);
+      return this.rowToMemory(row, embedding);
+    });
   }
 
   async markDeleted(id: string): Promise<boolean> {
-    const table = await this.getTable();
+    const result = this.db
+      .prepare(
+        "UPDATE memories SET superseded_by = ?, updated_at = ? WHERE id = ?",
+      )
+      .run(DELETED_TOMBSTONE, Date.now(), id);
 
-    // Verify existence first to match previous behavior (return false if not found)
-    const existing = await table.query().where(`id = '${id}'`).limit(1).toArray();
-    if (existing.length === 0) {
-      return false;
-    }
-
-    const now = Date.now();
-    await table.update({
-      where: `id = '${id}'`,
-      values: {
-        superseded_by: DELETED_TOMBSTONE,
-        updated_at: now,
-      },
-    });
-
-    return true;
+    return result.changes > 0;
   }
 
   /**
-   * Performs hybrid search combining vector similarity and full-text search.
-   * Uses RRF (Reciprocal Rank Fusion) to combine rankings from both search methods.
-   *
-   * @param embedding - Query embedding vector
-   * @param query - Text query for full-text search
-   * @param limit - Maximum number of results to return
-   * @returns Array of HybridRow containing full Memory data plus RRF score
+   * Hybrid search combining vector KNN and FTS5, fused with Reciprocal Rank Fusion.
    */
-  async findHybrid(embedding: number[], query: string, limit: number): Promise<HybridRow[]> {
-    // Ensure FTS index exists (with mutex to prevent concurrent creation)
-    // This must happen BEFORE getTable to ensure proper mutex behavior
-    await this.ensureFtsIndex();
+  async findHybrid(
+    embedding: number[],
+    query: string,
+    limit: number,
+  ): Promise<HybridRow[]> {
+    const candidateLimit = limit * 3;
+    const vecBuf = serializeVector(embedding);
 
-    const table = await this.getTable();
+    // Vector KNN search
+    const vectorResults = this.db
+      .prepare(
+        "SELECT id, distance FROM memories_vec WHERE vector MATCH ? AND k = ? ORDER BY distance",
+      )
+      .all(vecBuf, candidateLimit) as Array<{ id: string; distance: number }>;
 
-    // Create RRF reranker with k=60 (standard parameter)
-    const reranker = await rerankers.RRFReranker.create(60);
+    // Full-text search
+    const ftsQuery = sanitizeFtsQuery(query);
+    const ftsResults: Array<{ id: string }> = ftsQuery
+      ? (this.db
+          .prepare(
+            "SELECT id FROM memories_fts WHERE memories_fts MATCH ? LIMIT ?",
+          )
+          .all(ftsQuery, candidateLimit) as Array<{ id: string }>)
+      : [];
 
-    // Perform hybrid search: combine vector search and full-text search
-    const results = await table
-      .query()
-      .nearestTo(embedding)
-      .fullTextSearch(query)
-      .rerank(reranker)
-      .limit(limit)
-      .toArray();
+    // Compute RRF scores and pick top ids
+    const rrfScores = hybridRRF(vectorResults, ftsResults);
+    const topIds = topByRRF(rrfScores, limit);
 
-    return results.map((row) => {
-      const memory = this.rowToMemory(row as Record<string, unknown>);
-      return {
+    if (topIds.length === 0) return [];
+
+    // Fetch full rows for the winning ids (service layer handles deleted filtering)
+    const placeholders = topIds.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM memories WHERE id IN (${placeholders})`,
+      )
+      .all(...topIds) as Array<Record<string, unknown>>;
+
+    // Build a lookup for quick access
+    const rowMap = new Map<string, Record<string, unknown>>();
+    for (const row of rows) {
+      rowMap.set(row.id as string, row);
+    }
+
+    // Return results in RRF-ranked order, skipping any that were deleted
+    const results: HybridRow[] = [];
+    for (const id of topIds) {
+      const row = rowMap.get(id);
+      if (!row) continue; // deleted or missing
+
+      const memEmbedding = this.getEmbedding(id);
+      const memory = this.rowToMemory(row, memEmbedding);
+      results.push({
         ...memory,
-        rrfScore: (row._relevance_score as number) ?? 0,
-      };
-    });
+        rrfScore: rrfScores.get(id) ?? 0,
+      });
+    }
+
+    return results;
   }
 }

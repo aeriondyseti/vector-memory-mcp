@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, 'rc/*']
   pull_request:
     branches: [main, dev]
 
@@ -21,9 +21,6 @@ jobs:
 
       - name: Typecheck
         run: bun run typecheck
-
-      - name: Build
-        run: bun run build
 
       - name: Run tests
         run: bun run test

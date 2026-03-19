@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeAll, afterAll } from "bun:test";
+import { describe, expect, test, beforeAll, afterAll, mock } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -6,7 +6,7 @@ import { connectToDatabase } from "../src/db/connection";
 import { MemoryRepository } from "../src/db/memory.repository";
 import { EmbeddingsService } from "../src/services/embeddings.service";
 import { MemoryService } from "../src/services/memory.service";
-import { createHttpApp } from "../src/http/server";
+import { createHttpApp, startHttpServer } from "../src/http/server";
 import type { Config } from "../src/config/index";
 
 function createTestConfig(dbPath: string): Config {
@@ -18,6 +18,14 @@ function createTestConfig(dbPath: string): Config {
     httpHost: "127.0.0.1",
     enableHttp: true,
     transportMode: "stdio",
+    conversationHistory: {
+      enabled: false,
+      sessionLogPath: null,
+      historyWeight: 0.75,
+      chunkOverlap: 1,
+      maxChunkMessages: 10,
+      indexSubagents: false,
+    },
   };
 }
 
@@ -29,9 +37,9 @@ describe("HTTP API", () => {
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-http-test-"));
-    const dbPath = join(tmpDir, "test.lancedb");
+    const dbPath = join(tmpDir, "test.db");
     testConfig = createTestConfig(dbPath);
-    const db = await connectToDatabase(dbPath);
+    const db = connectToDatabase(dbPath);
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     memoryService = new MemoryService(repository, embeddings);
@@ -120,11 +128,11 @@ describe("HTTP API", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.memories).toBeInstanceOf(Array);
+      expect(body.results).toBeInstanceOf(Array);
       expect(body.count).toBeGreaterThan(0);
 
-      const found = body.memories.some((m: { content: string }) =>
-        m.content.includes("JWT")
+      const found = body.results.some((r: { content: string }) =>
+        r.content.includes("JWT")
       );
       expect(found).toBe(true);
     });
@@ -170,6 +178,48 @@ describe("HTTP API", () => {
     });
   });
 
+  describe("GET /waypoint", () => {
+    test("returns 404 when no waypoint exists", async () => {
+      const res = await app.request("/waypoint");
+      expect(res.status).toBe(404);
+      const body = await res.json();
+      expect(body.error).toContain("No waypoint");
+    });
+
+    test("returns waypoint after storing one", async () => {
+      await memoryService.setWaypoint({
+        project: "test-project",
+        branch: "main",
+        summary: "Test waypoint",
+        completed: ["Task A"],
+        next_steps: ["Task B"],
+      });
+
+      const res = await app.request("/waypoint");
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.content).toContain("test-project");
+      expect(body.metadata.project).toBe("test-project");
+      expect(body.updatedAt).toBeDefined();
+    });
+
+    test("includes referenced memories", async () => {
+      const mem = await memoryService.store("Referenced memory content");
+      await memoryService.setWaypoint({
+        project: "ref-test",
+        summary: "Waypoint with refs",
+        memory_ids: [mem.id],
+      });
+
+      const res = await app.request("/waypoint");
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.referencedMemories).toBeArray();
+      expect(body.referencedMemories.length).toBeGreaterThanOrEqual(1);
+      expect(body.referencedMemories[0].content).toBe("Referenced memory content");
+    });
+  });
+
   describe("DELETE /memories/:id", () => {
     test("deletes a memory", async () => {
       // Store a memory
@@ -212,9 +262,9 @@ describe("MCP Transport", () => {
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-mcp-transport-test-"));
-    const dbPath = join(tmpDir, "test.lancedb");
+    const dbPath = join(tmpDir, "test.db");
     const testConfig = createTestConfig(dbPath);
-    const db = await connectToDatabase(dbPath);
+    const db = connectToDatabase(dbPath);
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     memoryService = new MemoryService(repository, embeddings);
@@ -424,9 +474,9 @@ describe("HTTP API Integration", () => {
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-http-integration-"));
-    const dbPath = join(tmpDir, "test.lancedb");
+    const dbPath = join(tmpDir, "test.db");
     const testConfig = createTestConfig(dbPath);
-    const db = await connectToDatabase(dbPath);
+    const db = connectToDatabase(dbPath);
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     memoryService = new MemoryService(repository, embeddings);
@@ -465,7 +515,7 @@ describe("HTTP API Integration", () => {
       body: JSON.stringify({ query: "authentication OAuth", limit: 10 }),
     });
     const searchBody = await searchRes.json();
-    expect(searchBody.memories.length).toBeGreaterThan(0);
+    expect(searchBody.results.length).toBeGreaterThan(0);
 
     // 3. Delete one memory
     const deleteRes = await app.request(`/memories/${ids[0]}`, {
@@ -484,6 +534,130 @@ describe("HTTP API Integration", () => {
       body: JSON.stringify({ query: "database PostgreSQL", limit: 10 }),
     });
     const finalBody = await finalSearch.json();
-    expect(finalBody.memories.length).toBeGreaterThan(0);
+    expect(finalBody.results.length).toBeGreaterThan(0);
+  });
+});
+
+describe("startHttpServer", () => {
+  let tmpDir: string;
+  let memoryService: MemoryService;
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-start-test-"));
+    const dbPath = join(tmpDir, "test.db");
+    const db = connectToDatabase(dbPath);
+    const repository = new MemoryRepository(db);
+    const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
+    memoryService = new MemoryService(repository, embeddings);
+  });
+
+  afterAll(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test("starts server on configured port and stops cleanly", async () => {
+    const config = createTestConfig(join(tmpDir, "test.db"));
+    config.httpPort = 49152 + Math.floor(Math.random() * 1000);
+
+    const { stop, port } = await startHttpServer(memoryService, config);
+    expect(port).toBe(config.httpPort);
+
+    // Verify server is responding
+    const res = await fetch(`http://127.0.0.1:${port}/health`);
+    expect(res.status).toBe(200);
+
+    stop();
+  });
+
+  test("finds alternative port when preferred is in use", async () => {
+    const config = createTestConfig(join(tmpDir, "test.db"));
+    config.httpPort = 49152 + Math.floor(Math.random() * 1000);
+
+    // Start first server on that port
+    const server1 = await startHttpServer(memoryService, config);
+    expect(server1.port).toBe(config.httpPort);
+
+    // Start second server on same port — should find alternative
+    const server2 = await startHttpServer(memoryService, config);
+    expect(server2.port).toBeGreaterThan(0);
+    expect(server2.port).not.toBe(server1.port);
+
+    server1.stop();
+    server2.stop();
+  });
+});
+
+describe("HTTP error handling", () => {
+  let app: ReturnType<typeof createHttpApp>;
+  let tmpDir: string;
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-error-test-"));
+    const dbPath = join(tmpDir, "test.db");
+    const testConfig = createTestConfig(dbPath);
+    const db = connectToDatabase(dbPath);
+    const repository = new MemoryRepository(db);
+    const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
+
+    // Create a proxy service that can throw on demand
+    const realService = new MemoryService(repository, embeddings);
+    const throwingService = new Proxy(realService, {
+      get(target, prop) {
+        if (prop === "search" || prop === "store" || prop === "delete" ||
+            prop === "get" || prop === "getLatestWaypoint") {
+          return () => { throw new Error("Simulated failure"); };
+        }
+        return (target as Record<string | symbol, unknown>)[prop];
+      },
+    }) as MemoryService;
+
+    app = createHttpApp(throwingService, testConfig);
+  });
+
+  afterAll(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test("POST /search returns 500 on service error", async () => {
+    const res = await app.request("/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: "test" }),
+    });
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("Simulated failure");
+  });
+
+  test("POST /store returns 500 on service error", async () => {
+    const res = await app.request("/store", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "test" }),
+    });
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("Simulated failure");
+  });
+
+  test("DELETE /memories/:id returns 500 on service error", async () => {
+    const res = await app.request("/memories/some-id", { method: "DELETE" });
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("Simulated failure");
+  });
+
+  test("GET /memories/:id returns 500 on service error", async () => {
+    const res = await app.request("/memories/some-id");
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("Simulated failure");
+  });
+
+  test("GET /waypoint returns 500 on service error", async () => {
+    const res = await app.request("/waypoint");
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("Simulated failure");
   });
 });

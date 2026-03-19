@@ -8,7 +8,17 @@
 
 import { spawn } from "bun";
 
-const proc = spawn(["bun", "test", "--preload", "./tests/preload.ts"], {
+// Exclude benchmark tests — they're probabilistic quality metrics, not pass/fail gates.
+// Run benchmarks separately with: bun run benchmark
+const args = ["bun", "test", "--preload", "./tests/preload.ts"];
+
+// Collect all test files except benchmarks
+const glob = new Bun.Glob("tests/**/*.test.ts");
+for (const path of glob.scanSync(".")) {
+  if (!path.includes("benchmark")) args.push(path);
+}
+
+const proc = spawn(args, {
   stdout: "pipe",
   stderr: "pipe",
   env: { ...process.env, FORCE_COLOR: "1" },

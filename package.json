@@ -1,35 +1,30 @@
 {
   "name": "@aeriondyseti/vector-memory-mcp",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "A zero-configuration RAG memory server for MCP clients",
   "type": "module",
-  "main": "dist/src/index.js",
+  "main": "src/index.ts",
   "bin": {
-    "vector-memory-mcp": "dist/src/index.js"
+    "vector-memory-mcp": "src/index.ts"
   },
   "files": [
-    "dist",
     "src",
     "scripts",
-    "hooks",
     "README.md",
     "LICENSE"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AerionDyseti/vector-memory-mcp.git"
+    "url": "https://github.com/aeriondyseti/vector-memory-mcp"
   },
   "author": "AerionDyseti",
   "bugs": {
-    "url": "https://github.com/AerionDyseti/vector-memory-mcp/issues"
+    "url": "https://github.com/aeriondyseti/vector-memory-mcp/issues"
   },
-  "homepage": "https://github.com/AerionDyseti/vector-memory-mcp#readme",
+  "homepage": "https://github.com/aeriondyseti/vector-memory-mcp#readme",
   "scripts": {
-    "start": "node dist/src/index.js",
-    "start:bun": "bun run src/index.ts",
+    "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
-    "build": "tsc",
-    "prebuild": "rm -rf dist",
     "typecheck": "bunx tsc --noEmit",
     "test": "bun run scripts/test-runner.ts",
     "test:raw": "bun test --preload ./tests/preload.ts",
@@ -37,36 +32,34 @@
     "test:coverage": "bun test --preload ./tests/preload.ts --coverage",
     "benchmark": "bun test tests/benchmark.test.ts --preload ./tests/preload.ts",
     "test:preload": "bun run tests/preload.ts",
+    "smoke": "bun run scripts/smoke-test.ts",
     "warmup": "bun run scripts/warmup.ts",
     "postinstall": "bun run scripts/warmup.ts",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bunx tsc --noEmit"
   },
   "keywords": [
     "mcp",
     "memory",
     "rag",
     "embeddings",
-    "lancedb"
+    "sqlite-vec"
   ],
   "license": "MIT",
   "dependencies": {
-    "@hono/node-server": "^1.19.9",
     "@huggingface/transformers": "^3.8.0",
-    "@lancedb/lancedb": "^0.22.3",
+    "@lancedb/lancedb": "^0.26.2",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "apache-arrow": "^21.1.0",
     "arg": "^5.0.2",
-    "hono": "^4.11.3"
+    "hono": "^4.11.3",
+    "sqlite-vec": "^0.1.6"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "^5.0.0"
   },
   "trustedDependencies": [
-    "onnxruntime-node",
     "protobufjs",
     "sharp"
-  ],
-  "overrides": {
-    "onnxruntime-node": "1.23.2"
-  }
+  ]
 }

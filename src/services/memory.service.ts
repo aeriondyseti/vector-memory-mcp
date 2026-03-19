@@ -1,8 +1,10 @@
 import { randomUUID } from "crypto";
-import type { Memory, SearchIntent, IntentProfile } from "../types/memory.js";
+import type { Memory, SearchIntent, IntentProfile, HybridRow } from "../types/memory.js";
 import { isDeleted } from "../types/memory.js";
+import type { SearchResult, SearchOptions } from "../types/conversation.js";
 import type { MemoryRepository } from "../db/memory.repository.js";
 import type { EmbeddingsService } from "./embeddings.service.js";
+import type { ConversationHistoryService } from "./conversation.service.js";
 
 const INTENT_PROFILES: Record<SearchIntent, IntentProfile> = {
   continuity: { weights: { relevance: 0.3, recency: 0.5, utility: 0.2 }, jitter: 0.02 },
@@ -15,10 +17,20 @@ const INTENT_PROFILES: Record<SearchIntent, IntentProfile> = {
 const sigmoid = (x: number): number => 1 / (1 + Math.exp(-x));
 
 export class MemoryService {
+  private conversationService: ConversationHistoryService | null = null;
+
   constructor(
     private repository: MemoryRepository,
     private embeddings: EmbeddingsService
-  ) { }
+  ) {}
+
+  setConversationService(service: ConversationHistoryService): void {
+    this.conversationService = service;
+  }
+
+  getConversationService(): ConversationHistoryService | null {
+    return this.conversationService;
+  }
 
   async store(
     content: string,
@@ -62,6 +74,24 @@ export class MemoryService {
 
     await this.repository.upsert(updatedMemory);
     return updatedMemory;
+  }
+
+  async getMultiple(ids: string[]): Promise<Memory[]> {
+    if (ids.length === 0) return [];
+    const memories = await this.repository.findByIds(ids);
+    // Track access in bulk
+    const now = new Date();
+    const live = memories.filter((m) => !isDeleted(m));
+    await Promise.all(
+      live.map((m) =>
+        this.repository.upsert({
+          ...m,
+          accessCount: m.accessCount + 1,
+          lastAccessed: now,
+        })
+      )
+    );
+    return live;
   }
 
   async delete(id: string): Promise<boolean> {
@@ -122,71 +152,133 @@ export class MemoryService {
     return updatedMemory;
   }
 
+  private computeMemoryScore(
+    candidate: HybridRow,
+    profile: IntentProfile,
+    now: Date
+  ): number {
+    const relevance = candidate.rrfScore;
+    const lastAccessed = candidate.lastAccessed ?? candidate.createdAt;
+    const hoursSinceAccess = Math.max(
+      0,
+      (now.getTime() - lastAccessed.getTime()) / (1000 * 60 * 60)
+    );
+    const recency = Math.pow(0.995, hoursSinceAccess);
+    const utility = sigmoid(
+      (candidate.usefulness + Math.log(candidate.accessCount + 1)) / 5
+    );
+    const { weights, jitter } = profile;
+    const score =
+      weights.relevance * relevance +
+      weights.recency * recency +
+      weights.utility * utility;
+    return score * (1 + (Math.random() * 2 - 1) * jitter);
+  }
+
   async search(
     query: string,
     intent: SearchIntent,
     limit: number = 10,
-    includeDeleted: boolean = false
-  ): Promise<Memory[]> {
+    includeDeleted: boolean = false,
+    options?: SearchOptions
+  ): Promise<SearchResult[]> {
     const queryEmbedding = await this.embeddings.embed(query);
-    const fetchLimit = limit * 5; // Fetch more for re-ranking
-
-    const candidates = await this.repository.findHybrid(queryEmbedding, query, fetchLimit);
     const profile = INTENT_PROFILES[intent];
     const now = new Date();
 
-    const scored = candidates
-      .filter((m) => includeDeleted || !isDeleted(m))
-      .map((candidate) => {
-        // Relevance: RRF score (already normalized ~0-1)
-        const relevance = candidate.rrfScore;
+    const hasConversationService = this.conversationService !== null;
+    const historyOnly = (options?.historyOnly ?? false) && hasConversationService;
+    const includeHistory =
+      (options?.includeHistory ?? true) && hasConversationService;
+    const historyWeight =
+      options?.historyWeight ??
+      this.conversationService?.config.historyWeight ??
+      0.75;
 
-        // Recency: exponential decay
-        const lastAccessed = candidate.lastAccessed ?? candidate.createdAt;
-        const hoursSinceAccess = Math.max(0, (now.getTime() - lastAccessed.getTime()) / (1000 * 60 * 60));
-        const recency = Math.pow(0.995, hoursSinceAccess);
+    // Run memory + history queries in parallel
+    const memoryPromise =
+      !historyOnly
+        ? this.repository
+            .findHybrid(queryEmbedding, query, limit * 5)
+            .then((candidates) =>
+              candidates
+                .filter((m) => includeDeleted || !isDeleted(m))
+                .map((candidate) => ({
+                  id: candidate.id,
+                  content: candidate.content,
+                  metadata: candidate.metadata,
+                  createdAt: candidate.createdAt,
+                  updatedAt: candidate.updatedAt,
+                  source: "memory" as const,
+                  score: this.computeMemoryScore(candidate, profile, now),
+                  supersededBy: candidate.supersededBy,
+                  usefulness: candidate.usefulness,
+                  accessCount: candidate.accessCount,
+                  lastAccessed: candidate.lastAccessed,
+                }))
+            )
+        : Promise.resolve([] as SearchResult[]);
 
-        // Utility: sigmoid of usefulness + log(accessCount)
-        const utility = sigmoid((candidate.usefulness + Math.log(candidate.accessCount + 1)) / 5);
+    const historyPromise =
+      includeHistory || historyOnly
+        ? this.conversationService!
+            .searchHistory(
+              query,
+              queryEmbedding,
+              historyOnly ? limit * 5 : limit * 3,
+              options?.historyFilters
+            )
+            .then((historyRows) =>
+              historyRows.map((row) => ({
+                id: row.id,
+                content: row.content,
+                metadata: row.metadata,
+                createdAt: row.createdAt,
+                updatedAt: row.createdAt,
+                source: "conversation_history" as const,
+                score: row.rrfScore * historyWeight,
+                supersededBy: null,
+                sessionId: (row.metadata?.session_id as string) ?? "",
+                role: (row.metadata?.role as string) ?? "unknown",
+                messageIndexStart: (row.metadata?.message_index_start as number) ?? 0,
+                messageIndexEnd: (row.metadata?.message_index_end as number) ?? 0,
+              }))
+            )
+        : Promise.resolve([] as SearchResult[]);
 
-        // Weighted score
-        const { weights, jitter } = profile;
-        const score =
-          weights.relevance * relevance +
-          weights.recency * recency +
-          weights.utility * utility;
+    const [memoryResults, historyResults] = await Promise.all([
+      memoryPromise,
+      historyPromise,
+    ]);
 
-        // Apply jitter
-        const finalScore = score * (1 + (Math.random() * 2 - 1) * jitter);
+    // Merge and sort by score descending
+    const merged = [...memoryResults, ...historyResults];
+    merged.sort((a, b) => b.score - a.score);
 
-        return { memory: candidate as Memory, finalScore };
-      });
-
-    // Sort by final score descending
-    scored.sort((a, b) => b.finalScore - a.finalScore);
-
-    // Return top N (read-only - no access tracking)
-    return scored.slice(0, limit).map((s) => s.memory);
+    return merged.slice(0, limit);
   }
 
   async trackAccess(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const memories = await this.repository.findByIds(ids);
     const now = new Date();
-    for (const id of ids) {
-      const memory = await this.repository.findById(id);
-      if (memory && !isDeleted(memory)) {
-        await this.repository.upsert({
-          ...memory,
-          accessCount: memory.accessCount + 1,
-          lastAccessed: now,
-        });
-      }
-    }
+    await Promise.all(
+      memories
+        .filter((m) => !isDeleted(m))
+        .map((m) =>
+          this.repository.upsert({
+            ...m,
+            accessCount: m.accessCount + 1,
+            lastAccessed: now,
+          })
+        )
+    );
   }
 
   private static readonly UUID_ZERO =
     "00000000-0000-0000-0000-000000000000";
 
-  async storeCheckpoint(args: {
+  async setWaypoint(args: {
     project: string;
     branch?: string;
     summary: string;
@@ -213,7 +305,7 @@ export class MemoryService {
       return items.map((i) => `- ${i}`).join("\n");
     };
 
-    const content = `# Checkpoint - ${args.project}
+    const content = `# Waypoint - ${args.project}
 **Date:** ${date} ${time} | **Branch:** ${args.branch ?? "unknown"}
 
 ## Summary
@@ -236,7 +328,7 @@ ${list(args.memory_ids)}`;
 
     const metadata: Record<string, unknown> = {
       ...(args.metadata ?? {}),
-      type: "checkpoint",
+      type: "waypoint",
       project: args.project,
       date,
       branch: args.branch ?? "unknown",
@@ -260,7 +352,7 @@ ${list(args.memory_ids)}`;
     return memory;
   }
 
-  async getLatestCheckpoint(): Promise<Memory | null> {
+  async getLatestWaypoint(): Promise<Memory | null> {
     return await this.get(MemoryService.UUID_ZERO);
   }
 }

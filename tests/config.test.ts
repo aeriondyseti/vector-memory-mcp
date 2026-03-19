@@ -36,11 +36,11 @@ describe("parseCliArgs", () => {
 
   test("parses multiple args together", () => {
     const result = parseCliArgs([
-      "--db-file", "/my/db.lancedb",
+      "--db-file", "/my/db.sqlite",
       "--port", "4000",
       "--no-http",
     ]);
-    expect(result.dbPath).toBe("/my/db.lancedb");
+    expect(result.dbPath).toBe("/my/db.sqlite");
     expect(result.httpPort).toBe(4000);
     expect(result.enableHttp).toBe(false);
   });
@@ -64,12 +64,12 @@ describe("loadConfig", () => {
 
   test("applies overrides", () => {
     const config = loadConfig({
-      dbPath: "/custom/db.lancedb",
+      dbPath: "/custom/db.sqlite",
       httpPort: 5000,
       enableHttp: false,
       transportMode: "http",
     });
-    expect(config.dbPath).toBe("/custom/db.lancedb");
+    expect(config.dbPath).toBe("/custom/db.sqlite");
     expect(config.httpPort).toBe(5000);
     expect(config.enableHttp).toBe(false);
     expect(config.transportMode).toBe("http");

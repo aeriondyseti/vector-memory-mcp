@@ -64,8 +64,8 @@ export class BenchmarkRunner {
    */
   async setup(): Promise<void> {
     this.tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-benchmark-"));
-    const dbPath = join(this.tmpDir, "benchmark.lancedb");
-    const db = await connectToDatabase(dbPath);
+    const dbPath = join(this.tmpDir, "benchmark.db");
+    const db = connectToDatabase(dbPath);
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService(MODEL_NAME, MODEL_DIMENSION);
     this.service = new MemoryService(repository, embeddings);

@@ -5,16 +5,80 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - 2026-03-18
 
-## [1.1.0] - 2026-02-24
+### Breaking Changes
+- **SQLite replaces LanceDB**: Storage backend migrated from LanceDB (~845-file directory) to a single SQLite file using [sqlite-vec](https://github.com/asg017/sqlite-vec) for vector search and FTS5 for full-text search. Net new dependency footprint reduced to 24KB (sqlite-vec); LanceDB remains bundled temporarily for migration support (see Migration below).
+- **Bun runtime required**: Node.js support removed. The server now requires [Bun](https://bun.sh/) for `bun:sqlite` native SQLite bindings. The `dist/` build step and `@hono/node-server` dependency have been removed.
+- **Rename checkpoint to waypoint**: All "checkpoint" terminology renamed to "waypoint"
+  - MCP tools: `store_checkpoint` → `set_waypoint`, `get_checkpoint` → `get_waypoint`
+  - HTTP route: `GET /checkpoint` → `GET /waypoint`
+  - Metadata type field: `"checkpoint"` → `"waypoint"`
+  - Existing waypoint data (stored at UUID zero) remains compatible
 
 ### Added
-- **Environment variable configuration**: `VECTOR_MEMORY_DB_PATH` and `VECTOR_MEMORY_HTTP_PORT` env vars now work as documented, falling back between CLI flags → env vars → defaults
+- **`migrate` subcommand**: Run `vector-memory-mcp migrate` to convert LanceDB data to SQLite. Auto-detects legacy data at startup and prompts for migration.
+- **Lockfile-based port discovery**: Server writes `.vector-memory/server.lock` with `{port, pid}` on startup, enabling hooks to discover the correct port in multi-session scenarios.
+- **Server instructions**: MCP server now declares itself as the canonical memory system in tool descriptions
+- **Smoke test script**: `bun run smoke` for manual testing checklist
+- **Version-based debug logging**: Auto-enabled for `-dev.N` and `-rc.N` versions, or via `VECTOR_MEMORY_DEBUG=1`
+
+### Fixed
+- **MCP string-serialized arrays**: Added `asArray()` helper to handle MCP transports delivering array arguments as JSON strings (e.g., `for..of` iterating character-by-character)
+- **`isError` flag on validation errors**: All validation error responses now include `isError: true` per MCP convention
+- **Server version in MCP info**: Uses `VERSION` from `package.json` instead of hardcoded `"0.6.0"`
+- **Migration guard**: `runMigrate` now guards against missing LanceDB source on fresh installs
+- **Migration vector conversion**: Fixed `DataView` byteOffset/byteLength handling in `toFloatArray` — previously ignored view bounds, risking corrupted embeddings
+- **Migration hardening**: Warn on unexpected timestamp types instead of silent `Date.now()` fallback; close LanceDB connection after migration; quote paths in summary shell commands; handle `.sqlite` extension doubling
+- **Input validation**: Validate `query`, `history_after`, `history_before`, and `since` date parameters in MCP handlers and HTTP routes — reject malformed dates instead of passing `Invalid Date` downstream
+- **Empty FTS query guard**: Skip FTS MATCH when sanitized query is empty instead of crashing
+- **Waypoint soft-delete filter**: Exclude soft-deleted memories from waypoint `referencedMemories`
+- **Subagent UUID validation**: Validate subagent session filenames against UUID pattern (matching main session behavior)
+- **Publish workflow**: Add `NODE_AUTH_TOKEN` to dist-tag cascade step; always run typecheck for `@dev` publishes
 
 ### Changed
-- **README rewritten**: Configuration section now accurately documents CLI flags (`--db-file`, `--port`, `--no-http`), environment variables, precedence order, and includes an example MCP config with env vars
-- Removed undocumented `VECTOR_MEMORY_MODEL` env var from README (embedding model is not user-configurable)
+- **Direct TypeScript execution**: Package now runs `.ts` source directly via Bun instead of compiling to `dist/`. Simplifies development and eliminates stale-build issues.
+- **Hybrid search rewritten**: KNN (sqlite-vec) + FTS5 queries with manual Reciprocal Rank Fusion (k=60) replace LanceDB's built-in reranker chain. Service layer unchanged.
+- **CI/CD rewrite**: Three-tier dist-tag model (`@dev`/`@rc`/`@latest`) with branch-based RC publish flow
+
+### Removed
+- `dist/` build pipeline (`tsc` compilation, `prebuild`, `build` scripts)
+- `@hono/node-server` dependency and Node.js HTTP fallback code path
+- LanceDB schema files (`src/db/schema.ts`, `conversation.schema.ts`, `lancedb-utils.ts`)
+
+### Migration
+Users upgrading from 1.x with existing data should run:
+```bash
+vector-memory-mcp migrate
+# Verify .vector-memory/memories.db.sqlite exists and contains your data
+mv .vector-memory/memories.db .vector-memory/memories.db.lance-backup
+mv .vector-memory/memories.db.sqlite .vector-memory/memories.db
+```
+
+If migration fails, restore the backup:
+```bash
+mv .vector-memory/memories.db.lance-backup .vector-memory/memories.db
+```
+
+LanceDB (`@lancedb/lancedb`, `apache-arrow`) ships as a production dependency in 2.0 solely to support migration. It will be removed in the next major version.
+
+## [1.1.0] - 2026-03-11
+
+### Added
+- **Conversation history indexing**: Index Claude Code JSONL session logs as searchable history via `index_conversations`, `list_indexed_sessions`, and `reindex_session` tools
+- **Unified search**: `search_memories` gains `include_history`, `history_only`, `session_id`, `role_filter`, `history_after`, and `history_before` parameters to search across both memories and conversation history
+- **Conversation history parser**: Incremental JSONL parser with chunking, overlap, and role extraction for Claude Code session logs
+- **Conversation history data layer**: Dedicated LanceDB table, repository, and service for conversation chunks with hybrid vector + FTS search
+
+### Fixed
+- **SQL injection in LanceDB where clauses**: Added `escapeLanceDbString()` helper to double single quotes in all 12 string interpolation sites across `MemoryRepository` and `ConversationHistoryRepository`
+- **`include_history` / `history_only` mutual exclusivity**: Now returns an error if both are set to `true` instead of silently preferring `history_only`
+
+### Changed
+- **Shared reranker factory**: Extracted `createRerankerMutex()` into `lancedb-utils.ts`, replacing duplicate promise-mutex `getReranker()` methods in both repositories
+- **Shared test helpers**: Created `tests/utils/test-helpers.ts` with `EMBEDDING_DIM`, `fakeEmbedding()`, `createMockEmbeddings()`, `userLine()`, `assistantLine()` — eliminates duplication across 4 test files
+- **Test runner consistency**: Migrated 3 vitest test files back to bun:test (`vi.fn()` → `mock()`)
+- **`handleGetMemories` cleanup**: Converted inline arrow `format` to named `formatMemoryDetail()` function
 
 ## [1.0.2] - 2026-02-10
 
@@ -115,6 +179,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial MCP server implementation
 - Basic project structure
 
+[2.0.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.1.0...v2.0.0
+[1.1.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.0.2...v1.1.0
+[1.0.2]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v0.8.0...v1.0.0
 [0.8.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v0.5.0...v0.8.0
 [0.5.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v0.3.0...v0.4.0
