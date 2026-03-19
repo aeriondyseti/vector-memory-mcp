@@ -124,8 +124,8 @@ jobs:
             exit 1
           fi
           echo "::add-mask::$NPM_TOKEN"
-          # Write token directly to .npmrc to avoid NODE_AUTH_TOKEN conflicts
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > "$HOME/.npmrc"
+          # Write token to the setup-node .npmrc (NPM_CONFIG_USERCONFIG overrides ~/.npmrc)
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           echo "oidc_success=true" >> $GITHUB_OUTPUT
 
       - name: Cascade dist-tags
