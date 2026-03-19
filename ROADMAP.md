@@ -14,6 +14,8 @@ Current version: **1.1.0**
 
 - **Unbounded IN clause in `findByIds()`**: `memory.repository.ts:findByIds()` builds a SQL IN clause from an unbounded array of IDs. LanceDB/DataFusion may have query length limits. Add a size guard (e.g., 100 IDs) and batch if needed.
 
+- **GitHub Actions Node.js 20 deprecation**: `actions/checkout@v4` and `actions/setup-node@v4` run on Node.js 20, which GitHub will force to Node.js 24 starting June 2, 2026. Update to newer action versions that support Node.js 24 before then.
+
 ## Completed
 
 ### v1.1.0 - Conversation History Indexing (Feature 27)
