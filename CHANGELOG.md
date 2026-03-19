@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-03-19
+
+### Fixed
+- **Publish workflow bash syntax error**: Fixed unescaped parentheses in dist-tag warning step that caused workflow failure after successful publish
+- **Dist-tag cascade without NPM_TOKEN**: Replaced `npm dist-tag add` (requires access token) with shadow `X.Y.Z-dev.0` publish using OIDC — no secrets needed
+- **Node 20 deprecation**: Upgraded `actions/checkout` and `actions/setup-node` to v6 (Node 24 native), bumped `node-version` to 24 LTS, dropped redundant `npm install -g npm@latest` step
+
+### Added
+- **Release channels documentation**: README section covering `@latest`, `@rc`, and `@dev` install channels with usage warnings
+
 ## [2.1.0] - 2026-03-19
 
 ### Changed
