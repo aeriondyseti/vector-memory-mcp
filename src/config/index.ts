@@ -5,7 +5,7 @@ import packageJson from "../../package.json" with { type: "json" };
 
 export const VERSION = packageJson.version;
 
-/** Debug mode: auto-enabled for pre-release versions (dev/rc), or via DEBUG env var */
+/** Debug mode: auto-enabled for pre-release versions (dev/rc), or via VECTOR_MEMORY_DEBUG env var */
 export const DEBUG = process.env.VECTOR_MEMORY_DEBUG === "1"
   || VERSION.includes("-dev.")
   || VERSION.includes("-rc.");

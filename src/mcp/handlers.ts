@@ -50,7 +50,7 @@ export async function handleStoreMemories(
   try {
     memories = asArray(args?.memories, "memories");
   } catch (e) {
-    return { content: [{ type: "text", text: errorText(e) }] };
+    return { isError: true, content: [{ type: "text", text: errorText(e) }] };
   }
 
   const ids: string[] = [];
@@ -84,7 +84,7 @@ export async function handleDeleteMemories(
   try {
     ids = asArray(args?.ids, "ids");
   } catch (e) {
-    return { content: [{ type: "text", text: errorText(e) }] };
+    return { isError: true, content: [{ type: "text", text: errorText(e) }] };
   }
   const results: string[] = [];
 
@@ -119,7 +119,7 @@ export async function handleUpdateMemories(
   try {
     updates = asArray(args?.updates, "updates");
   } catch (e) {
-    return { content: [{ type: "text", text: errorText(e) }] };
+    return { isError: true, content: [{ type: "text", text: errorText(e) }] };
   }
 
   const results: string[] = [];
@@ -224,7 +224,7 @@ export async function handleGetMemories(
   try {
     ids = asArray(args?.ids, "ids");
   } catch (e) {
-    return { content: [{ type: "text", text: errorText(e) }] };
+    return { isError: true, content: [{ type: "text", text: errorText(e) }] };
   }
 
   const memories = await service.getMultiple(ids);
