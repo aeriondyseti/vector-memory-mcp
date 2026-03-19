@@ -9,6 +9,7 @@ import type {
   IndexedSession,
   ParsedMessage,
   SessionFileInfo,
+  SessionIndexDetail,
 } from "../types/conversation.js";
 import type { ConversationHistoryConfig } from "../config/index.js";
 import { resolveSessionLogPath } from "../config/index.js";
@@ -175,12 +176,18 @@ export class ConversationHistoryService {
   async indexConversations(
     path?: string,
     since?: Date
-  ): Promise<{ indexed: number; skipped: number; errors: string[] }> {
+  ): Promise<{
+    indexed: number;
+    skipped: number;
+    errors: string[];
+    details: SessionIndexDetail[];
+  }> {
     if (!this.config.enabled) {
       return {
         indexed: 0,
         skipped: 0,
         errors: ["Conversation history indexing is not enabled"],
+        details: [],
       };
     }
 
@@ -190,6 +197,7 @@ export class ConversationHistoryService {
         indexed: 0,
         skipped: 0,
         errors: ["No session log path configured or detected"],
+        details: [],
       };
     }
 
@@ -203,39 +211,48 @@ export class ConversationHistoryService {
     let indexed = 0;
     let skipped = 0;
     const errors: string[] = [];
+    const details: SessionIndexDetail[] = [];
 
     for (const file of sessionFiles) {
       const existing = indexState.get(file.sessionId);
       if (existing && existing.lastModified >= file.lastModified.getTime()) {
         skipped++;
+        details.push({ sessionId: file.sessionId, project: file.project, status: "skipped" });
         continue;
       }
 
       try {
-        await this.indexSession(file, indexState);
+        const state = await this.indexSession(file, indexState);
         indexed++;
+        details.push({
+          sessionId: file.sessionId,
+          project: file.project,
+          status: "indexed",
+          chunks: state.chunkCount,
+          messages: state.messageCount,
+        });
       } catch (err) {
-        errors.push(
-          `${file.sessionId}: ${err instanceof Error ? err.message : String(err)}`
-        );
+        const message = err instanceof Error ? err.message : String(err);
+        errors.push(`${file.sessionId}: ${message}`);
+        details.push({ sessionId: file.sessionId, project: file.project, status: "error", error: message });
       }
     }
 
     await this.saveIndexState(indexState);
-    return { indexed, skipped, errors };
+    return { indexed, skipped, errors, details };
   }
 
   private async indexSession(
     file: SessionFileInfo,
     indexState: Map<string, IndexedSession>
-  ): Promise<void> {
+  ): Promise<IndexedSession> {
     const messages = await this.parser.parse(
       file.filePath,
       this.config.indexSubagents
     );
     if (messages.length === 0) {
       // Still track it so we don't re-attempt
-      indexState.set(file.sessionId, {
+      const session: IndexedSession = {
         sessionId: file.sessionId,
         filePath: file.filePath,
         project: file.project,
@@ -245,8 +262,9 @@ export class ConversationHistoryService {
         indexedAt: new Date(),
         firstMessageAt: file.lastModified,
         lastMessageAt: file.lastModified,
-      });
-      return;
+      };
+      indexState.set(file.sessionId, session);
+      return session;
     }
 
     const chunks = chunkMessages(
@@ -280,7 +298,7 @@ export class ConversationHistoryService {
     await this.repository.insertBatch(rows);
 
     // Update index state
-    indexState.set(file.sessionId, {
+    const session: IndexedSession = {
       sessionId: file.sessionId,
       filePath: file.filePath,
       project: file.project,
@@ -290,7 +308,9 @@ export class ConversationHistoryService {
       indexedAt: new Date(),
       firstMessageAt: messages[0].timestamp,
       lastMessageAt: messages[messages.length - 1].timestamp,
-    });
+    };
+    indexState.set(file.sessionId, session);
+    return session;
   }
 
   async reindexSession(
