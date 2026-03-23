@@ -32,9 +32,11 @@ export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
  * Loads all vectors, computes cosine similarity, returns top-K results
  * sorted by descending similarity (ascending distance).
  */
+type VecTable = "memories_vec" | "conversation_history_vec";
+
 export function knnSearch(
   db: Database,
-  table: string,
+  table: VecTable,
   queryVec: number[],
   k: number,
 ): Array<{ id: string; distance: number }> {

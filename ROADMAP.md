@@ -28,6 +28,8 @@ Current version: **2.0.0**
 
 - **No normalization of `project` string in waypoint operations**: The `project` parameter flows through `set_waypoint` / `get_waypoint` without trimming or case normalization, so `"MyProject"` and `"myproject"` silently produce different waypoint slots. Add boundary normalization (e.g. trim + lowercase) or document case-sensitivity. Deferred since multi-project waypoints are experimental.
 
+- **In-memory vector cache for brute-force KNN**: `knnSearch()` in `sqlite-utils.ts` does a full `SELECT id, vector FROM table` on every search call. For a personal memory system (<10K records, ~15MB) this is acceptable, but a write-through `Map<string, Float32Array>` cache invalidated on insert/update/delete would eliminate repeated I/O and allocation. Becomes more important as memory count grows.
+
 - **Separate "minimal" vs "integrated" server modes**: Currently the server is a single configuration that exposes everything — pure MCP tools, HTTP/SSE transport, conversation history indexing, waypoints, and hooks designed for the Claude Code plugin (`cc-plugins`). A "minimal" mode would be a pure MCP server that any client uses as it pleases (just memory CRUD + search), while "integrated" mode enables the full stack (HTTP server, conversation indexing, waypoint system, plugin hook support). This would simplify the setup for users who just want semantic memory without the Claude Code integration surface, and make the codebase boundary between core memory and integration features more explicit.
 
 ## Experimental
