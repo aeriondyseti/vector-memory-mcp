@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.3] - 2026-03-23
+
+### Fixed
+- **LanceDB extract pagination and dedup**: `query().toArrow()` without offset/limit returned non-deterministic results that duplicated some rows and skipped others. Switched to paginated offset/limit reads with deduplication by ID. Also adds schema-aware timestamp conversion (reads Arrow `TimeUnit` per column) and safe BigInt fallback when Arrow's getter throws.
+
 ## [2.2.2] - 2026-03-23
 
 ### Fixed
