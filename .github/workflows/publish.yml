@@ -30,7 +30,7 @@ jobs:
           fetch-depth: 0  # Full history needed for branch-tag validation
 
       - name: Validate stable tag is on main
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref, '-dev.') && !contains(github.ref, '-rc.')
         run: |
           TAG="${{ github.ref_name }}"
           # Check that the tagged commit exists on main
@@ -46,6 +46,10 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             TAG="${{ inputs.tag }}"
           elif [[ "${{ github.ref }}" == refs/heads/rc/* ]]; then
+            TAG="rc"
+          elif [[ "${{ github.ref }}" == *-dev.* ]]; then
+            TAG="dev"
+          elif [[ "${{ github.ref }}" == *-rc.* ]]; then
             TAG="rc"
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG="latest"
