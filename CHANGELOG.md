@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2] - 2026-03-23
+
+### Fixed
+- **LanceDB migration BigInt crash on macOS**: Arrow's `StructRow` proxy threw `TypeError` when reading microsecond timestamps exceeding `Number.MAX_SAFE_INTEGER`. Migration now reads columns directly from Arrow `RecordBatch` objects, bypassing the unsafe conversion.
+
 ## [2.2.1] - 2026-03-23
 
 ### Fixed
