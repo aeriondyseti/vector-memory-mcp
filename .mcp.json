@@ -8,15 +8,6 @@
         "@upstash/context7-mcp"
       ]
     },
-    "vector-memory": {
-      "type": "stdio",
-      "command": "bunx",
-      "args": [
-        "--bun",
-        "@aeriondyseti/vector-memory-mcp@rc",
-        "--enable-history"
-      ]
-    },
     "serena": {
       "type": "stdio",
       "command": "uvx",

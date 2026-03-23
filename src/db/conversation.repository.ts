@@ -9,6 +9,7 @@ import {
   sanitizeFtsQuery,
   hybridRRF,
   topByRRF,
+  knnSearch,
 } from "./sqlite-utils.js";
 
 export class ConversationRepository {
@@ -112,14 +113,8 @@ export class ConversationRepository {
   ): Promise<ConversationHybridRow[]> {
     const candidateCount = limit * 3;
 
-    // Vector KNN search
-    const vecResults = this.db
-      .prepare(
-        `SELECT id FROM conversation_history_vec
-         WHERE vector MATCH ? AND k = ?
-         ORDER BY distance`
-      )
-      .all(serializeVector(embedding), candidateCount) as Array<{ id: string }>;
+    // Vector KNN search (brute-force cosine similarity in JS)
+    const vecResults = knnSearch(this.db, "conversation_history_vec", embedding, candidateCount);
 
     // FTS5 search
     const ftsQuery = sanitizeFtsQuery(query);
