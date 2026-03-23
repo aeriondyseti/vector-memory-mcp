@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1] - 2026-03-23
+
+### Fixed
+- **macOS compatibility**: Dropped `sqlite-vec` native extension which required `sqlite3_load_extension`, unavailable on macOS system SQLite. Vector KNN search is now implemented as brute-force cosine similarity in JS over plain BLOB tables. No API changes.
+- **Removed unused `apache-arrow` dependency**: Was only a transitive dependency of LanceDB, not directly imported.
+
+### Changed
+- **Vec tables migrated from vec0 to plain BLOB**: On first startup after upgrade, existing `vec0` virtual tables are automatically migrated to plain `(id TEXT, vector BLOB)` tables. Migration is transparent and one-time.
+- **LanceDB migration refactored**: Data extraction now runs in a subprocess (`scripts/lancedb-extract.ts`) to avoid native symbol collisions between `@lancedb/lancedb` and `bun:sqlite`.
+
 ## [2.2.0] - 2026-03-19
 
 ### Added
