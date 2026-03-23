@@ -4,17 +4,58 @@ import type { Database } from "bun:sqlite";
 export const RRF_K = 60;
 
 /**
- * Serialize a number[] embedding to the raw float32 bytes sqlite-vec expects.
+ * Serialize a number[] embedding to raw float32 bytes for BLOB storage.
  */
 export function serializeVector(vec: number[]): Buffer {
   return Buffer.from(new Float32Array(vec).buffer);
 }
 
 /**
- * Deserialize raw float32 bytes from sqlite-vec back to number[].
+ * Deserialize raw float32 bytes back to number[].
  */
 export function deserializeVector(buf: Buffer): number[] {
   return Array.from(new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4));
+}
+
+/**
+ * Cosine similarity between two pre-normalized Float32Arrays.
+ * Returns dot product (equivalent to cosine sim when vectors are unit-length).
+ */
+export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+  return dot;
+}
+
+/**
+ * Brute-force KNN search over a vector blob table.
+ * Loads all vectors, computes cosine similarity, returns top-K results
+ * sorted by descending similarity (ascending distance).
+ */
+export function knnSearch(
+  db: Database,
+  table: string,
+  queryVec: number[],
+  k: number,
+): Array<{ id: string; distance: number }> {
+  const rows = db
+    .prepare(`SELECT id, vector FROM ${table}`)
+    .all() as Array<{ id: string; vector: Buffer }>;
+
+  const qv = new Float32Array(queryVec);
+  const scored = rows.map((r) => {
+    const vec = new Float32Array(
+      r.vector.buffer,
+      r.vector.byteOffset,
+      r.vector.byteLength / 4,
+    );
+    const sim = cosineSimilarity(qv, vec);
+    // Convert similarity to distance (1 - sim) for consistency with previous API
+    return { id: r.id, distance: 1 - sim };
+  });
+
+  scored.sort((a, b) => a.distance - b.distance);
+  return scored.slice(0, k);
 }
 
 /**

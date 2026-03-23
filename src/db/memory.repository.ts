@@ -6,6 +6,7 @@ import {
   sanitizeFtsQuery,
   hybridRRF,
   topByRRF,
+  knnSearch,
 } from "./sqlite-utils.js";
 import {
   type Memory,
@@ -46,7 +47,7 @@ export class MemoryRepository {
   }
 
   /**
-   * Fetch the embedding vector for a memory id from the vec0 table.
+   * Fetch the embedding vector for a memory id.
    */
   private getEmbedding(id: string): number[] {
     const row = this.db
@@ -110,7 +111,6 @@ export class MemoryRepository {
           memory.lastAccessed?.getTime() ?? null,
         );
 
-      // vec0 virtual tables don't support REPLACE — delete then insert
       this.db.prepare("DELETE FROM memories_vec WHERE id = ?").run(memory.id);
       this.db
         .prepare("INSERT INTO memories_vec (id, vector) VALUES (?, ?)")
@@ -170,14 +170,9 @@ export class MemoryRepository {
     limit: number,
   ): Promise<HybridRow[]> {
     const candidateLimit = limit * 3;
-    const vecBuf = serializeVector(embedding);
 
-    // Vector KNN search
-    const vectorResults = this.db
-      .prepare(
-        "SELECT id, distance FROM memories_vec WHERE vector MATCH ? AND k = ? ORDER BY distance",
-      )
-      .all(vecBuf, candidateLimit) as Array<{ id: string; distance: number }>;
+    // Vector KNN search (brute-force cosine similarity in JS)
+    const vectorResults = knnSearch(this.db, "memories_vec", embedding, candidateLimit);
 
     // Full-text search
     const ftsQuery = sanitizeFtsQuery(query);

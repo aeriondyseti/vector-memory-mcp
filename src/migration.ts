@@ -1,57 +1,32 @@
 /**
- * LanceDB → SQLite (sqlite-vec) migration logic.
+ * LanceDB -> SQLite migration logic.
  *
- * This module is the shared core used by both the `migrate` subcommand
- * and the standalone `scripts/migrate-from-lancedb.ts` script.
+ * Reads LanceDB data in a child process (scripts/lancedb-extract.ts) to avoid
+ * a native symbol collision between @lancedb/lancedb and bun:sqlite.
+ * The extracted JSON is then written to SQLite in-process.
  *
  * @deprecated Will be removed in the next major version once LanceDB
  *   support is dropped.
  */
 
 import { existsSync, statSync } from "fs";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 import { connectToDatabase } from "./db/connection.js";
 import { serializeVector } from "./db/sqlite-utils.js";
 
-// ── Helpers ─────────────────────────────────────────────────────────
-
-function toEpochMs(value: unknown): number {
-  if (typeof value === "number") return value;
-  if (value instanceof Date) return value.getTime();
-  if (typeof value === "bigint") return Number(value);
-  console.warn(`⚠️ Unexpected timestamp type: ${typeof value} (value: ${value}), using current time`);
-  return Date.now();
-}
-
-function toFloatArray(vec: unknown): number[] {
-  if (Array.isArray(vec)) return vec;
-  if (vec instanceof Float32Array) return Array.from(vec);
-  // Arrow Vector objects have a .toArray() method that returns Float32Array
-  if (vec && typeof (vec as any).toArray === "function") {
-    return Array.from((vec as any).toArray());
-  }
-  if (ArrayBuffer.isView(vec)) {
-    const view = vec as DataView;
-    return Array.from(new Float32Array(view.buffer, view.byteOffset, view.byteLength / 4));
-  }
-  return [];
-}
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── Detection ───────────────────────────────────────────────────────
 
-/**
- * Check if a path is a LanceDB directory (i.e. needs migration).
- * Returns true if the path exists and is a directory.
- */
 export function isLanceDbDirectory(dbPath: string): boolean {
   return existsSync(dbPath) && statSync(dbPath).isDirectory();
 }
 
-// ── Migration ───────────────────────────────────────────────────────
+// ── Types ───────────────────────────────────────────────────────────
 
 export interface MigrateOptions {
-  /** Path to the LanceDB directory (source). */
   source: string;
-  /** Path to the new SQLite file (target). */
   target: string;
 }
 
@@ -61,24 +36,44 @@ export interface MigrateResult {
   outputSizeMB: string;
 }
 
-/**
- * Run the full LanceDB → SQLite migration.
- *
- * Dynamically imports @lancedb/lancedb so the cost is only paid
- * when the migration is actually invoked.
- */
+interface ExtractedData {
+  memories: Array<{
+    id: string;
+    content: string;
+    metadata: string;
+    vector: number[];
+    created_at: number;
+    updated_at: number;
+    last_accessed: number | null;
+    superseded_by: string | null;
+    usefulness: number;
+    access_count: number;
+  }>;
+  conversations: Array<{
+    id: string;
+    content: string;
+    metadata: string;
+    vector: number[];
+    created_at: number;
+    session_id: string;
+    role: string;
+    message_index_start: number;
+    message_index_end: number;
+    project: string;
+  }>;
+}
+
+// ── Migration ───────────────────────────────────────────────────────
+
 export async function migrate(opts: MigrateOptions): Promise<MigrateResult> {
   const { source, target } = opts;
 
-  // Validate source
   if (!existsSync(source)) {
     throw new Error(`Source not found: ${source}`);
   }
   if (!statSync(source).isDirectory()) {
     throw new Error(`Source is not a directory (expected LanceDB): ${source}`);
   }
-
-  // Prevent overwriting
   if (existsSync(target)) {
     throw new Error(
       `Target already exists: ${target}\n   Delete it first or choose a different target path.`
@@ -89,148 +84,100 @@ export async function migrate(opts: MigrateOptions): Promise<MigrateResult> {
   console.error(`📄 Target (SQLite):  ${target}`);
   console.error();
 
-  // Dynamic import — only loads LanceDB when migration is actually run
-  const lancedb = await import("@lancedb/lancedb");
+  // Phase 1: Extract data from LanceDB in a subprocess.
+  // This avoids a native symbol collision between @lancedb/lancedb and bun:sqlite.
+  const extractScript = resolve(__dirname, "..", "scripts", "lancedb-extract.ts");
+  const proc = Bun.spawn(["bun", extractScript, source], {
+    stdout: "pipe",
+    stderr: "inherit",
+  });
 
-  // Open LanceDB
-  const lanceDb = await lancedb.connect(source);
-  const tableNames = await lanceDb.tableNames();
-  console.error(`Found tables: ${tableNames.join(", ")}`);
+  const output = await new Response(proc.stdout).text();
+  const exitCode = await proc.exited;
 
-  // Open SQLite (reuses shared connection setup: WAL, sqlite-vec, migrations)
+  if (exitCode !== 0) {
+    throw new Error(`LanceDB extraction failed (exit code ${exitCode})`);
+  }
+
+  const data: ExtractedData = JSON.parse(output);
+
+  // Phase 2: Write to SQLite (no LanceDB in this process).
   const sqliteDb = connectToDatabase(target);
 
   let memoriesMigrated = 0;
   let conversationChunksMigrated = 0;
 
-  // ── Migrate memories ────────────────────────────────────────────
-  if (tableNames.includes("memories")) {
-    const memoriesTable = await lanceDb.openTable("memories");
-    const totalMemories = await memoriesTable.countRows();
-    console.error(`\n🧠 Migrating ${totalMemories} memories...`);
+  if (data.memories.length > 0) {
+    console.error(`\n🧠 Writing ${data.memories.length} memories to SQLite...`);
 
     const insertMain = sqliteDb.prepare(
       `INSERT OR REPLACE INTO memories
         (id, content, metadata, created_at, updated_at, superseded_by, usefulness, access_count, last_accessed)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
+    const deleteVec = sqliteDb.prepare(`DELETE FROM memories_vec WHERE id = ?`);
     const insertVec = sqliteDb.prepare(
       `INSERT INTO memories_vec (id, vector) VALUES (?, ?)`
     );
     const insertFts = sqliteDb.prepare(
-      `INSERT INTO memories_fts (id, content) VALUES (?, ?)`
+      `INSERT OR REPLACE INTO memories_fts (id, content) VALUES (?, ?)`
     );
 
-    const BATCH_SIZE = 500;
-    let offset = 0;
-
-    while (true) {
-      const rows = await memoriesTable.query().limit(BATCH_SIZE).offset(offset).toArray();
-      if (rows.length === 0) break;
-
-      const tx = sqliteDb.transaction(() => {
-        for (const row of rows) {
-          const vec = toFloatArray(row.vector);
-          const createdAt = toEpochMs(row.created_at);
-          const updatedAt = toEpochMs(row.updated_at);
-          const lastAccessed = row.last_accessed != null ? toEpochMs(row.last_accessed) : null;
-
-          insertMain.run(
-            row.id,
-            row.content,
-            row.metadata ?? "{}",
-            createdAt,
-            updatedAt,
-            row.superseded_by ?? null,
-            row.usefulness ?? 0,
-            row.access_count ?? 0,
-            lastAccessed,
-          );
-
-          if (vec.length > 0) {
-            insertVec.run(row.id, serializeVector(vec));
-          }
-
-          insertFts.run(row.id, row.content);
+    const tx = sqliteDb.transaction(() => {
+      for (const row of data.memories) {
+        insertMain.run(
+          row.id, row.content, row.metadata,
+          row.created_at, row.updated_at,
+          row.superseded_by, row.usefulness,
+          row.access_count, row.last_accessed,
+        );
+        if (row.vector.length > 0) {
+          deleteVec.run(row.id);
+          insertVec.run(row.id, serializeVector(row.vector));
         }
-      });
-
-      tx();
-      memoriesMigrated += rows.length;
-      offset += BATCH_SIZE;
-
-      if (totalMemories > BATCH_SIZE) {
-        process.stderr.write(`   ${memoriesMigrated}/${totalMemories}\r`);
+        insertFts.run(row.id, row.content);
       }
-    }
-
+    });
+    tx();
+    memoriesMigrated = data.memories.length;
     console.error(`   ✅ ${memoriesMigrated} memories migrated`);
   }
 
-  // ── Migrate conversation history ────────────────────────────────
-  if (tableNames.includes("conversation_history")) {
-    const convTable = await lanceDb.openTable("conversation_history");
-    const totalConv = await convTable.countRows();
-    console.error(`\n💬 Migrating ${totalConv} conversation chunks...`);
+  if (data.conversations.length > 0) {
+    console.error(`\n💬 Writing ${data.conversations.length} conversation chunks to SQLite...`);
 
     const insertMain = sqliteDb.prepare(
       `INSERT OR REPLACE INTO conversation_history
         (id, content, metadata, created_at, session_id, role, message_index_start, message_index_end, project)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
+    const deleteVec = sqliteDb.prepare(`DELETE FROM conversation_history_vec WHERE id = ?`);
     const insertVec = sqliteDb.prepare(
       `INSERT INTO conversation_history_vec (id, vector) VALUES (?, ?)`
     );
     const insertFts = sqliteDb.prepare(
-      `INSERT INTO conversation_history_fts (id, content) VALUES (?, ?)`
+      `INSERT OR REPLACE INTO conversation_history_fts (id, content) VALUES (?, ?)`
     );
 
-    const BATCH_SIZE = 500;
-    let offset = 0;
-
-    while (true) {
-      const rows = await convTable.query().limit(BATCH_SIZE).offset(offset).toArray();
-      if (rows.length === 0) break;
-
-      const tx = sqliteDb.transaction(() => {
-        for (const row of rows) {
-          const vec = toFloatArray(row.vector);
-          const createdAt = toEpochMs(row.created_at);
-
-          insertMain.run(
-            row.id,
-            row.content,
-            row.metadata ?? "{}",
-            createdAt,
-            row.session_id,
-            row.role,
-            row.message_index_start ?? 0,
-            row.message_index_end ?? 0,
-            row.project ?? "",
-          );
-
-          if (vec.length > 0) {
-            insertVec.run(row.id, serializeVector(vec));
-          }
-
-          insertFts.run(row.id, row.content);
+    const tx = sqliteDb.transaction(() => {
+      for (const row of data.conversations) {
+        insertMain.run(
+          row.id, row.content, row.metadata,
+          row.created_at, row.session_id, row.role,
+          row.message_index_start, row.message_index_end, row.project,
+        );
+        if (row.vector.length > 0) {
+          deleteVec.run(row.id);
+          insertVec.run(row.id, serializeVector(row.vector));
         }
-      });
-
-      tx();
-      conversationChunksMigrated += rows.length;
-      offset += BATCH_SIZE;
-
-      if (totalConv > BATCH_SIZE) {
-        process.stderr.write(`   ${conversationChunksMigrated}/${totalConv}\r`);
+        insertFts.run(row.id, row.content);
       }
-    }
-
+    });
+    tx();
+    conversationChunksMigrated = data.conversations.length;
     console.error(`   ✅ ${conversationChunksMigrated} conversation chunks migrated`);
   }
 
-  // ── Finalize ────────────────────────────────────────────────────
-  await lanceDb.close?.();
   sqliteDb.close();
 
   const { size } = statSync(target);
@@ -239,9 +186,6 @@ export async function migrate(opts: MigrateOptions): Promise<MigrateResult> {
   return { memoriesMigrated, conversationChunksMigrated, outputSizeMB };
 }
 
-/**
- * Format a human-readable summary after migration completes.
- */
 export function formatMigrationSummary(
   source: string,
   target: string,
