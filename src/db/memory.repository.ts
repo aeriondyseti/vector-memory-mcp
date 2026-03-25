@@ -17,6 +17,10 @@ import {
 export class MemoryRepository {
   constructor(private db: Database) {}
 
+  getDb(): Database {
+    return this.db;
+  }
+
   // ---------------------------------------------------------------------------
   // Row mapping
   // ---------------------------------------------------------------------------

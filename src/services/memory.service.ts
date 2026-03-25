@@ -32,6 +32,14 @@ export class MemoryService {
     return this.conversationService;
   }
 
+  getRepository(): MemoryRepository {
+    return this.repository;
+  }
+
+  getEmbeddings(): EmbeddingsService {
+    return this.embeddings;
+  }
+
   async store(
     content: string,
     metadata: Record<string, unknown> = {},
@@ -366,6 +374,14 @@ ${list(args.memory_ids)}`;
     };
 
     await this.repository.upsert(memory);
+
+    // Always update the global (no-project) waypoint so the session-start
+    // hook can find the most recent waypoint without knowing the project name.
+    const globalId = MemoryService.UUID_ZERO;
+    if (memory.id !== globalId) {
+      await this.repository.upsert({ ...memory, id: globalId });
+    }
+
     return memory;
   }
 

@@ -3,7 +3,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { resources, readResource } from "./resources.js";
 
 import { tools } from "./tools.js";
 import { handleToolCall } from "./handlers.js";
@@ -20,7 +23,7 @@ export function createServer(memoryService: MemoryService): Server {
   const server = new Server(
     { name: "vector-memory-mcp", version: VERSION },
     {
-      capabilities: { tools: {} },
+      capabilities: { tools: {}, resources: {} },
       instructions: SERVER_INSTRUCTIONS,
     }
   );
@@ -32,6 +35,14 @@ export function createServer(memoryService: MemoryService): Server {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     return handleToolCall(name, args, memoryService);
+  });
+
+  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    return { resources };
+  });
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    return readResource(request.params.uri);
   });
 
   return server;

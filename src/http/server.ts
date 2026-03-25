@@ -8,6 +8,7 @@ import type { Config } from "../config/index.js";
 import { isDeleted } from "../types/memory.js";
 import { createMcpRoutes } from "./mcp-transport.js";
 import type { Memory, SearchIntent } from "../types/memory.js";
+import { MigrationService } from "../services/migration.service.js";
 
 /**
  * Check if a port is available by attempting to bind to it
@@ -236,6 +237,31 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
         since
       );
 
+      return c.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  // Migrate from external memory database
+  app.post("/migrate", async (c) => {
+    try {
+      const body = await c.req.json();
+      const source = body.source;
+
+      if (!source || typeof source !== "string") {
+        return c.json({ error: "Missing or invalid 'source' field" }, 400);
+      }
+
+      const repository = memoryService.getRepository();
+      const migrationService = new MigrationService(
+        repository,
+        memoryService.getEmbeddings(),
+        repository.getDb(),
+      );
+
+      const result = await migrationService.migrate(source);
       return c.json(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
