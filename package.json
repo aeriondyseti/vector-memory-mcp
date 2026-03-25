@@ -35,7 +35,8 @@
     "smoke": "bun run scripts/smoke-test.ts",
     "warmup": "bun run scripts/warmup.ts",
     "postinstall": "bun run scripts/warmup.ts",
-    "prepublishOnly": "bunx tsc --noEmit"
+    "prepublishOnly": "bunx tsc --noEmit",
+    "postversion": "bun scripts/sync-version.ts"
   },
   "keywords": [
     "mcp",

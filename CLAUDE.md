@@ -60,13 +60,58 @@ bun run warmup        # download ML models
 
 ## Publishing
 
-Three-tier npm dist-tags: `@dev`, `@rc`, `@latest`.
+Three-tier npm dist-tags: `@dev`, `@rc`, `@latest`. Use `/publish` to run the workflow interactively.
 
-- `@dev`: git tags on dev branch
-- `@rc`: branch pushes from `rc/*` branches
-- `@latest`: `v*` git tags on main, cascades to `@dev` and `@rc`
+### Version Source of Truth
 
-See `.claude/skills/publish/SKILL.md` for the publish workflow.
+`package.json` is the single source of truth. `scripts/sync-version.ts` stamps the version into `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`. It accepts an optional explicit version argument; without one it reads from `package.json`.
+
+### Two Installation Paths
+
+- **npm** (`bunx @aeriondyseti/vector-memory-mcp`) — standalone MCP server, no hooks/skills
+- **Plugin/marketplace** (clone from GitHub) — MCP server runs from source via `plugin/.mcp.json`, includes hooks + skills
+
+### Dev Flow (`/publish dev`)
+
+Lightweight snapshot of current `dev` branch. Backward-looking: "stuff since last release."
+
+1. Must be on `dev`, clean, up to date
+2. Compute version: latest stable tag + `-dev.N` (e.g., `2.2.3-dev.4`)
+3. `sync-version.ts "${NEW_VERSION}"` → commit → tag `v${NEW_VERSION}` → push branch + tags
+4. GHA publishes to npm `@dev` (overrides `package.json` version from tag at build time)
+
+### RC Flow (`/publish rc`)
+
+Stabilization branch. Forward-looking: "this will become X.Y.Z." No new features — bugfixes and chores only.
+
+1. Must be on `dev`, clean, up to date. Check for existing `rc/*` branches
+2. Analyze commits since last stable tag → determine semver bump (`feat:` = minor, `fix:` = patch, `feat!:` = major)
+3. Create `rc/X.Y.Z` branch, `npm version X.Y.Z-rc.1`, `sync-version.ts` → commit → push
+4. GHA publishes to npm `@rc` on every push to the `rc/*` branch
+5. Iterate: fix bugs → bump rc number (`X.Y.Z-rc.N`) → sync → commit → push
+
+### Release Flow (`/publish release`)
+
+Promote an RC to stable. Must be on an `rc/*` branch.
+
+1. Version from branch name: `rc/2.3.0` → `2.3.0`
+2. Write CHANGELOG, `npm version X.Y.Z`, `sync-version.ts` → commit → push
+3. Create PR: `rc/X.Y.Z` → `main`
+4. After merge: tag `vX.Y.Z` on main, push tags, merge main → dev, delete rc branch
+5. GHA publishes to npm `@latest`, cascades `@dev` via shadow publish, creates GitHub Release
+
+### Plugin & Marketplace
+
+This repo is both an npm package and a Claude Code plugin marketplace.
+
+| File | Purpose |
+|------|---------|
+| `.claude-plugin/plugin.json` | Plugin manifest — points to `plugin/` for hooks, skills, MCP config |
+| `.claude-plugin/marketplace.json` | Marketplace manifest — single plugin, `"source": "."` |
+| `plugin/.mcp.json` | Runs MCP server from source: `bun ${CLAUDE_PLUGIN_ROOT}/src/index.ts` |
+| `plugin/hooks/` | Session lifecycle hooks (start, clear, compact, context monitor) |
+| `plugin/skills/` | Skills: vector-memory-usage, waypoint-set, waypoint-get, waypoint-workflow |
+| `scripts/sync-version.ts` | Stamps version from `package.json` (or explicit arg) into plugin/marketplace files |
 
 ## Code Style
 

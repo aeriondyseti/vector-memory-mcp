@@ -1,0 +1,49 @@
+{
+  "description": "Vector memory lifecycle hooks: session context loading and context monitoring",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "start",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/plugin/hooks/scripts/session-start.ts",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/plugin/hooks/scripts/session-clear.ts",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/plugin/hooks/scripts/session-compact.ts",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/plugin/hooks/scripts/context-monitor.ts",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
