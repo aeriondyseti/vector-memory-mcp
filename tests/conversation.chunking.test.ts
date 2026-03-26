@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
-import { chunkMessages } from "../server/core/conversation.service";
-import type { ParsedMessage } from "../server/core/conversation";
+import { chunkMessages } from "../server/core/conversation.service.js";
+import type { ParsedMessage } from "../server/core/conversation.js";
 
 function makeMessage(
   index: number,

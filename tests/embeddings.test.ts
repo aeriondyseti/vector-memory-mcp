@@ -1,10 +1,10 @@
 import { describe, expect, test, beforeAll } from "bun:test";
-import { EmbeddingsService } from "../server/core/embeddings.service";
+import { EmbeddingsService } from "../server/core/embeddings.service.js";
 import {
   isModelAvailable,
   createEmbeddingsService,
   testWithModel,
-} from "./utils/model-loader";
+} from "./utils/model-loader.js";
 
 describe("EmbeddingsService", () => {
   let service: EmbeddingsService;
