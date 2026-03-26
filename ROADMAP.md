@@ -1,6 +1,6 @@
 # Roadmap
 
-Current version: **2.0.0**
+Current version: **2.3.0-rc.2**
 
 ## Tech Debt
 
@@ -27,6 +27,8 @@ Current version: **2.0.0**
 - **`waypointId()` produces non-RFC-4122 UUID**: The deterministic project-scoped waypoint ID is SHA-256 formatted as `8-4-4-4-12` but lacks version/variant bits, making it a pseudo-UUID that could theoretically collide with `randomUUID()` values in the same table. Low risk since waypoint IDs occupy a distinct semantic slot, but should either use proper UUIDv5 or a non-UUID format (e.g. `wp:<hex>`). Deferred since multi-project waypoints are experimental.
 
 - **No normalization of `project` string in waypoint operations**: The `project` parameter flows through `set_waypoint` / `get_waypoint` without trimming or case normalization, so `"MyProject"` and `"myproject"` silently produce different waypoint slots. Add boundary normalization (e.g. trim + lowercase) or document case-sensitivity. Deferred since multi-project waypoints are experimental.
+
+- **Migration and backfill testing**: `server/core/migrations.ts` has no dedicated test coverage. The `backfillVectors()` function (which re-embeds rows missing from `_vec` tables after the vec0-to-BLOB migration) was validated manually by restarting the live server and confirming `search_memories` returned ranked results, but no automated test exists. Should cover: migration sequencing, backfill detection of missing/empty vectors, idempotent re-runs, and edge cases like zero-vector waypoints.
 
 - **In-memory vector cache for brute-force KNN**: `knnSearch()` in `sqlite-utils.ts` does a full `SELECT id, vector FROM table` on every search call. For a personal memory system (<10K records, ~15MB) this is acceptable, but a write-through `Map<string, Float32Array>` cache invalidated on insert/update/delete would eliminate repeated I/O and allocation. Becomes more important as memory count grows.
 
