@@ -18,7 +18,7 @@ const isCI = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true";
 const describeE2E = isCI ? describe.skip : describe;
 
 // Use source directly with bun — bun:sqlite requires the Bun runtime
-const SERVER_PATH = join(import.meta.dir, "../src/index.ts");
+const SERVER_PATH = join(import.meta.dir, "../server/index.ts");
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -231,7 +231,7 @@ describeE2E("E2E: HTTP Transport", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-e2e-http-"));
     dbPath = join(tmpDir, "test.db");
 
-    proc = spawn(["bun", "run", SERVER_PATH, "--db-file", dbPath, "--port", String(port)], {
+    proc = spawn(["bun", "run", SERVER_PATH, "--db-file", dbPath, "--plugin", "--port", String(port)], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",

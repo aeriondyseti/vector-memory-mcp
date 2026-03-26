@@ -12,6 +12,6 @@
     "resolveJsonModule": true,
     "noEmit": true
   },
-  "include": ["src/**/*", "scripts/**/*"],
+  "include": ["server/**/*", "scripts/**/*", "plugin/**/*"],
   "exclude": ["node_modules", "dist", "scripts/vector-benchmark.ts"]
 }

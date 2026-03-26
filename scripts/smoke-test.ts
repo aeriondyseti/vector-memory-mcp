@@ -30,7 +30,7 @@ import { tmpdir } from "os";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-const SERVER_PATH = join(import.meta.dir, "../src/index.ts");
+const SERVER_PATH = join(import.meta.dir, "../server/index.ts");
 
 let passed = 0;
 let failed = 0;

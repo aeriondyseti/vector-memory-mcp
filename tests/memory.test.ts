@@ -4,7 +4,7 @@ import {
   isDeleted,
   memoryToDict,
   type Memory,
-} from "../src/types/memory";
+} from "../server/core/memory.js";
 
 describe("types/memory", () => {
   const createMemory = (overrides: Partial<Memory> = {}): Memory => ({

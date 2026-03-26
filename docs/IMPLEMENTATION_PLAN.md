@@ -628,7 +628,7 @@ cd vector-memory-mcp
 bun install
 
 # Run server
-bun run src/index.ts
+bun run server/index.ts
 
 # Configure Claude Code
 # Add to ~/.claude/config.json:

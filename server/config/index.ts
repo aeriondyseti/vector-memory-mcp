@@ -28,6 +28,7 @@ export interface Config {
   httpPort: number;
   httpHost: string;
   enableHttp: boolean;
+  pluginMode: boolean;
   transportMode: TransportMode;
   conversationHistory: ConversationHistoryConfig;
 }
@@ -36,6 +37,7 @@ export interface ConfigOverrides {
   dbPath?: string;
   httpPort?: number;
   enableHttp?: boolean;
+  pluginMode?: boolean;
   transportMode?: TransportMode;
   enableHistory?: boolean;
   historyPath?: string;
@@ -55,8 +57,9 @@ function resolvePath(path: string): string {
 
 export function loadConfig(overrides: ConfigOverrides = {}): Config {
   const transportMode = overrides.transportMode ?? "stdio";
-  // HTTP enabled by default (needed for hooks), can disable with --no-http
-  const enableHttp = overrides.enableHttp ?? true;
+  const pluginMode = overrides.pluginMode ?? false;
+  // HTTP enabled only in plugin mode (hooks need it). --no-http overrides.
+  const enableHttp = overrides.enableHttp ?? pluginMode;
 
   return {
     dbPath: resolvePath(
@@ -74,6 +77,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): Config {
       ?? DEFAULT_HTTP_PORT,
     httpHost: DEFAULT_HTTP_HOST,
     enableHttp,
+    pluginMode,
     transportMode,
     conversationHistory: {
       enabled: overrides.enableHistory ?? false,
@@ -95,6 +99,7 @@ export function parseCliArgs(argv: string[]): ConfigOverrides {
       "--db-file": String,
       "--port": Number,
       "--no-http": Boolean,
+      "--plugin": Boolean,
       "--enable-history": Boolean,
       "--history-path": String,
       "--history-weight": Number,
@@ -110,6 +115,7 @@ export function parseCliArgs(argv: string[]): ConfigOverrides {
     dbPath: args["--db-file"],
     httpPort: args["--port"],
     enableHttp: args["--no-http"] ? false : undefined,
+    pluginMode: args["--plugin"] ?? undefined,
     enableHistory: args["--enable-history"] ?? undefined,
     historyPath: args["--history-path"],
     historyWeight: args["--history-weight"],
