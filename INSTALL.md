@@ -6,7 +6,7 @@ To test the MCP memory server in an MCP-compatible client:
 
 ### 1. Install dependencies
 ```bash
-cd /home/aerion/dev/vector-memory-mcp
+cd <path-to-vector-memory-mcp>
 bun install
 ```
 
@@ -19,7 +19,7 @@ Edit `~/.claude/config.json` and add:
   "mcpServers": {
     "memory": {
       "command": "bun",
-      "args": ["run", "/home/aerion/dev/vector-memory-mcp/server/index.ts"]
+      "args": ["run", "<path-to-vector-memory-mcp>/server/index.ts"]
     }
   }
 }
@@ -65,7 +65,7 @@ You can inspect the database using LanceDB tools if needed.
 
 ### Test the server manually
 ```bash
-cd /home/aerion/dev/vector-memory-mcp
+cd <path-to-vector-memory-mcp>
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}' | bun run server/index.ts
 ```
 
