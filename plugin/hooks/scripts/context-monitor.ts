@@ -1,6 +1,10 @@
 #!/usr/bin/env bun
 /**
- * Stop hook for vector-memory plugin.
+ * Context health monitor for vector-memory plugin.
+ *
+ * Runs on both Stop and PostToolUse events to provide timely feedback:
+ *   - Stop: fires at end of each turn (always evaluates)
+ *   - PostToolUse: fires after each tool call during autonomous runs (throttled to every 30s)
  *
  * Monitors session health via resource pressure signals from the transcript:
  *   1. Turn count (main chain only, excludes subagent/sidechain entries)
@@ -30,15 +34,20 @@ interface HookInput {
   reason: string;
 }
 
+// When invoked from PostToolUse, throttle to avoid running after every tool call.
+// Stop hooks always evaluate (definitive end-of-turn feedback).
+const IS_THROTTLED = process.argv.includes("--throttled");
+const THROTTLE_SECONDS = 30;
+
 // ── Configuration (matching session-monitor.py) ─────────────────────
 
 const TURN_WARN = 120;
 const TURN_STRONG = 180;
 const TURN_CRITICAL = 250;
 
-const CONTEXT_WARN = 120_000; // tokens
+const CONTEXT_WARN = 100_000; // tokens
 const CONTEXT_STRONG = 150_000;
-const CONTEXT_CRITICAL = 175_000;
+const CONTEXT_CRITICAL = 200_000;
 
 const COMPRESS_WARN = 2;
 const COMPRESS_STRONG = 4;
@@ -51,6 +60,7 @@ interface MonitorState {
   turn_count: number;
   compressions: number;
   context_length: number;
+  last_checked_at: number;
 }
 
 function loadState(sessionId: string): MonitorState {
@@ -65,6 +75,7 @@ function loadState(sessionId: string): MonitorState {
     turn_count: 0,
     compressions: 0,
     context_length: 0,
+    last_checked_at: 0,
   };
 }
 
@@ -241,29 +252,48 @@ async function main() {
   const input: HookInput = await Bun.stdin.json();
 
   if (!input.transcript_path || !input.session_id) {
-    console.log(JSON.stringify({ decision: "approve" }));
+    console.log(JSON.stringify(IS_THROTTLED ? {} : { decision: "approve" }));
     return;
   }
 
   let state = loadState(input.session_id);
+
+  // PostToolUse hooks are throttled to avoid running after every tool call.
+  // Stop hooks always evaluate (definitive end-of-turn feedback).
+  if (IS_THROTTLED) {
+    const elapsed = (Date.now() - state.last_checked_at) / 1000;
+    if (elapsed < THROTTLE_SECONDS) {
+      console.log(JSON.stringify({}));
+      return;
+    }
+  }
+
   state = analyzeTranscript(input.transcript_path, state);
   const message = evaluate(state);
+  state.last_checked_at = Date.now();
   saveState(input.session_id, state);
 
   if (message) {
-    console.log(
-      JSON.stringify({
-        decision: "approve",
-        systemMessage: message,
-      })
-    );
+    if (IS_THROTTLED) {
+      // PostToolUse: additionalContext must be inside hookSpecificOutput
+      console.log(JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PostToolUse",
+          additionalContext: message,
+        },
+      }));
+    } else {
+      // Stop: systemMessage is the standard output field
+      console.log(JSON.stringify({ decision: "approve", systemMessage: message }));
+    }
   } else {
-    console.log(JSON.stringify({ decision: "approve" }));
+    // No issues — approve (Stop) or pass-through (PostToolUse)
+    console.log(JSON.stringify(IS_THROTTLED ? {} : { decision: "approve" }));
   }
 }
 
 main().catch(() => {
   // On error, approve silently to avoid blocking the session
-  console.log(JSON.stringify({ decision: "approve" }));
+  console.log(JSON.stringify(IS_THROTTLED ? {} : { decision: "approve" }));
   process.exit(0);
 });

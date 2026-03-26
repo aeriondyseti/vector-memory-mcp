@@ -44,6 +44,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/plugin/hooks/scripts/context-monitor.ts --throttled",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
