@@ -1,29 +1,26 @@
 /**
  * Hook-specific utilities for vector-memory plugin hooks.
  *
- * Re-exports shared formatting from server/utils/formatting.ts, and adds:
+ * Provides:
  *   - Structured hook output builder (JSON protocol)
  *   - Monitor state management
  *   - Server discovery and interaction
+ *
+ * Shared formatting (ansi, icons, message builders) lives in
+ * server/utils/formatting.ts — import directly from there.
  */
 
 import { readFileSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-
-// ── Shared formatting (re-exported for hook consumers) ──────────────
-
 import {
   ansi,
   icon,
-  rule,
   buildSystemMessage,
   debug,
   timeAgo,
   type MessageLine,
 } from "../../../server/utils/formatting.js";
-
-export { ansi, icon, rule, buildSystemMessage, debug, timeAgo, type MessageLine };
 
 // ── Hook event names ────────────────────────────────────────────────
 
