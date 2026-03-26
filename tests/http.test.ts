@@ -17,6 +17,7 @@ function createTestConfig(dbPath: string): Config {
     httpPort: 3271,
     httpHost: "127.0.0.1",
     enableHttp: true,
+    pluginMode: false,
     transportMode: "stdio",
     conversationHistory: {
       enabled: false,

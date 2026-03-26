@@ -59,11 +59,10 @@ When developing an MCP memory server, we want to dogfood it (use it while buildi
 ```
 
 #### Development Mode
-Use a separate environment variable for development:
+Use explicit CLI flags for development:
 
 ```bash
-export VECTOR_MEMORY_DB_PATH="/home/user/.local/share/vector-memory-mcp/dev.db"
-bun run server/index.ts
+bun run server/index.ts --db-file "/home/user/.local/share/vector-memory-mcp/dev.db"
 ```
 
 ---

@@ -279,7 +279,7 @@ Tests graceful handling of edge cases.
 ```bash
 # 1. Start a server, note its PID
 cd /tmp && mkdir smoke-resilience && cd smoke-resilience
-bun run $PACKAGE_DIR/server/index.ts --port 3299 &
+bun run $PACKAGE_DIR/server/index.ts --plugin --port 3299 &
 SERVER_PID=$!
 cat .vector-memory/server.lock
 ```
@@ -298,7 +298,7 @@ cat .vector-memory/server.lock
 
 ```bash
 # 4. Start a new server — it should handle the stale lockfile
-bun run $PACKAGE_DIR/server/index.ts --port 3299 &
+bun run $PACKAGE_DIR/server/index.ts --plugin --port 3299 &
 NEW_PID=$!
 sleep 1
 cat .vector-memory/server.lock
@@ -319,10 +319,10 @@ kill $NEW_PID 2>/dev/null; rm -rf /tmp/smoke-resilience
 cd /tmp && mkdir smoke-port-a smoke-port-b
 
 cd /tmp/smoke-port-a
-bun run $PACKAGE_DIR/server/index.ts --port 3299 &
+bun run $PACKAGE_DIR/server/index.ts --plugin --port 3299 &
 
 cd /tmp/smoke-port-b
-bun run $PACKAGE_DIR/server/index.ts --port 3299 &
+bun run $PACKAGE_DIR/server/index.ts --plugin --port 3299 &
 ```
 
 - [ ] First server binds to port 3299
@@ -346,7 +346,7 @@ kill %1 %2 2>/dev/null; rm -rf /tmp/smoke-port-a /tmp/smoke-port-b
 
 > **Note:** This test assumes a server is running on port 3271 (e.g., from Section D or E).
 > If no server is running, start one first:
-> `cd /tmp && mkdir -p smoke-f3 && cd smoke-f3 && bun run $PACKAGE_DIR/server/index.ts &`
+> `cd /tmp && mkdir -p smoke-f3 && cd smoke-f3 && bun run $PACKAGE_DIR/server/index.ts --plugin &`
 
 ```bash
 # Send an empty query to the search endpoint

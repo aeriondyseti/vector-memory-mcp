@@ -2,7 +2,7 @@
 /**
  * Standalone migration script: LanceDB → SQLite (sqlite-vec)
  *
- * This is a thin wrapper around src/migration.ts for direct invocation.
+ * This is a thin wrapper around server/migration.ts for direct invocation.
  * The preferred way to migrate is `vector-memory-mcp migrate`.
  *
  * Usage:
