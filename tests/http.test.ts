@@ -2,12 +2,12 @@ import { describe, expect, test, beforeAll, afterAll, mock } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { connectToDatabase } from "../src/db/connection";
-import { MemoryRepository } from "../src/db/memory.repository";
-import { EmbeddingsService } from "../src/services/embeddings.service";
-import { MemoryService } from "../src/services/memory.service";
-import { createHttpApp, startHttpServer } from "../src/http/server";
-import type { Config } from "../src/config/index";
+import { connectToDatabase } from "../server/core/connection.js";
+import { MemoryRepository } from "../server/core/memory.repository.js";
+import { EmbeddingsService } from "../server/core/embeddings.service.js";
+import { MemoryService } from "../server/core/memory.service.js";
+import { createHttpApp, startHttpServer } from "../server/transports/http/server.js";
+import type { Config } from "../server/config/index.js";
 
 function createTestConfig(dbPath: string): Config {
   return {
@@ -17,6 +17,7 @@ function createTestConfig(dbPath: string): Config {
     httpPort: 3271,
     httpHost: "127.0.0.1",
     enableHttp: true,
+    pluginMode: false,
     transportMode: "stdio",
     conversationHistory: {
       enabled: false,

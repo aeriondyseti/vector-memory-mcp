@@ -163,6 +163,9 @@ package-lock.json
 .claude/*
 !.claude/commands/
 !.claude/skills/
+
+# Claude Plugin manifest (track in version control)
+!.claude-plugin/
 .aider*
 
 # Git worktrees

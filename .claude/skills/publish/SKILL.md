@@ -52,9 +52,12 @@ fi
 NEW_VERSION="${BASE}-dev.${NEXT_NUM}"
 ```
 
-### D3. Tag and Push (triggers GHA)
+### D3. Sync Plugin Version, Tag, and Push (triggers GHA)
 
 ```bash
+bun scripts/sync-version.ts "${NEW_VERSION}"
+git add .claude-plugin/plugin.json .claude-plugin/marketplace.json
+git commit -m "chore: sync plugin version to ${NEW_VERSION}"
 git tag "v${NEW_VERSION}"
 git push origin dev && git push --tags
 ```
@@ -129,7 +132,8 @@ Ask: "Create rc/X.Y.Z with version X.Y.Z-rc.1? (yes/no)"
 ```bash
 git checkout -b rc/X.Y.Z
 npm version X.Y.Z-rc.1 --no-git-tag-version
-git add package.json
+bun scripts/sync-version.ts
+git add package.json .claude-plugin/plugin.json .claude-plugin/marketplace.json
 git commit -m "chore: begin rc X.Y.Z"
 git push -u origin rc/X.Y.Z
 ```
@@ -143,7 +147,8 @@ When fixing bugs on the RC branch, bump the RC number before pushing:
 ```bash
 # Already on rc/X.Y.Z branch
 npm version X.Y.Z-rc.N --no-git-tag-version
-git add package.json
+bun scripts/sync-version.ts
+git add package.json .claude-plugin/plugin.json .claude-plugin/marketplace.json
 git commit -m "chore: bump rc to X.Y.Z-rc.N"
 git push origin rc/X.Y.Z
 ```
@@ -211,7 +216,8 @@ Update CHANGELOG and set final version on the rc branch:
 
 ```bash
 npm version X.Y.Z --no-git-tag-version
-git add CHANGELOG.md package.json
+bun scripts/sync-version.ts
+git add CHANGELOG.md package.json .claude-plugin/plugin.json .claude-plugin/marketplace.json
 git commit -m "chore: release vX.Y.Z"
 git push origin rc/X.Y.Z
 ```

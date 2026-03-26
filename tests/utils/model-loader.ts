@@ -5,7 +5,7 @@
  * and skip tests gracefully if the model is unavailable.
  */
 
-import { EmbeddingsService } from "../../src/services/embeddings.service.js";
+import { EmbeddingsService } from "../../server/core/embeddings.service.js";
 
 const MODEL_NAME = "Xenova/all-MiniLM-L6-v2";
 const MODEL_DIMENSION = 384;

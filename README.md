@@ -20,14 +20,27 @@ A local-first MCP server that provides vector-based memory storage. Uses local e
 
 ---
 
-## Quick Start
+## Installation
 
-### Prerequisites
+There are two ways to install Vector Memory, depending on how much integration you want.
 
-- [Bun](https://bun.sh/) 1.0+
-- An MCP-compatible client (Claude Code, Claude Desktop, etc.)
+### Option A: Claude Code Plugin (recommended)
 
-### Install
+Install as a plugin to get the full experience: MCP server, session lifecycle hooks, waypoint skills, and context monitoring — all managed automatically.
+
+```bash
+# Add the marketplace
+claude plugin marketplace add AerionDyseti/vector-memory-mcp
+
+# Install the plugin
+claude plugin install vector-memory@vector-memory-mcp
+```
+
+This clones the repo and runs the MCP server directly from source. Hooks handle session start/clear/compact events, and skills provide `/waypoint:set`, `/waypoint:get`, and memory usage guidance.
+
+### Option B: MCP Server Only
+
+Install just the MCP server via npm if you want memory storage without hooks or skills, or if you're using a non-Claude Code MCP client.
 
 ```bash
 bun install -g @aeriondyseti/vector-memory-mcp
@@ -35,9 +48,7 @@ bun install -g @aeriondyseti/vector-memory-mcp
 
 > First install downloads ML models (~90MB). This may take a minute.
 
-### Configure
-
-Add to your MCP client config (e.g., `~/.claude/settings.json`):
+Then add to your MCP client config (e.g., `~/.claude/settings.json`):
 
 ```json
 {
@@ -51,9 +62,16 @@ Add to your MCP client config (e.g., `~/.claude/settings.json`):
 }
 ```
 
-### Use
+### Prerequisites
 
-Restart your MCP client. You now have access to:
+- [Bun](https://bun.sh/) 1.0+
+- An MCP-compatible client (Claude Code, Claude Desktop, etc.)
+
+---
+
+## Tools
+
+Restart your MCP client after installation. You now have access to:
 
 | Tool | Description |
 |------|-------------|
@@ -116,7 +134,9 @@ CLI flags:
 
 ## Release Channels
 
-The stable release is what you get by default:
+**Plugin users:** The plugin tracks the repo's default branch. To switch channels, reinstall from a specific branch or tag.
+
+**npm users:** The stable release is what you get by default:
 
 ```bash
 bun install -g @aeriondyseti/vector-memory-mcp
@@ -124,8 +144,8 @@ bun install -g @aeriondyseti/vector-memory-mcp
 
 Pre-release channels are available for testing upcoming changes. **These are unstable and may break without notice — use at your own risk.**
 
-| Channel | Install | Description |
-|---------|---------|-------------|
+| Channel | npm | Description |
+|---------|-----|-------------|
 | `@latest` | *(default)* | Stable releases |
 | `@rc` | `@aeriondyseti/vector-memory-mcp@rc` | Release candidates — final testing before stable |
 | `@dev` | `@aeriondyseti/vector-memory-mcp@dev` | Development builds — latest features, least stable |

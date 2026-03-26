@@ -1,5 +1,5 @@
 import { mock } from "bun:test";
-import type { EmbeddingsService } from "../../src/services/embeddings.service.js";
+import type { EmbeddingsService } from "../../server/core/embeddings.service.js";
 
 export const EMBEDDING_DIM = 384;
 

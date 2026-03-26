@@ -1,0 +1,31 @@
+{
+  "name": "vector-memory-mcp",
+  "repository": "https://github.com/aeriondyseti/vector-memory-mcp",
+  "owner": {
+    "name": "AerionDyseti",
+    "email": "inblessedsilencewaiting@gmail.com"
+  },
+  "metadata": {
+    "description": "Vector memory MCP server and Claude Code plugin",
+    "version": "2.2.3"
+  },
+  "plugins": [
+    {
+      "name": "vector-memory",
+      "source": ".",
+      "description": "RAG-powered session memory with waypoints for Claude Code",
+      "version": "2.2.3",
+      "author": {
+        "name": "AerionDyseti"
+      },
+      "category": "productivity",
+      "tags": [
+        "memory",
+        "rag",
+        "waypoints",
+        "session-persistence",
+        "vector-search"
+      ]
+    }
+  ]
+}
