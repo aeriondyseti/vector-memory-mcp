@@ -1,35 +1,52 @@
 import type { Database } from "bun:sqlite";
 
 /**
- * Check if a table exists and is a vec0 virtual table (from the old sqlite-vec schema).
+ * Pre-migration step: remove vec0 virtual table entries from sqlite_master
+ * and drop their shadow tables using the sqlite3 CLI.
+ *
+ * Must run BEFORE bun:sqlite opens the database because:
+ *  - bun:sqlite cannot modify sqlite_master (no writable_schema support)
+ *  - DROP TABLE on a virtual table requires the extension module to be loaded
+ *  - SQLite 3.51+ has defensive mode on by default, requiring .dbconfig override
+ *
+ * Safe to call on any database — it's a no-op if there are no vec0 tables.
  */
-function isVec0Table(db: Database, tableName: string): boolean {
-  const row = db
-    .prepare(
-      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`,
-    )
-    .get(tableName) as { sql: string } | null;
-  return row?.sql?.toLowerCase().includes("vec0") ?? false;
-}
-
-/**
- * Migrate a vec0 virtual table to a plain BLOB table.
- * Copies id + vector data, drops the vec0 table and its shadow tables, then
- * creates the new plain table with the copied data.
- */
-function migrateVec0ToBlob(db: Database, tableName: string): void {
-  const tmpTable = `${tableName}_migration_tmp`;
-
-  db.exec(`CREATE TABLE IF NOT EXISTS ${tmpTable} (id TEXT PRIMARY KEY, vector BLOB NOT NULL)`);
-  db.exec(`INSERT OR IGNORE INTO ${tmpTable} (id, vector) SELECT id, vector FROM ${tableName}`);
-  db.exec(`DROP TABLE ${tableName}`);
-  db.exec(`CREATE TABLE ${tableName} (id TEXT PRIMARY KEY, vector BLOB NOT NULL)`);
-  db.exec(`INSERT INTO ${tableName} (id, vector) SELECT id, vector FROM ${tmpTable}`);
-  db.exec(`DROP TABLE ${tmpTable}`);
+export function removeVec0Tables(dbPath: string): void {
+  const result = Bun.spawnSync({
+    cmd: ["sqlite3", dbPath],
+    stdin: new TextEncoder().encode(
+      [
+        ".dbconfig defensive off",
+        ".dbconfig writable_schema on",
+        // Drop shadow tables (regular tables, no extension needed)
+        "DROP TABLE IF EXISTS memories_vec_rowids;",
+        "DROP TABLE IF EXISTS memories_vec_chunks;",
+        "DROP TABLE IF EXISTS memories_vec_info;",
+        "DROP TABLE IF EXISTS memories_vec_vector_chunks00;",
+        "DROP TABLE IF EXISTS memories_vec_migration_tmp;",
+        "DROP TABLE IF EXISTS conversation_history_vec_rowids;",
+        "DROP TABLE IF EXISTS conversation_history_vec_chunks;",
+        "DROP TABLE IF EXISTS conversation_history_vec_info;",
+        "DROP TABLE IF EXISTS conversation_history_vec_vector_chunks00;",
+        "DROP TABLE IF EXISTS conversation_history_vec_migration_tmp;",
+        // Remove orphaned vec0 virtual table entries from schema
+        "DELETE FROM sqlite_master WHERE sql LIKE '%vec0%';",
+      ].join("\n"),
+    ),
+  });
+  if (result.exitCode !== 0) {
+    const stderr = result.stderr.toString().trim();
+    if (!stderr.includes("unable to open database")) {
+      throw new Error(`vec0 cleanup failed: ${stderr}`);
+    }
+  }
 }
 
 /**
  * Run all schema migrations. Safe to call on every startup (uses IF NOT EXISTS).
+ *
+ * IMPORTANT: Call removeVec0Tables(dbPath) before opening the database
+ * with bun:sqlite if the database may contain vec0 virtual tables.
  */
 export function runMigrations(db: Database): void {
   // -- Memories --
@@ -47,17 +64,12 @@ export function runMigrations(db: Database): void {
     )
   `);
 
-  // Migrate vec0 -> plain blob table if upgrading from sqlite-vec schema
-  if (isVec0Table(db, "memories_vec")) {
-    migrateVec0ToBlob(db, "memories_vec");
-  } else {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS memories_vec (
-        id     TEXT PRIMARY KEY,
-        vector BLOB NOT NULL
-      )
-    `);
-  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memories_vec (
+      id     TEXT PRIMARY KEY,
+      vector BLOB NOT NULL
+    )
+  `);
 
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
@@ -81,17 +93,12 @@ export function runMigrations(db: Database): void {
     )
   `);
 
-  // Migrate vec0 -> plain blob table if upgrading from sqlite-vec schema
-  if (isVec0Table(db, "conversation_history_vec")) {
-    migrateVec0ToBlob(db, "conversation_history_vec");
-  } else {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS conversation_history_vec (
-        id     TEXT PRIMARY KEY,
-        vector BLOB NOT NULL
-      )
-    `);
-  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS conversation_history_vec (
+      id     TEXT PRIMARY KEY,
+      vector BLOB NOT NULL
+    )
+  `);
 
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS conversation_history_fts USING fts5(
