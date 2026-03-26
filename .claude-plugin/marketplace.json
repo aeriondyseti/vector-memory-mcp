@@ -1,4 +1,5 @@
 {
+  "$schema": "./schemas/marketplace.schema.json",
   "name": "vector-memory-mcp",
   "repository": "https://github.com/aeriondyseti/vector-memory-mcp",
   "owner": {

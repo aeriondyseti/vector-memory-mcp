@@ -114,8 +114,9 @@ This repo is both an npm package and a Claude Code plugin marketplace.
 
 | File | Purpose |
 |------|---------|
-| `.claude-plugin/plugin.json` | Plugin manifest — points to `plugin/` for hooks, skills, MCP config |
-| `.claude-plugin/marketplace.json` | Marketplace manifest — single plugin, `"source": "."` |
+| `.claude-plugin/plugin.json` | Plugin manifest — `mcpServers`, `hooks`, `skills` point to `plugin/` |
+| `.claude-plugin/marketplace.json` | Marketplace manifest — single plugin, `"source": "./"` |
+| `.claude-plugin/schemas/` | Local JSON Schema files for plugin.json and marketplace.json |
 | `plugin/.mcp.json` | Runs MCP server from source: `bun ${CLAUDE_PLUGIN_ROOT}/server/index.ts` |
 | `plugin/hooks/` | Session lifecycle hooks (start, clear, compact, context monitor) |
 | `plugin/skills/` | Skills: vector-memory-usage, waypoint-set, waypoint-get, waypoint-workflow |

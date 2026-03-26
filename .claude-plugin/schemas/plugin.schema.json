@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "claude-code-plugin.schema.json",
+  "title": "Claude Code Plugin Manifest",
+  "description": "Schema for .claude-plugin/plugin.json — defines plugin metadata and component configuration.",
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "description": "Unique plugin identifier (kebab-case, no spaces). Used for namespacing components."
+    },
+    "version": {
+      "type": "string",
+      "description": "Semantic version (MAJOR.MINOR.PATCH). If also set in the marketplace entry, plugin.json takes priority."
+    },
+    "description": {
+      "type": "string",
+      "description": "Brief explanation of plugin purpose."
+    },
+    "author": {
+      "$ref": "#/$defs/author",
+      "description": "Plugin author information."
+    },
+    "homepage": {
+      "type": "string",
+      "format": "uri",
+      "description": "Documentation URL."
+    },
+    "repository": {
+      "type": "string",
+      "format": "uri",
+      "description": "Source code URL."
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX license identifier (e.g. MIT, Apache-2.0)."
+    },
+    "keywords": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Discovery tags."
+    },
+    "commands": {
+      "$ref": "#/$defs/pathOrPaths",
+      "description": "Custom command files/directories (replaces default commands/)."
+    },
+    "agents": {
+      "$ref": "#/$defs/pathOrPaths",
+      "description": "Custom agent files (replaces default agents/)."
+    },
+    "skills": {
+      "$ref": "#/$defs/pathOrPaths",
+      "description": "Custom skill directories (replaces default skills/)."
+    },
+    "hooks": {
+      "$ref": "#/$defs/pathOrPathsOrObject",
+      "description": "Hook config paths or inline hook configuration."
+    },
+    "mcpServers": {
+      "$ref": "#/$defs/pathOrPathsOrObject",
+      "description": "MCP server config paths or inline MCP server configuration."
+    },
+    "outputStyles": {
+      "$ref": "#/$defs/pathOrPaths",
+      "description": "Custom output style files/directories (replaces default output-styles/)."
+    },
+    "lspServers": {
+      "$ref": "#/$defs/pathOrPathsOrObject",
+      "description": "LSP server configs for code intelligence."
+    },
+    "userConfig": {
+      "type": "object",
+      "description": "User-configurable values prompted at enable time. Keys are valid identifiers, available as ${user_config.KEY} in configs.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["description"],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Prompt shown to the user when configuring this value."
+          },
+          "sensitive": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, stored in system keychain rather than settings.json."
+          }
+        }
+      }
+    },
+    "channels": {
+      "type": "array",
+      "description": "Channel declarations for message injection.",
+      "items": {
+        "type": "object",
+        "required": ["server"],
+        "properties": {
+          "server": {
+            "type": "string",
+            "description": "Must match a key in the plugin's mcpServers."
+          },
+          "userConfig": {
+            "type": "object",
+            "description": "Per-channel user-configurable values (same schema as top-level userConfig).",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["description"],
+              "properties": {
+                "description": { "type": "string" },
+                "sensitive": { "type": "boolean", "default": false }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "author": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "url": { "type": "string", "format": "uri" }
+      },
+      "additionalProperties": false
+    },
+    "pathOrPaths": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^\\./",
+          "description": "Relative path starting with ./"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^\\./"
+          },
+          "description": "Array of relative paths starting with ./"
+        }
+      ]
+    },
+    "pathOrPathsOrObject": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^\\./",
+          "description": "Relative path to a config file starting with ./"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^\\./"
+          },
+          "description": "Array of relative paths starting with ./"
+        },
+        {
+          "type": "object",
+          "description": "Inline configuration object."
+        }
+      ]
+    }
+  }
+}
