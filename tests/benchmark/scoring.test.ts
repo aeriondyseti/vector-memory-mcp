@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { Database } from "bun:sqlite";
-import { connectToDatabase } from "../server/core/connection.js";
-import { MemoryRepository } from "../server/core/memory.repository.js";
-import { EmbeddingsService } from "../server/core/embeddings.service.js";
-import { MemoryService } from "../server/core/memory.service.js";
+import { connectToDatabase } from "../../server/core/connection.js";
+import { MemoryRepository } from "../../server/core/memory.repository.js";
+import { EmbeddingsService } from "../../server/core/embeddings.service.js";
+import { MemoryService } from "../../server/core/memory.service.js";
 
 describe("MemoryService - Scoring with Intents", () => {
   let db: Database;
