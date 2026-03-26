@@ -8,7 +8,7 @@ import { EmbeddingsService } from "./core/embeddings.service.js";
 import { MemoryService } from "./core/memory.service.js";
 import { ConversationHistoryService } from "./core/conversation.service.js";
 import { startServer } from "./transports/mcp/server.js";
-import { startHttpServer, removeLockfile } from "./transports/http/server.js";
+import { startHttpServer } from "./transports/http/server.js";
 import { isLanceDbDirectory, migrate, formatMigrationSummary } from "./migration.js";
 
 async function runMigrate(args: string[]): Promise<void> {
@@ -92,7 +92,6 @@ async function main(): Promise<void> {
   // Graceful shutdown handler
   const shutdown = () => {
     console.error("[vector-memory-mcp] Shutting down...");
-    removeLockfile();
     if (httpStop) httpStop();
     db.close();
     process.exit(0);

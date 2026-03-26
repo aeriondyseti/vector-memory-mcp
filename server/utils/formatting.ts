@@ -110,9 +110,10 @@ export function buildSystemMessage(
 // ── Diagnostic logging ──────────────────────────────────────────────
 
 /**
- * Log a diagnostic message to stderr (visible in verbose/debug mode).
+ * Log a diagnostic message to stderr when VECTOR_MEMORY_DEBUG=1.
  */
 export function debug(label: string, message: string): void {
+  if (process.env.VECTOR_MEMORY_DEBUG !== "1") return;
   console.error(
     `${ansi.gray}[${label}]${ansi.reset} ${ansi.dim}${message}${ansi.reset}`
   );
@@ -128,7 +129,6 @@ export function timeAgo(iso: string): string {
     return "unknown";
   }
   const seconds = Math.floor((now - then) / 1000);
-  debug("timeAgo", `iso=${iso}, now=${now}, then=${then}, delta=${seconds}s`);
   if (seconds < 0) {
     debug("timeAgo", `negative delta (${seconds}s) — clock skew or future timestamp`);
     return "just now";

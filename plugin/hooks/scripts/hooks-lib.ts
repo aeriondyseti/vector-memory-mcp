@@ -11,9 +11,9 @@ import { readFileSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-// ── Re-export shared formatting ─────────────────────────────────────
+// ── Shared formatting (re-exported for hook consumers) ──────────────
 
-export {
+import {
   ansi,
   icon,
   rule,
@@ -23,14 +23,7 @@ export {
   type MessageLine,
 } from "../../../server/utils/formatting.js";
 
-import {
-  ansi,
-  icon,
-  buildSystemMessage,
-  debug,
-  timeAgo,
-  type MessageLine,
-} from "../../../server/utils/formatting.js";
+export { ansi, icon, rule, buildSystemMessage, debug, timeAgo, type MessageLine };
 
 // ── Hook event names ────────────────────────────────────────────────
 
