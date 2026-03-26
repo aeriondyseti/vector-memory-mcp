@@ -9,26 +9,6 @@ import { MemoryService } from "./core/memory.service.js";
 import { ConversationHistoryService } from "./core/conversation.service.js";
 import { startServer } from "./transports/mcp/server.js";
 import { startHttpServer } from "./transports/http/server.js";
-import { isLanceDbDirectory, migrate, formatMigrationSummary } from "./migration.js";
-
-async function runMigrate(args: string[]): Promise<void> {
-  const overrides = parseCliArgs(args.slice(1)); // skip "migrate"
-  const config = loadConfig(overrides);
-
-  const source = config.dbPath;
-  const target = source.endsWith(".sqlite") ? source.replace(/\.sqlite$/, "-migrated.sqlite") : source + ".sqlite";
-
-  if (!isLanceDbDirectory(source)) {
-    console.error(
-      `[vector-memory-mcp] No LanceDB data found at ${source}\n` +
-      `  Nothing to migrate. The server will create a fresh SQLite database on startup.`
-    );
-    return;
-  }
-
-  const result = await migrate({ source, target });
-  console.error(formatMigrationSummary(source, target, result));
-}
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -40,26 +20,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Check for migrate command
-  if (args[0] === "migrate") {
-    await runMigrate(args);
-    return;
-  }
-
   // Parse CLI args and load config
   const overrides = parseCliArgs(args);
   const config = loadConfig(overrides);
-
-  // Detect legacy LanceDB data and warn
-  if (isLanceDbDirectory(config.dbPath)) {
-    console.error(
-      `[vector-memory-mcp] ⚠️  Legacy LanceDB data detected at ${config.dbPath}\n` +
-      `  Your data must be migrated to the new SQLite format.\n` +
-      `  Run: vector-memory-mcp migrate\n` +
-      `  Or:  bun run server/index.ts migrate\n`
-    );
-    process.exit(1);
-  }
 
   // Initialize database
   const db = connectToDatabase(config.dbPath);
