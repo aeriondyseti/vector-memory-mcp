@@ -7,14 +7,14 @@
   },
   "metadata": {
     "description": "Vector memory MCP server and Claude Code plugin",
-    "version": "2.2.5"
+    "version": "2.2.6"
   },
   "plugins": [
     {
       "name": "vector-memory",
       "source": "./",
       "description": "RAG-powered session memory with waypoints for Claude Code",
-      "version": "2.2.5",
+      "version": "2.2.6",
       "author": {
         "name": "AerionDyseti"
       },
