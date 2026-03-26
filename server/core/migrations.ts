@@ -1,4 +1,6 @@
 import type { Database } from "bun:sqlite";
+import type { EmbeddingsService } from "./embeddings.service.js";
+import { serializeVector } from "./sqlite-utils.js";
 
 /**
  * Pre-migration step: remove vec0 virtual table entries from sqlite_master
@@ -112,4 +114,92 @@ export function runMigrations(db: Database): void {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_conversation_project ON conversation_history(project)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_conversation_role ON conversation_history(role)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_conversation_created_at ON conversation_history(created_at)`);
+}
+
+/**
+ * Backfill missing vectors in memories_vec and conversation_history_vec.
+ *
+ * After the vec0-to-BLOB migration, existing rows may lack vector embeddings.
+ * This re-embeds their content and inserts into the _vec tables.
+ * Idempotent: skips rows that already have vectors. Fast no-op when fully backfilled.
+ */
+export async function backfillVectors(
+  db: Database,
+  embeddings: EmbeddingsService,
+): Promise<void> {
+  // ── Memories ──────────────────────────────────────────────────────
+  // Catch both missing rows (v.id IS NULL) and corrupt 0-byte BLOBs
+  const missingMemories = db
+    .prepare(
+      `SELECT m.id, m.content, json_extract(m.metadata, '$.type') AS type
+       FROM memories m
+       LEFT JOIN memories_vec v ON m.id = v.id
+       WHERE v.id IS NULL OR length(v.vector) = 0`,
+    )
+    .all() as Array<{ id: string; content: string; type: string | null }>;
+
+  if (missingMemories.length > 0) {
+    console.error(
+      `[vector-memory-mcp] Backfilling vectors for ${missingMemories.length} memories...`,
+    );
+
+    const insertVec = db.prepare(
+      "INSERT OR REPLACE INTO memories_vec (id, vector) VALUES (?, ?)",
+    );
+
+    const zeroVector = serializeVector(
+      new Array(embeddings.dimension).fill(0),
+    );
+
+    for (const row of missingMemories) {
+      // Waypoints use a zero vector (not semantically searched)
+      const blob =
+        row.type === "waypoint"
+          ? zeroVector
+          : serializeVector(await embeddings.embed(row.content));
+
+      insertVec.run(row.id, blob);
+    }
+
+    console.error(
+      `[vector-memory-mcp] Backfilled ${missingMemories.length} memory vectors`,
+    );
+  }
+
+  // ── Conversation history ──────────────────────────────────────────
+  const missingConvos = db
+    .prepare(
+      `SELECT c.id, c.content
+       FROM conversation_history c
+       LEFT JOIN conversation_history_vec v ON c.id = v.id
+       WHERE v.id IS NULL OR length(v.vector) = 0`,
+    )
+    .all() as Array<{ id: string; content: string }>;
+
+  if (missingConvos.length > 0) {
+    console.error(
+      `[vector-memory-mcp] Backfilling vectors for ${missingConvos.length} conversation chunks...`,
+    );
+
+    const insertConvoVec = db.prepare(
+      "INSERT OR REPLACE INTO conversation_history_vec (id, vector) VALUES (?, ?)",
+    );
+
+    for (let i = 0; i < missingConvos.length; i++) {
+      const row = missingConvos[i];
+      const vec = serializeVector(await embeddings.embed(row.content));
+      insertConvoVec.run(row.id, vec);
+
+      // Log progress every 100 chunks
+      if ((i + 1) % 100 === 0) {
+        console.error(
+          `[vector-memory-mcp]   ...${i + 1}/${missingConvos.length} conversation chunks`,
+        );
+      }
+    }
+
+    console.error(
+      `[vector-memory-mcp] Backfilled ${missingConvos.length} conversation vectors`,
+    );
+  }
 }

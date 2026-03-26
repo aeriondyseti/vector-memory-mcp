@@ -2,6 +2,7 @@
 
 import { loadConfig, parseCliArgs } from "./config/index.js";
 import { connectToDatabase } from "./core/connection.js";
+import { backfillVectors } from "./core/migrations.js";
 import { MemoryRepository } from "./core/memory.repository.js";
 import { ConversationRepository } from "./core/conversation.repository.js";
 import { EmbeddingsService } from "./core/embeddings.service.js";
@@ -31,6 +32,9 @@ async function main(): Promise<void> {
   const repository = new MemoryRepository(db);
   const embeddings = new EmbeddingsService(config.embeddingModel, config.embeddingDimension);
   const memoryService = new MemoryService(repository, embeddings);
+
+  // Backfill any missing vectors (e.g. after vec0-to-BLOB migration)
+  await backfillVectors(db, embeddings);
 
   if (config.pluginMode) {
     console.error("[vector-memory-mcp] Running in plugin mode");
