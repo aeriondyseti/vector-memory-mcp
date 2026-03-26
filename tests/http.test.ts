@@ -574,12 +574,12 @@ describe("startHttpServer", () => {
     const config = createTestConfig(join(tmpDir, "test.db"));
     config.httpPort = 49152 + Math.floor(Math.random() * 1000);
 
-    // Start first server on that port
+    // Start first server — may or may not get the requested port
     const server1 = await startHttpServer(memoryService, config);
-    expect(server1.port).toBe(config.httpPort);
 
-    // Start second server on same port — should find alternative
-    const server2 = await startHttpServer(memoryService, config);
+    // Start second server requesting the same port server1 actually bound to
+    const config2 = { ...config, httpPort: server1.port };
+    const server2 = await startHttpServer(memoryService, config2);
     expect(server2.port).toBeGreaterThan(0);
     expect(server2.port).not.toBe(server1.port);
 
