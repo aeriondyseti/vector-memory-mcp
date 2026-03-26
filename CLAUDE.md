@@ -64,7 +64,7 @@ bun run warmup        # download ML models
 `main` -> `dev` -> `feat/*` -> `dev` -> `rc/X.Y.Z` -> `main` -> `dev` (reset)
 
 - **RC branches:** bugfixes and chores only, no new features
-- **Branch protection:** require test status check on `main` and `dev`
+- **Branch protection:** require test status check on `main` only; `dev` is unprotected (integration/dogfooding branch)
 
 ## Publishing
 

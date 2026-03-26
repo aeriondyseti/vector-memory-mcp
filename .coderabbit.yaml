@@ -1,0 +1,83 @@
+language: "en-US"
+early_access: false
+tone_instructions: "Be direct and technical. Skip praise for routine code. Focus on bugs, missed edge cases, and architectural issues."
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  changed_files_summary: true
+  poem: false
+  sequence_diagrams: false
+  collapse_walkthrough: true
+
+  path_filters:
+    - "!docs/**"
+    - "!*.md"
+    - "!.github/**"
+
+  path_instructions:
+    - path: "**/*.ts"
+      instructions: |
+        Runtime: Bun (not Node.js). Use bun:sqlite, Bun.file(), Bun.serve(), etc.
+        Module resolution: NodeNext — all relative imports must include .js extension.
+        TypeScript strict mode. No JSDoc — types serve as documentation.
+        Use `import type` for type-only imports.
+        No console.log except server startup messages in server/index.ts.
+    - path: "server/**/*.ts"
+      instructions: |
+        Files: kebab-case. Classes: PascalCase. Functions: camelCase. Constants: SCREAMING_SNAKE_CASE.
+        Object dictionaries used as namespaces (ansi, icon) use camelCase — not SCREAMING_SNAKE.
+        server/core/ contains all business logic, db, and type definitions.
+        server/transports/ contains MCP stdio and HTTP transport layers.
+        server/utils/ contains shared utilities used by both server and plugin.
+    - path: "plugin/**/*.ts"
+      instructions: |
+        Plugin hooks run as standalone Bun child processes, not inside the server.
+        They communicate with the server via HTTP (lockfile-based discovery).
+        Shared formatting is imported directly from server/utils/formatting.ts.
+        Hook-specific code (emitHookOutput, getStatePath, server discovery) stays in hooks-lib.ts.
+    - path: "tests/**/*.ts"
+      instructions: |
+        Framework: bun:test (not Jest/Vitest).
+        Most tests require preload script (tests/preload.ts) for embedding model.
+        tests/benchmark/ contains non-deterministic quality metrics — not CI gates.
+        Deterministic retrieval tests live in tests/retrieval.test.ts.
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    ignore_title_keywords:
+      - "WIP"
+    base_branches:
+      - "main"
+
+  tools:
+    biome:
+      enabled: true
+    eslint:
+      enabled: false
+    ruff:
+      enabled: false
+    pylint:
+      enabled: false
+    golangci-lint:
+      enabled: false
+    shellcheck:
+      enabled: false
+    swiftlint:
+      enabled: false
+    phpstan:
+      enabled: false
+    detekt:
+      enabled: false
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  learnings:
+    scope: "auto"
+  code_guidelines:
+    enabled: true

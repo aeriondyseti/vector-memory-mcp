@@ -1,0 +1,112 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.9/schema.json",
+
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true,
+    "defaultBranch": "main"
+  },
+
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "server/**/*.ts",
+      "plugin/**/*.ts",
+      "tests/**/*.ts",
+      "scripts/**/*.ts"
+    ]
+  },
+
+  "formatter": {
+    "enabled": false
+  },
+
+  "javascript": {
+    "globals": ["Bun"]
+  },
+
+  "assist": {
+    "enabled": false
+  },
+
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+
+      "correctness": {
+        "noUnusedVariables": "warn",
+        "noUnusedImports": "warn"
+      },
+
+      "style": {
+        "useImportType": "warn",
+        "useExportType": "warn",
+        "noNonNullAssertion": "off",
+        "useFilenamingConvention": {
+          "level": "warn",
+          "options": {
+            "filenameCases": ["kebab-case"]
+          }
+        }
+      },
+
+      "suspicious": {
+        "noConsole": "warn",
+        "noExplicitAny": "off",
+        "noImplicitAnyLet": "off"
+      },
+
+      "complexity": {
+        "noExcessiveCognitiveComplexity": "warn"
+      }
+    }
+  },
+
+  "overrides": [
+    {
+      "includes": ["server/index.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["tests/**/*.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          },
+          "style": {
+            "useFilenamingConvention": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["scripts/**/*.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["plugin/hooks/scripts/**/*.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
+    }
+  ]
+}
