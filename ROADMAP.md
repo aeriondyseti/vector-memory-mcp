@@ -142,6 +142,48 @@ No schema changes anticipated — builds on pinned/metadata flags and existing r
 
 **Integration point:** The Claude Code plugin (`github.com/aeriondyseti/cc-plugins`) already implements a `SessionStart` hook that fetches the most recent waypoint and injects it into context. The memory menu should integrate with this existing hook — either by extending `get_waypoint` to include the pinned memory summary alongside the waypoint, or by exposing a dedicated `get_session_context` tool that the plugin hook calls in addition to (or instead of) `get_waypoint`. The plugin hook is the primary consumer of this feature.
 
+#### 29. Federated Cross-Project Search
+Search across multiple projects' `.vector-memory/` databases without changing the per-project storage model. Each project keeps its own `memories.db`; federation happens at query time.
+
+**Architecture:**
+- **Auto-registry**: on server startup, register the current project (name + DB path) in `~/.config/vector-memory/projects.json`. Zero config.
+- **Federated search**: when `project_scope: '*'` is passed to `search_memories`, open all registered project DBs read-only, run KNN + FTS5 per project, merge results with global RRF ranking, return with project attribution.
+- **Graceful degradation**: missing/moved DBs are skipped silently. Schema mismatches are caught per-project.
+
+**Key design decisions:**
+- No `ATTACH DATABASE` — open separate read-only `Database` connections per project. Reuses existing `knnSearch()` and FTS5 queries verbatim. Simpler and avoids schema-qualified table name issues with `bun:sqlite`.
+- Global RRF across per-project ranked lists (not simple concatenation) to avoid biasing toward projects with more matches.
+- Privacy by default: normal searches hit only the current project. Cross-project is explicit opt-in.
+
+**New files:**
+- `server/core/project-registry.ts` — read/write `projects.json`, upsert on `dbPath`
+- `server/core/federated-search.service.ts` — multi-DB search, per-project KNN + FTS5, global RRF merge
+
+**Modified files:**
+- `server/core/conversation.ts` — add `projectScope` to `SearchOptions`, `'federated_memory'` to `source` union, `projectName?` to `SearchResult`
+- `server/core/memory.service.ts` — add `FederatedSearchService` setter, branch in `search()` on `projectScope`
+- `server/transports/mcp/tools.ts` — add `project_scope: "local" | "*"` param to `search_memories`
+- `server/transports/mcp/handlers.ts` — route `project_scope`, annotate federated results with project name
+- `server/index.ts` — instantiate registry, register project, wire federated service
+
+No schema changes. No changes to per-project storage.
+
+#### 30. Embedding Model Evaluation
+Evaluate alternatives to `Xenova/all-MiniLM-L6-v2` (384d). The current model is adequate but was chosen early; newer models may offer better retrieval quality, especially for code-heavy content.
+
+**Candidates to evaluate:**
+- all-MiniLM-L12-v2 (384d, deeper — same dimensions, drop-in swap)
+- all-mpnet-base-v2 (768d — often cited as best sentence-transformers model)
+- BGE models (bge-small-en, bge-base-en)
+- GTE models (gte-small, gte-base)
+- Nomic embed models (nomic-embed-text-v1, v1.5)
+- Code-specific embedding models
+- Any strong 2025-2026 local models compatible with `@huggingface/transformers`
+
+**Evaluation criteria:** MTEB/retrieval benchmarks, model size (download + memory), speed relative to MiniLM-L6, code/developer content performance, ONNX availability for transformers.js.
+
+**Migration concern:** changing dimensions requires re-embedding all stored memories. Prefer same-dimension (384d) candidates for a non-breaking swap. If a higher-dimension model wins, implement a background re-embedding migration in `migrations.ts`.
+
 ---
 
 ### Phase 2 — High Impact, Medium Effort
@@ -482,6 +524,8 @@ SQLite's single-file format makes backup straightforward — a file copy or `.ba
 | 6 | Database maintenance tools | 1 | No |
 | 7 | Response size controls | 1 | No |
 | 28 | Pinned memory menu (session context) | 1 | No (builds on #3) |
+| 29 | Federated cross-project search | 1 | No |
+| 30 | Embedding model evaluation | 1 | Possible (if dimensions change) |
 | 8 | Memory archiving | 2 | Yes — `archived` column |
 | 9 | Confidence & importance levels | 2 | Yes — two `Utf8` columns |
 | 10 | TTL (auto-expiry) | 2 | Yes — `expires_at` column |

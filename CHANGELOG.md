@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-03-26
+
+### Added
+- **Plugin setup hook**: New `plugin-setup.sh` SessionStart hook that auto-installs dependencies and warms up the embedding model on first plugin use. Uses a cached hash of `package.json` to skip reinstalls when nothing changed.
+
+### Fixed
+- **Context monitor for autonomous sessions**: Run context monitor on `PostToolUse` events, not just `Notification`, so it fires during autonomous agent sessions.
+- **Port collision test stability**: Stabilized flaky port collision test with deterministic port allocation.
+- **Vector backfill after migration**: Backfill missing vectors in `_vec` tables after the vec0-to-BLOB migration, ensuring search works immediately after upgrade.
+
+### Changed
+- **Removed legacy LanceDB migration code**: Dropped `@lancedb/lancedb` and `apache-arrow` dependencies and all associated migration paths. Users on 1.x must upgrade through 2.2.x first.
+- **Removed publish skill**: Publishing workflow now documented in CLAUDE.md instead of a skill file.
+
+### Roadmap
+- Added Feature 29: Federated cross-project search (search across multiple projects' databases)
+- Added Feature 30: Embedding model evaluation (alternatives to all-MiniLM-L6-v2)
+
 ## [2.2.3] - 2026-03-23
 
 ### Fixed
@@ -224,6 +242,7 @@ LanceDB (`@lancedb/lancedb`, `apache-arrow`) ships as a production dependency in
 - Initial MCP server implementation
 - Basic project structure
 
+[2.3.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v2.2.3...v2.3.0
 [2.0.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.0.1...v1.0.2
