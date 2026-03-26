@@ -1,6 +1,6 @@
 {
   "name": "vector-memory",
-  "version": "2.2.4",
+  "version": "2.2.5",
   "description": "RAG-powered session memory with waypoints for Claude Code",
   "author": {
     "name": "AerionDyseti",
@@ -15,12 +15,7 @@
     "session-persistence",
     "vector-search"
   ],
-  "mcpConfig": "plugin/.mcp.json",
-  "hooks": "plugin/hooks/hooks.json",
-  "skills": [
-    "plugin/skills/vector-memory-usage/SKILL.md",
-    "plugin/skills/waypoint-set/SKILL.md",
-    "plugin/skills/waypoint-get/SKILL.md",
-    "plugin/skills/waypoint-workflow/SKILL.md"
-  ]
+  "mcpConfig": "./plugin/.mcp.json",
+  "hooks": "./plugin/hooks/hooks.json",
+  "skills": "./plugin/skills/"
 }
