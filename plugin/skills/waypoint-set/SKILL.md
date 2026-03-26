@@ -36,7 +36,7 @@ summary: [2-3 sentences: what was the primary goal, what's the current status]
 
 completed:
 - [specific items with file paths where relevant]
-- [e.g., "Implemented user auth in src/auth/login.ts"]
+- [e.g., "Implemented user auth in server/auth/login.ts"]
 
 in_progress_blocked:
 - [items still in flight with current state]

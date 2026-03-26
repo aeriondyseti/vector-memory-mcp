@@ -73,14 +73,14 @@ The `reason_for_search` field forces intentional retrieval. Be specific:
 Each memory should be self-contained and capture exactly one idea:
 
 **Good:**
-```
+```text
 "Chose libSQL over PostgreSQL for the Resonance project because
 of native vector support and simpler single-file deployment for local-first
 architecture."
 ```
 
 **Bad:**
-```
+```text
 "Uses SQLite"
 ```
 

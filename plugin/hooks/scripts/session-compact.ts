@@ -31,11 +31,15 @@ async function main() {
     if (existsSync(statePath)) {
       state = JSON.parse(readFileSync(statePath, "utf-8"));
     }
-  } catch {}
+  } catch (err) {
+    debug("session-compact", `Failed to read state: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   state.compressions += 1;
   writeFileSync(statePath, JSON.stringify(state));
   debug("session-compact", `compressions=${state.compressions}`);
 }
 
-main().catch(() => {});
+main().catch((err) => {
+  debug("session-compact", `Unhandled error: ${err instanceof Error ? err.message : String(err)}`);
+});

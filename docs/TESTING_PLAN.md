@@ -38,7 +38,7 @@ When developing an MCP memory server, we want to dogfood it (use it while buildi
 - Debugging requires isolated test databases
 - Crashes could lose important data
 
-### Selected Approach: Environment Variables
+### Selected Approach: CLI Flags
 
 **Implementation:**
 

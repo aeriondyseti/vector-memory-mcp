@@ -98,7 +98,7 @@ This two-step process ensures individual insights persist as searchable memories
 
 A well-structured waypoint looks like this:
 
-```
+```yaml
 project: "acme-api"
 branch: "feature/user-auth"
 summary: "Implemented JWT-based authentication with refresh tokens. All 18 auth tests passing. Ready to add rate limiting."
@@ -131,7 +131,7 @@ memory_ids:
 
 The recommended workflow for each work session:
 
-```
+```text
 1. Session starts → Load waypoint (/waypoint:get)
 2. Work on tasks
 3. Context monitor warns at 50% → Consider setting a waypoint soon

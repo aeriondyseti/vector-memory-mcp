@@ -248,7 +248,10 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
   // Migrate from external memory database
   app.post("/migrate", async (c) => {
     try {
-      const body = await c.req.json();
+      const body = await c.req.json().catch(() => null);
+      if (!body || typeof body !== "object") {
+        return c.json({ error: "Invalid or missing JSON body" }, 400);
+      }
       const source = body.source;
 
       if (!source || typeof source !== "string") {

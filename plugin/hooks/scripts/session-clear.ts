@@ -34,4 +34,6 @@ async function main() {
   await indexAndLoadWaypoint("session-clear");
 }
 
-main().catch(() => {});
+main().catch((err) => {
+  debug("session-clear", `Unhandled error: ${err instanceof Error ? err.message : String(err)}`);
+});

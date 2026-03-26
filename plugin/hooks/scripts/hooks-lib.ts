@@ -65,7 +65,9 @@ export const STATE_DIR = join(tmpdir(), "claude-context-monitor");
 
 export function getStatePath(sessionId: string): string {
   mkdirSync(STATE_DIR, { recursive: true });
-  return join(STATE_DIR, `${sessionId}.json`);
+  // Sanitize to prevent path traversal — strip anything that isn't alphanumeric or hyphens
+  const safe = sessionId.replace(/[^a-zA-Z0-9-]/g, "_");
+  return join(STATE_DIR, `${safe}.json`);
 }
 
 // ── Server discovery ────────────────────────────────────────────────
@@ -213,6 +215,15 @@ export async function indexAndLoadWaypoint(label: string): Promise<void> {
   const health = await fetchJson<HealthResponse>(serverUrl, "/health");
   if (!health.ok) {
     debug(label, `Server unreachable: ${health.error}`);
+    emitHookOutput({
+      systemMessage: buildSystemMessage("Vector Memory", [
+        {
+          icon: icon.warning,
+          iconColor: ansi.yellow,
+          text: `Server unreachable — run ${ansi.bold}/vector-memory:waypoint-get${ansi.reset} to load your waypoint manually`,
+        },
+      ]),
+    });
     return;
   }
 

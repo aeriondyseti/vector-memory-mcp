@@ -59,7 +59,9 @@ export function loadConfig(overrides: ConfigOverrides = {}): Config {
   const transportMode = overrides.transportMode ?? "stdio";
   const pluginMode = overrides.pluginMode ?? false;
   // HTTP enabled only in plugin mode (hooks need it). --no-http overrides.
-  const enableHttp = overrides.enableHttp ?? pluginMode;
+  // Force HTTP on if transport mode requires it, regardless of plugin mode.
+  const enableHttp = overrides.enableHttp
+    ?? (transportMode === "http" || transportMode === "both" || pluginMode);
 
   return {
     dbPath: resolvePath(
