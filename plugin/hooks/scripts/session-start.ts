@@ -5,7 +5,7 @@
  * Discovers the server, indexes conversations, and loads the latest waypoint.
  */
 
-import { indexAndLoadWaypoint, debug, icon, ansi, buildSystemMessage, emitHookOutput } from "./hooks-lib";
+import { indexAndLoadWaypoint, debug, icon, ansi, buildSystemMessage, emitHookOutput } from "./hooks-lib.js";
 
 async function main() {
   await Bun.stdin.text();

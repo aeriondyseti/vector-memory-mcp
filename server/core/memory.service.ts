@@ -1,8 +1,8 @@
 import { randomUUID, createHash } from "crypto";
-import type { Memory, SearchIntent, IntentProfile, HybridRow } from "../types/memory.js";
-import { isDeleted } from "../types/memory.js";
-import type { SearchResult, SearchOptions } from "../types/conversation.js";
-import type { MemoryRepository } from "../db/memory.repository.js";
+import type { Memory, SearchIntent, IntentProfile, HybridRow } from "./memory.js";
+import { isDeleted } from "./memory.js";
+import type { SearchResult, SearchOptions } from "./conversation.js";
+import type { MemoryRepository } from "./memory.repository.js";
 import type { EmbeddingsService } from "./embeddings.service.js";
 import type { ConversationHistoryService } from "./conversation.service.js";
 

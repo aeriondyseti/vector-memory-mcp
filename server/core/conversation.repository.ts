@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import type {
   ConversationHybridRow,
   HistoryFilters,
-} from "../types/conversation.js";
+} from "./conversation.js";
 import {
   serializeVector,
   safeParseJsonObject,

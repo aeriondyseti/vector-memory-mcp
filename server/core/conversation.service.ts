@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { dirname, join } from "path";
-import type { ConversationRepository } from "../db/conversation.repository.js";
+import type { ConversationRepository } from "./conversation.repository.js";
 import type {
   ConversationChunk,
   ConversationHybridRow,
@@ -10,7 +10,7 @@ import type {
   ParsedMessage,
   SessionFileInfo,
   SessionIndexDetail,
-} from "../types/conversation.js";
+} from "./conversation.js";
 import type { ConversationHistoryConfig } from "../config/index.js";
 import { resolveSessionLogPath } from "../config/index.js";
 import type { EmbeddingsService } from "./embeddings.service.js";

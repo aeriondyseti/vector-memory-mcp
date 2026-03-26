@@ -6,7 +6,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from "fs";
-import { getStatePath, debug } from "./hooks-lib";
+import { getStatePath, debug } from "./hooks-lib.js";
 
 interface HookInput {
   session_id: string;

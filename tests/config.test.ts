@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { parseCliArgs, loadConfig } from "../src/config/index";
+import { parseCliArgs, loadConfig } from "../server/config/index";
 
 describe("parseCliArgs", () => {
   test("returns empty overrides for no args", () => {
@@ -34,6 +34,11 @@ describe("parseCliArgs", () => {
     expect(result.enableHttp).toBe(false);
   });
 
+  test("parses --plugin", () => {
+    const result = parseCliArgs(["--plugin"]);
+    expect(result.pluginMode).toBe(true);
+  });
+
   test("parses multiple args together", () => {
     const result = parseCliArgs([
       "--db-file", "/my/db.sqlite",
@@ -58,8 +63,25 @@ describe("loadConfig", () => {
     expect(config.embeddingDimension).toBe(384);
     expect(config.httpPort).toBe(3271);
     expect(config.httpHost).toBe("127.0.0.1");
-    expect(config.enableHttp).toBe(true);
+    expect(config.enableHttp).toBe(false);
+    expect(config.pluginMode).toBe(false);
     expect(config.transportMode).toBe("stdio");
+  });
+
+  test("plugin mode enables HTTP by default", () => {
+    const config = loadConfig({ pluginMode: true });
+    expect(config.pluginMode).toBe(true);
+    expect(config.enableHttp).toBe(true);
+  });
+
+  test("--port alone does not enable HTTP", () => {
+    const config = loadConfig({ httpPort: 4000 });
+    expect(config.enableHttp).toBe(false);
+  });
+
+  test("--no-http overrides plugin mode", () => {
+    const config = loadConfig({ pluginMode: true, enableHttp: false });
+    expect(config.enableHttp).toBe(false);
   });
 
   test("applies overrides", () => {

@@ -12,8 +12,8 @@
 import { existsSync, statSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { connectToDatabase } from "./db/connection.js";
-import { serializeVector } from "./db/sqlite-utils.js";
+import { connectToDatabase } from "./core/connection.js";
+import { serializeVector } from "./core/sqlite-utils.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

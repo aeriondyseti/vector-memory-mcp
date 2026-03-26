@@ -5,8 +5,8 @@
  * This runs during installation to ensure everything is ready to use
  */
 
-import { config } from "../src/config/index.js";
-import { EmbeddingsService } from "../src/services/embeddings.service.js";
+import { config } from "../server/config/index.js";
+import { EmbeddingsService } from "../server/core/embeddings.service.js";
 
 async function warmup(): Promise<void> {
   console.log("🔥 Warming up vector-memory-mcp...");

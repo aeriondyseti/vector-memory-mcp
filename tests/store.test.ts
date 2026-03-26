@@ -3,11 +3,11 @@ import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { Database } from "bun:sqlite";
-import { connectToDatabase } from "../src/db/connection";
-import { MemoryRepository } from "../src/db/memory.repository";
-import { EmbeddingsService } from "../src/services/embeddings.service";
-import { MemoryService } from "../src/services/memory.service";
-import { DELETED_TOMBSTONE } from "../src/types/memory";
+import { connectToDatabase } from "../server/core/connection";
+import { MemoryRepository } from "../server/core/memory.repository";
+import { EmbeddingsService } from "../server/core/embeddings.service";
+import { MemoryService } from "../server/core/memory.service";
+import { DELETED_TOMBSTONE } from "../server/core/memory";
 
 describe("MemoryService", () => {
   let db: Database;

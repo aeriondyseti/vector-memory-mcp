@@ -3,8 +3,8 @@ import { createHash } from "crypto";
 import { existsSync, statSync, readdirSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { serializeVector } from "../db/sqlite-utils.js";
-import type { MemoryRepository } from "../db/memory.repository.js";
+import { serializeVector } from "./sqlite-utils.js";
+import type { MemoryRepository } from "./memory.repository.js";
 import type { EmbeddingsService } from "./embeddings.service.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

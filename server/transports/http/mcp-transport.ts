@@ -24,8 +24,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { tools } from "../mcp/tools.js";
 import { handleToolCall } from "../mcp/handlers.js";
 import { SERVER_INSTRUCTIONS } from "../mcp/server.js";
-import { VERSION } from "../config/index.js";
-import type { MemoryService } from "../services/memory.service.js";
+import { VERSION } from "../../config/index.js";
+import type { MemoryService } from "../../core/memory.service.js";
 
 interface Session {
   server: Server;

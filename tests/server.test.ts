@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { Database } from "bun:sqlite";
-import { tools } from "../src/mcp/tools";
+import { tools } from "../server/transports/mcp/tools";
 import {
   handleToolCall,
   handleStoreMemories,
@@ -17,14 +17,14 @@ import {
   handleListIndexedSessions,
   handleReindexSession,
   handleReportMemoryUsefulness,
-} from "../src/mcp/handlers";
-import { createServer } from "../src/mcp/server";
-import { connectToDatabase } from "../src/db/connection";
-import { MemoryRepository } from "../src/db/memory.repository";
-import { EmbeddingsService } from "../src/services/embeddings.service";
-import { MemoryService } from "../src/services/memory.service";
-import type { ConversationHistoryService } from "../src/services/conversation.service";
-import type { IndexedSession, ConversationHybridRow } from "../src/types/conversation";
+} from "../server/transports/mcp/handlers";
+import { createServer } from "../server/transports/mcp/server";
+import { connectToDatabase } from "../server/core/connection";
+import { MemoryRepository } from "../server/core/memory.repository";
+import { EmbeddingsService } from "../server/core/embeddings.service";
+import { MemoryService } from "../server/core/memory.service";
+import type { ConversationHistoryService } from "../server/core/conversation.service";
+import type { IndexedSession, ConversationHybridRow } from "../server/core/conversation";
 
 describe("mcp", () => {
   let db: Database;

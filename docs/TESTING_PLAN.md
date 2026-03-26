@@ -63,7 +63,7 @@ Use a separate environment variable for development:
 
 ```bash
 export VECTOR_MEMORY_DB_PATH="/home/user/.local/share/vector-memory-mcp/dev.db"
-bun run src/index.ts
+bun run server/index.ts
 ```
 
 ---

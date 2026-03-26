@@ -21,7 +21,7 @@ import {
   closeSync,
   statSync,
 } from "fs";
-import { getStatePath } from "./hooks-lib";
+import { getStatePath } from "./hooks-lib.js";
 
 interface HookInput {
   session_id: string;

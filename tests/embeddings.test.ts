@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeAll } from "bun:test";
-import { EmbeddingsService } from "../src/services/embeddings.service";
+import { EmbeddingsService } from "../server/core/embeddings.service";
 import {
   isModelAvailable,
   createEmbeddingsService,

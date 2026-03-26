@@ -1,14 +1,14 @@
 #!/usr/bin/env bun
 
 import { loadConfig, parseCliArgs } from "./config/index.js";
-import { connectToDatabase } from "./db/connection.js";
-import { MemoryRepository } from "./db/memory.repository.js";
-import { ConversationRepository } from "./db/conversation.repository.js";
-import { EmbeddingsService } from "./services/embeddings.service.js";
-import { MemoryService } from "./services/memory.service.js";
-import { ConversationHistoryService } from "./services/conversation.service.js";
-import { startServer } from "./mcp/server.js";
-import { startHttpServer, removeLockfile } from "./http/server.js";
+import { connectToDatabase } from "./core/connection.js";
+import { MemoryRepository } from "./core/memory.repository.js";
+import { ConversationRepository } from "./core/conversation.repository.js";
+import { EmbeddingsService } from "./core/embeddings.service.js";
+import { MemoryService } from "./core/memory.service.js";
+import { ConversationHistoryService } from "./core/conversation.service.js";
+import { startServer } from "./transports/mcp/server.js";
+import { startHttpServer, removeLockfile } from "./transports/http/server.js";
 import { isLanceDbDirectory, migrate, formatMigrationSummary } from "./migration.js";
 
 async function runMigrate(args: string[]): Promise<void> {
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
       `[vector-memory-mcp] ⚠️  Legacy LanceDB data detected at ${config.dbPath}\n` +
       `  Your data must be migrated to the new SQLite format.\n` +
       `  Run: vector-memory-mcp migrate\n` +
-      `  Or:  bun run src/index.ts migrate\n`
+      `  Or:  bun run server/index.ts migrate\n`
     );
     process.exit(1);
   }
@@ -68,6 +68,10 @@ async function main(): Promise<void> {
   const repository = new MemoryRepository(db);
   const embeddings = new EmbeddingsService(config.embeddingModel, config.embeddingDimension);
   const memoryService = new MemoryService(repository, embeddings);
+
+  if (config.pluginMode) {
+    console.error("[vector-memory-mcp] Running in plugin mode");
+  }
 
   // Conditionally initialize conversation history indexing
   if (config.conversationHistory.enabled) {

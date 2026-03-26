@@ -13,14 +13,14 @@ import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { Database } from "bun:sqlite";
-import { connectToDatabase } from "../src/db/connection";
-import { MemoryRepository } from "../src/db/memory.repository";
-import { EmbeddingsService } from "../src/services/embeddings.service";
-import { MemoryService } from "../src/services/memory.service";
-import { createHttpApp } from "../src/http/server";
+import { connectToDatabase } from "../server/core/connection";
+import { MemoryRepository } from "../server/core/memory.repository";
+import { EmbeddingsService } from "../server/core/embeddings.service";
+import { MemoryService } from "../server/core/memory.service";
+import { createHttpApp } from "../server/transports/http/server";
 import { fakeEmbedding } from "./utils/test-helpers";
-import type { Memory } from "../src/types/memory";
-import type { Config } from "../src/config/index";
+import type { Memory } from "../server/core/memory";
+import type { Config } from "../server/config/index";
 
 // A fixed UTC moment with a non-zero hour so a UTC-offset bug shifts it visibly.
 const KNOWN_UTC_MS = new Date("2026-01-15T09:30:00.000Z").getTime();

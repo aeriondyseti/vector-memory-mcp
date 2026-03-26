@@ -24,24 +24,32 @@ bun run warmup        # download ML models
 
 | Path | Purpose |
 |------|---------|
-| `src/index.ts` | Entry point, CLI arg parsing, server startup |
-| `src/config/index.ts` | Configuration |
-| `src/db/connection.ts` | SQLite connection setup |
-| `src/db/migrations.ts` | Schema migrations |
-| `src/db/memory.repository.ts` | Memory CRUD + hybrid search (sqlite-vec KNN + FTS5 + RRF) |
-| `src/db/conversation.repository.ts` | Conversation history storage |
-| `src/db/sqlite-utils.ts` | SQLite utility helpers |
-| `src/services/memory.service.ts` | Memory business logic |
-| `src/services/conversation.service.ts` | Conversation indexing service |
-| `src/services/embeddings.service.ts` | Local embeddings via @huggingface/transformers |
-| `src/services/parsers/` | Session log parsers (Claude Code JSONL) |
-| `src/mcp/server.ts` | MCP server setup |
-| `src/mcp/tools.ts` | MCP tool definitions |
-| `src/mcp/handlers.ts` | MCP tool handler implementations |
-| `src/http/server.ts` | HTTP/SSE transport (Hono) |
-| `src/http/mcp-transport.ts` | MCP-over-HTTP bridge |
-| `src/types/` | TypeScript type definitions |
-| `src/migration.ts` | LanceDB-to-SQLite migration (legacy support) |
+| `server/index.ts` | Entry point, CLI arg parsing, server startup |
+| `server/config/index.ts` | Configuration |
+| **Core** (`server/core/`) | |
+| `server/core/connection.ts` | SQLite connection setup |
+| `server/core/migrations.ts` | Schema migrations |
+| `server/core/memory.repository.ts` | Memory CRUD + hybrid search (sqlite-vec KNN + FTS5 + RRF) |
+| `server/core/conversation.repository.ts` | Conversation history storage |
+| `server/core/sqlite-utils.ts` | SQLite utility helpers |
+| `server/core/memory.service.ts` | Memory business logic |
+| `server/core/conversation.service.ts` | Conversation indexing service |
+| `server/core/embeddings.service.ts` | Local embeddings via @huggingface/transformers |
+| `server/core/migration.service.ts` | Cross-format database migration |
+| `server/core/parsers/` | Session log parsers (Claude Code JSONL) |
+| `server/core/memory.ts` | Memory type definitions |
+| `server/core/conversation.ts` | Conversation type definitions |
+| **Utils** (`server/utils/`) | |
+| `server/utils/formatting.ts` | ANSI styling, icons, message builders, time formatting |
+| **Transports** | |
+| `server/transports/mcp/server.ts` | MCP server setup |
+| `server/transports/mcp/tools.ts` | MCP tool definitions |
+| `server/transports/mcp/handlers.ts` | MCP tool handler implementations |
+| `server/transports/mcp/resources.ts` | MCP resource definitions |
+| `server/transports/http/server.ts` | HTTP/SSE transport (Hono) |
+| `server/transports/http/mcp-transport.ts` | MCP-over-HTTP bridge |
+| **Legacy** | |
+| `server/migration.ts` | LanceDB-to-SQLite migration (legacy support) |
 
 ## Testing
 
@@ -108,7 +116,7 @@ This repo is both an npm package and a Claude Code plugin marketplace.
 |------|---------|
 | `.claude-plugin/plugin.json` | Plugin manifest — points to `plugin/` for hooks, skills, MCP config |
 | `.claude-plugin/marketplace.json` | Marketplace manifest — single plugin, `"source": "."` |
-| `plugin/.mcp.json` | Runs MCP server from source: `bun ${CLAUDE_PLUGIN_ROOT}/src/index.ts` |
+| `plugin/.mcp.json` | Runs MCP server from source: `bun ${CLAUDE_PLUGIN_ROOT}/server/index.ts` |
 | `plugin/hooks/` | Session lifecycle hooks (start, clear, compact, context monitor) |
 | `plugin/skills/` | Skills: vector-memory-usage, waypoint-set, waypoint-get, waypoint-workflow |
 | `scripts/sync-version.ts` | Stamps version from `package.json` (or explicit arg) into plugin/marketplace files |
@@ -136,6 +144,6 @@ This repo is both an npm package and a Claude Code plugin marketplace.
 - All data stored in `.vector-memory/` directory (single SQLite file: `memories.db`)
 - Embedding model: `Xenova/all-MiniLM-L6-v2` (384 dimensions, loaded lazily on first use)
 - Embeddings are local via `@huggingface/transformers` — no API keys needed
-- MCP tool handlers may receive array args as JSON strings; use the `asArray()` helper from `src/mcp/handlers.ts`
+- MCP tool handlers may receive array args as JSON strings; use the `asArray()` helper from `server/transports/mcp/handlers.ts`
 - Version-based debug logging: auto-enabled for `-dev.N` and `-rc.N` versions, or set `VECTOR_MEMORY_DEBUG=1`
 - Config is CLI-arg driven (no env vars except `VECTOR_MEMORY_DEBUG`)

@@ -12,7 +12,7 @@ import {
   type Memory,
   type HybridRow,
   DELETED_TOMBSTONE,
-} from "../types/memory.js";
+} from "./memory.js";
 
 export class MemoryRepository {
   constructor(private db: Database) {}

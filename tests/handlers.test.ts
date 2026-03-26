@@ -4,10 +4,10 @@ import {
   handleIndexConversations,
   handleListIndexedSessions,
   handleReindexSession,
-} from "../src/mcp/handlers.js";
-import type { MemoryService } from "../src/services/memory.service.js";
-import type { ConversationHistoryService } from "../src/services/conversation.service.js";
-import type { SearchResult, IndexedSession } from "../src/types/conversation.js";
+} from "../server/transports/mcp/handlers.js";
+import type { MemoryService } from "../server/core/memory.service.js";
+import type { ConversationHistoryService } from "../server/core/conversation.service.js";
+import type { SearchResult, IndexedSession } from "../server/core/conversation.js";
 
 function createMockService(conversationService: ConversationHistoryService | null = null): MemoryService {
   return {

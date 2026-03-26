@@ -1,4 +1,4 @@
-import type { ParsedMessage, SessionFileInfo } from "../../types/conversation.js";
+import type { ParsedMessage, SessionFileInfo } from "../conversation.js";
 
 /** Interface for parsing session log files into structured messages */
 export interface SessionLogParser {

@@ -3,12 +3,12 @@ import { cors } from "hono/cors";
 import { createServer } from "net";
 import { writeFileSync, mkdirSync, unlinkSync } from "fs";
 import { join } from "path";
-import type { MemoryService } from "../services/memory.service.js";
-import type { Config } from "../config/index.js";
-import { isDeleted } from "../types/memory.js";
+import type { MemoryService } from "../../core/memory.service.js";
+import type { Config } from "../../config/index.js";
+import { isDeleted } from "../../core/memory.js";
 import { createMcpRoutes } from "./mcp-transport.js";
-import type { Memory, SearchIntent } from "../types/memory.js";
-import { MigrationService } from "../services/migration.service.js";
+import type { Memory, SearchIntent } from "../../core/memory.js";
+import { MigrationService } from "../../core/migration.service.js";
 
 /**
  * Check if a port is available by attempting to bind to it
@@ -110,6 +110,7 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
         embeddingModel: config.embeddingModel,
         embeddingDimension: config.embeddingDimension,
         historyEnabled: config.conversationHistory.enabled,
+        pluginMode: config.pluginMode,
       },
     });
   });

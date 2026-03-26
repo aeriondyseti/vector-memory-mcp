@@ -8,10 +8,10 @@
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { connectToDatabase } from "../../src/db/connection";
-import { MemoryRepository } from "../../src/db/memory.repository";
-import { EmbeddingsService } from "../../src/services/embeddings.service";
-import { MemoryService } from "../../src/services/memory.service";
+import { connectToDatabase } from "../../server/core/connection";
+import { MemoryRepository } from "../../server/core/memory.repository";
+import { EmbeddingsService } from "../../server/core/embeddings.service";
+import { MemoryService } from "../../server/core/memory.service";
 import type {
   BenchmarkDataset,
   BenchmarkResults,
@@ -19,7 +19,7 @@ import type {
   QueryCategory,
   QueryResult,
 } from "./types";
-import type { SearchIntent } from "../../src/types/memory";
+import type { SearchIntent } from "../../server/core/memory";
 import {
   precisionAtK,
   recallAtK,

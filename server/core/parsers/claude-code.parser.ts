@@ -1,6 +1,6 @@
 import { readFile, readdir, stat } from "fs/promises";
 import { basename, dirname, join } from "path";
-import type { ParsedMessage, SessionFileInfo } from "../../types/conversation.js";
+import type { ParsedMessage, SessionFileInfo } from "../conversation.js";
 import type { SessionLogParser } from "./types.js";
 
 // UUID pattern for session IDs

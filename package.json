@@ -3,12 +3,12 @@
   "version": "2.2.3",
   "description": "A zero-configuration RAG memory server for MCP clients",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "server/index.ts",
   "bin": {
-    "vector-memory-mcp": "src/index.ts"
+    "vector-memory-mcp": "server/index.ts"
   },
   "files": [
-    "src",
+    "server",
     "scripts",
     "README.md",
     "LICENSE"
@@ -23,8 +23,8 @@
   },
   "homepage": "https://github.com/aeriondyseti/vector-memory-mcp#readme",
   "scripts": {
-    "start": "bun run src/index.ts",
-    "dev": "bun --watch run src/index.ts",
+    "start": "bun run server/index.ts",
+    "dev": "bun --watch run server/index.ts",
     "typecheck": "bunx tsc --noEmit",
     "test": "bun run scripts/test-runner.ts",
     "test:raw": "bun test --preload ./tests/preload.ts",
