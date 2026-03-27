@@ -273,7 +273,14 @@ export class MemoryService {
     if (!project?.length) return MemoryService.UUID_ZERO;
     const normalized = project.trim().toLowerCase();
     const hex = createHash("sha256").update(`waypoint:${normalized}`).digest("hex");
-    // Format as UUID: 8-4-4-4-12
+    return `wp:${hex.slice(0, 32)}`;
+  }
+
+  /** Legacy UUID-formatted waypoint ID for migration fallback reads. */
+  private static legacyWaypointId(project?: string): string | null {
+    if (!project?.length) return null; // UUID_ZERO is still current for no-project
+    const normalized = project.trim().toLowerCase();
+    const hex = createHash("sha256").update(`waypoint:${normalized}`).digest("hex");
     return [
       hex.slice(0, 8),
       hex.slice(8, 12),
@@ -366,6 +373,20 @@ ${list(args.memory_ids)}`;
   }
 
   async getLatestWaypoint(project?: string): Promise<Memory | null> {
-    return await this.get(MemoryService.waypointId(project));
+    const waypoint = await this.get(MemoryService.waypointId(project));
+    if (waypoint) return waypoint;
+
+    // Fallback: try legacy UUID-formatted waypoint ID and migrate on read
+    const legacyId = MemoryService.legacyWaypointId(project);
+    if (!legacyId) return null;
+
+    const legacy = await this.repository.findById(legacyId);
+    if (!legacy) return null;
+
+    // Migrate: write under new ID, delete old
+    const newId = MemoryService.waypointId(project);
+    await this.repository.upsert({ ...legacy, id: newId });
+    await this.repository.markDeleted(legacyId);
+    return { ...legacy, id: newId };
   }
 }
