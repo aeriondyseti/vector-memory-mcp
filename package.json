@@ -1,6 +1,6 @@
 {
   "name": "@aeriondyseti/vector-memory-mcp",
-  "version": "2.3.0",
+  "version": "2.3.0-rc.3",
   "description": "A zero-configuration RAG memory server for MCP clients",
   "type": "module",
   "main": "server/index.ts",
