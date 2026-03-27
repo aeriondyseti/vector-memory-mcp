@@ -189,7 +189,9 @@ export async function handleSearchMemories(
     return errorResult(errorText(e));
   }
 
-  const results = await service.search(query, intent, limit, includeDeleted, {
+  const results = await service.search(query, intent, {
+    limit,
+    includeDeleted,
     includeHistory,
     historyOnly,
     historyFilters,

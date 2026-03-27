@@ -83,8 +83,8 @@ describe("MemoryService - Scoring with Intents", () => {
     }
 
     // Run multiple searches - with 15% jitter, order should sometimes differ
-    const results1 = await service.search("testing", "explore", 5);
-    const results2 = await service.search("testing", "explore", 5);
+    const results1 = await service.search("testing", "explore", { limit: 5 });
+    const results2 = await service.search("testing", "explore", { limit: 5 });
 
     // Both should return results
     expect(results1.length).toBe(5);

@@ -54,7 +54,9 @@ describe("handleSearchMemories", () => {
       service,
     );
 
-    expect(service.search).toHaveBeenCalledWith("test", "fact_check", 10, false, {
+    expect(service.search).toHaveBeenCalledWith("test", "fact_check", {
+      limit: 10,
+      includeDeleted: false,
       includeHistory: true,
       historyOnly: true,
       historyFilters: {
@@ -81,7 +83,9 @@ describe("handleSearchMemories", () => {
       service,
     );
 
-    expect(service.search).toHaveBeenCalledWith("test", "continuity", 10, false, {
+    expect(service.search).toHaveBeenCalledWith("test", "continuity", {
+      limit: 10,
+      includeDeleted: false,
       includeHistory: true,
       historyOnly: false,
       historyFilters: {

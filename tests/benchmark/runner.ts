@@ -115,7 +115,7 @@ export class BenchmarkRunner {
       // Run search - fetch more than needed to measure recall
       // Use "fact_check" intent for benchmarks as it emphasizes relevance
       const intent: SearchIntent = "fact_check";
-      const results = await this.service.search(query.query, intent, 10);
+      const results = await this.service.search(query.query, intent, { limit: 10 });
       const retrievedIds = results.map((m) => m.id);
 
       // Map expected IDs to actual stored IDs

@@ -55,7 +55,7 @@ describe("Retrieval - semantically relevant memories appear in results", () => {
     const mem2 = await service.store("React useState and useEffect patterns");
     await service.store("Italian pasta recipes from grandma");
 
-    const results = await service.search("React hooks", "fact_check", 10);
+    const results = await service.search("React hooks", "fact_check", { limit: 10 });
     const ids = results.map((r) => r.id);
     expect(ids).toContain(mem1.id);
     expect(ids).toContain(mem2.id);

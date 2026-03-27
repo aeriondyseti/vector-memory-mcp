@@ -273,15 +273,12 @@ export class ConversationHistoryService {
       this.config.chunkOverlap
     );
 
-    // Delete existing chunks for re-indexing
-    await this.repository.deleteBySessionId(file.sessionId);
-
-    // Embed all chunks
+    // Embed all chunks FIRST (pure computation, no DB side effects)
     const embeddings = await this.embeddings.embedBatch(
       chunks.map((c) => c.content)
     );
 
-    // Insert all chunks
+    // Build rows
     const rows = chunks.map((chunk, i) => ({
       id: chunk.id,
       vector: embeddings[i],
@@ -295,7 +292,8 @@ export class ConversationHistoryService {
       project: chunk.project,
     }));
 
-    await this.repository.insertBatch(rows);
+    // Atomically replace old chunks with new ones
+    await this.repository.replaceSession(file.sessionId, rows);
 
     // Update index state
     const session: IndexedSession = {

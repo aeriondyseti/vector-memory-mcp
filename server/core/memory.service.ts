@@ -87,19 +87,10 @@ export class MemoryService {
   async getMultiple(ids: string[]): Promise<Memory[]> {
     if (ids.length === 0) return [];
     const memories = await this.repository.findByIds(ids);
-    // Track access in bulk
     const now = new Date();
-    const live = memories.filter((m) => !isDeleted(m));
-    await Promise.all(
-      live.map((m) =>
-        this.repository.upsert({
-          ...m,
-          accessCount: m.accessCount + 1,
-          lastAccessed: now,
-        })
-      )
-    );
-    return live;
+    const liveIds = memories.filter((m) => !isDeleted(m)).map((m) => m.id);
+    this.repository.bulkUpdateAccess(liveIds, now);
+    return memories.filter((m) => !isDeleted(m));
   }
 
   async delete(id: string): Promise<boolean> {
@@ -186,10 +177,10 @@ export class MemoryService {
   async search(
     query: string,
     intent: SearchIntent,
-    limit: number = 10,
-    includeDeleted: boolean = false,
     options?: SearchOptions
   ): Promise<SearchResult[]> {
+    const limit = options?.limit ?? 10;
+    const includeDeleted = options?.includeDeleted ?? false;
     const queryEmbedding = await this.embeddings.embed(query);
     const profile = INTENT_PROFILES[intent];
     const now = new Date();
@@ -272,19 +263,7 @@ export class MemoryService {
 
   async trackAccess(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
-    const memories = await this.repository.findByIds(ids);
-    const now = new Date();
-    await Promise.all(
-      memories
-        .filter((m) => !isDeleted(m))
-        .map((m) =>
-          this.repository.upsert({
-            ...m,
-            accessCount: m.accessCount + 1,
-            lastAccessed: now,
-          })
-        )
-    );
+    this.repository.bulkUpdateAccess(ids, new Date());
   }
 
   private static readonly UUID_ZERO =

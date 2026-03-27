@@ -114,6 +114,8 @@ export interface HistoryFilters {
 
 /** Options for the integrated search across both sources */
 export interface SearchOptions {
+  limit?: number;
+  includeDeleted?: boolean;
   includeHistory?: boolean;
   historyOnly?: boolean;
   historyWeight?: number;

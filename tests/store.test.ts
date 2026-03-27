@@ -165,7 +165,7 @@ describe("MemoryService", () => {
       await service.store("Memory 2");
       await service.store("Memory 3");
 
-      const results = await service.search("memory", "fact_check", 2);
+      const results = await service.search("memory", "fact_check", { limit: 2 });
       expect(results.length).toBe(2);
     });
 
