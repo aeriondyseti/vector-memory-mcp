@@ -127,8 +127,43 @@ export async function backfillVectors(
   db: Database,
   embeddings: EmbeddingsService,
 ): Promise<void> {
+  // Fast sentinel check: skip the LEFT JOIN queries entirely when backfill is done
+  const sentinel = db
+    .prepare("SELECT 1 FROM memories_vec LIMIT 1")
+    .get();
+  const memoriesExist = db.prepare("SELECT 1 FROM memories LIMIT 1").get();
+  const convosExist = db.prepare("SELECT 1 FROM conversation_history LIMIT 1").get();
+
+  // If vec tables have data and source tables have data, backfill is likely complete.
+  // Only run the expensive LEFT JOIN when there's reason to suspect gaps.
+  const convoSentinel = db
+    .prepare("SELECT 1 FROM conversation_history_vec LIMIT 1")
+    .get();
+  const mayNeedMemoryBackfill = memoriesExist && !sentinel;
+  const mayNeedConvoBackfill = convosExist && !convoSentinel;
+
+  // If both vec tables are populated, do a quick count check to confirm
+  if (!mayNeedMemoryBackfill && !mayNeedConvoBackfill) {
+    if (memoriesExist) {
+      const gap = db.prepare(
+        `SELECT 1 FROM memories m LEFT JOIN memories_vec v ON m.id = v.id
+         WHERE v.id IS NULL OR length(v.vector) = 0 LIMIT 1`,
+      ).get();
+      if (!gap && convosExist) {
+        const convoGap = db.prepare(
+          `SELECT 1 FROM conversation_history c LEFT JOIN conversation_history_vec v ON c.id = v.id
+           WHERE v.id IS NULL OR length(v.vector) = 0 LIMIT 1`,
+        ).get();
+        if (!convoGap) return;
+      } else if (!gap && !convosExist) {
+        return;
+      }
+    } else {
+      return; // No data at all
+    }
+  }
+
   // ── Memories ──────────────────────────────────────────────────────
-  // Catch both missing rows (v.id IS NULL) and corrupt 0-byte BLOBs
   const missingMemories = db
     .prepare(
       `SELECT m.id, m.content, json_extract(m.metadata, '$.type') AS type
@@ -151,14 +186,27 @@ export async function backfillVectors(
       new Array(embeddings.dimension).fill(0),
     );
 
-    for (const row of missingMemories) {
-      // Waypoints use a zero vector (not semantically searched)
-      const blob =
-        row.type === "waypoint"
-          ? zeroVector
-          : serializeVector(await embeddings.embed(row.content));
+    // Separate waypoints from content that needs embedding
+    const toEmbed = missingMemories.filter((r) => r.type !== "waypoint");
+    const waypoints = missingMemories.filter((r) => r.type === "waypoint");
 
-      insertVec.run(row.id, blob);
+    // Batch embed all non-waypoint content
+    const vectors = toEmbed.length > 0
+      ? await embeddings.embedBatch(toEmbed.map((r) => r.content))
+      : [];
+
+    db.exec("BEGIN");
+    try {
+      for (const row of waypoints) {
+        insertVec.run(row.id, zeroVector);
+      }
+      for (let i = 0; i < toEmbed.length; i++) {
+        insertVec.run(toEmbed[i].id, serializeVector(vectors[i]));
+      }
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
     }
 
     console.error(
@@ -185,17 +233,27 @@ export async function backfillVectors(
       "INSERT OR REPLACE INTO conversation_history_vec (id, vector) VALUES (?, ?)",
     );
 
-    for (let i = 0; i < missingConvos.length; i++) {
-      const row = missingConvos[i];
-      const vec = serializeVector(await embeddings.embed(row.content));
-      insertConvoVec.run(row.id, vec);
+    // Batch embed in chunks of 32
+    const BATCH_SIZE = 32;
+    db.exec("BEGIN");
+    try {
+      for (let i = 0; i < missingConvos.length; i += BATCH_SIZE) {
+        const batch = missingConvos.slice(i, i + BATCH_SIZE);
+        const vecs = await embeddings.embedBatch(batch.map((r) => r.content));
+        for (let j = 0; j < batch.length; j++) {
+          insertConvoVec.run(batch[j].id, serializeVector(vecs[j]));
+        }
 
-      // Log progress every 100 chunks
-      if ((i + 1) % 100 === 0) {
-        console.error(
-          `[vector-memory-mcp]   ...${i + 1}/${missingConvos.length} conversation chunks`,
-        );
+        if ((i + BATCH_SIZE) % 100 < BATCH_SIZE) {
+          console.error(
+            `[vector-memory-mcp]   ...${Math.min(i + BATCH_SIZE, missingConvos.length)}/${missingConvos.length} conversation chunks`,
+          );
+        }
       }
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
     }
 
     console.error(

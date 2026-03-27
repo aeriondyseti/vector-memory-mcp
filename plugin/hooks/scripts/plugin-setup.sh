@@ -38,7 +38,7 @@ if [ "${needs_install}" = true ]; then
   # Emit progress message (raw text to stderr so it doesn't pollute JSON stdout)
   echo "⏳ Vector Memory: Installing dependencies..." >&2
   cd "${ROOT}"
-  bun install --frozen-lockfile 2>&1 >&2 || bun install 2>&1 >&2
+  bun install --frozen-lockfile >&2 2>&1 || bun install >&2 2>&1
   mkdir -p "${DATA}"
   echo "${current_hash}" > "${HASH_FILE}"
 fi
@@ -54,7 +54,7 @@ if [ "${needs_warmup}" = true ]; then
   actions+=("model")
   echo "⏳ Vector Memory: Warming up embedding model (first run only)..." >&2
   cd "${ROOT}"
-  bun run scripts/warmup.ts 2>&1 >&2 && touch "${MODEL_MARKER}"
+  bun run scripts/warmup.ts >&2 2>&1 && touch "${MODEL_MARKER}"
 fi
 
 # ── 3. Emit hook output ─────────────────────────────────────────────

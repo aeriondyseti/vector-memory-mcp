@@ -25,7 +25,23 @@ import {
   closeSync,
   statSync,
 } from "fs";
-import { getStatePath } from "./hooks-lib.js";
+import { getStatePath, emitHookOutput, type HookOutput } from "./hooks-lib.js";
+
+/** Emit the appropriate empty/pass-through response based on hook type. */
+function emitEmpty(): void {
+  emitHookOutput(IS_THROTTLED ? {} : { decision: "approve" });
+}
+
+/** Emit a message via the appropriate hook output field. */
+function emitMessage(message: string): void {
+  if (IS_THROTTLED) {
+    emitHookOutput({
+      hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: message },
+    });
+  } else {
+    emitHookOutput({ decision: "approve", systemMessage: message });
+  }
+}
 
 interface HookInput {
   session_id: string;
@@ -252,7 +268,7 @@ async function main() {
   const input: HookInput = await Bun.stdin.json();
 
   if (!input.transcript_path || !input.session_id) {
-    console.log(JSON.stringify(IS_THROTTLED ? {} : { decision: "approve" }));
+    emitEmpty();
     return;
   }
 
@@ -263,7 +279,7 @@ async function main() {
   if (IS_THROTTLED) {
     const elapsed = (Date.now() - state.last_checked_at) / 1000;
     if (elapsed < THROTTLE_SECONDS) {
-      console.log(JSON.stringify({}));
+      emitEmpty();
       return;
     }
   }
@@ -274,26 +290,14 @@ async function main() {
   saveState(input.session_id, state);
 
   if (message) {
-    if (IS_THROTTLED) {
-      // PostToolUse: additionalContext must be inside hookSpecificOutput
-      console.log(JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PostToolUse",
-          additionalContext: message,
-        },
-      }));
-    } else {
-      // Stop: systemMessage is the standard output field
-      console.log(JSON.stringify({ decision: "approve", systemMessage: message }));
-    }
+    emitMessage(message);
   } else {
-    // No issues — approve (Stop) or pass-through (PostToolUse)
-    console.log(JSON.stringify(IS_THROTTLED ? {} : { decision: "approve" }));
+    emitEmpty();
   }
 }
 
 main().catch(() => {
   // On error, approve silently to avoid blocking the session
-  console.log(JSON.stringify(IS_THROTTLED ? {} : { decision: "approve" }));
+  emitEmpty();
   process.exit(0);
 });
