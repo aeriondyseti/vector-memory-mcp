@@ -10,6 +10,10 @@ Current version: **2.4.0**
 
 - **Inconsistent parameter validation in MCP handlers**: `handleReindexSession` validates its required `session_id` arg defensively, but other handlers (`handleStoreMemories`, `handleDeleteMemories`, `handleReportMemoryUsefulness`, etc.) trust the MCP SDK schema validation and would throw unhandled `TypeError` on missing input. Low risk today since the SDK validates before calling handlers, but fragile if handlers are ever called directly (e.g. from HTTP routes).
 
+- **Hardcoded model name in `update-benchmarks.ts`**: The benchmark report bakes in `"Xenova/all-MiniLM-L6-v2 (384d)"` as a string literal. Should read from `BenchmarkRunner` or config so the report stays accurate if the model changes (especially relevant for Feature 30 — embedding model evaluation).
+
+- **Untyped transcript parsing in `context-monitor.ts`**: `analyzeTranscript()` uses `any` for parsed JSON lines from the Claude Code transcript. Should define a `TranscriptEntry` interface for the fields it reads (`message.usage`, `isSidechain`, `isApiErrorMessage`, `timestamp`) to catch schema drift early.
+
 - **N individual upserts for access tracking in `getMultiple()`**: `memory.service.ts:getMultiple()` batches the read via `findByIds` (single IN query), but fans out to N individual `repository.upsert()` calls for access tracking. Each upsert does a SELECT (existence check) + UPDATE — 2N queries total. A `bulkUpdateAccess(ids, now)` repository method using a single `UPDATE ... WHERE id IN (...)` would collapse this to 1 query. Same pattern applies to `trackAccess()`.
 
 - **Unbounded IN clause in `findByIds()`**: `memory.repository.ts:findByIds()` builds a SQL IN clause from an unbounded array of IDs. SQLite has a default SQLITE_MAX_VARIABLE_NUMBER limit (usually 999). Add a size guard (e.g., 100 IDs) and batch if needed.
