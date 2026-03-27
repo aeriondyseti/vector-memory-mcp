@@ -15,7 +15,6 @@
     "session-persistence",
     "vector-search"
   ],
-  "mcpServers": "./.mcp.json",
   "hooks": "./hooks/hooks.json",
   "skills": "./skills/"
 }
