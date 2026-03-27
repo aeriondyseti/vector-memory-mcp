@@ -42,6 +42,7 @@ function averageMetrics(runs: CategoryMetrics[]): CategoryMetrics {
     meanRecallAt5: runs.reduce((s, r) => s + r.meanRecallAt5, 0) / n,
     meanReciprocalRank: runs.reduce((s, r) => s + r.meanReciprocalRank, 0) / n,
     meanNDCGAt5: runs.reduce((s, r) => s + r.meanNDCGAt5, 0) / n,
+    meanAP10: runs.reduce((s, r) => s + r.meanAP10, 0) / n,
     queryCount: runs[0].queryCount,
   };
 }

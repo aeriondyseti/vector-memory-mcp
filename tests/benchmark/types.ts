@@ -83,6 +83,8 @@ export interface QueryResult {
   reciprocalRank: number;
   /** Normalized Discounted Cumulative Gain at k=5 */
   ndcg5: number;
+  /** Average Precision at k=10 (full result list quality) */
+  ap10: number;
   /** Whether this query met its category threshold */
   passed: boolean;
 }
@@ -101,6 +103,8 @@ export interface CategoryMetrics {
   meanReciprocalRank: number;
   /** Mean NDCG@5 */
   meanNDCGAt5: number;
+  /** Mean Average Precision@10 */
+  meanAP10: number;
   /** Number of queries in this category */
   queryCount: number;
 }

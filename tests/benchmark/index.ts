@@ -17,6 +17,7 @@ export {
   recallAtK,
   reciprocalRank,
   ndcgAtK,
+  averagePrecision,
   buildRelevanceScores,
 } from "./metrics";
 export type {

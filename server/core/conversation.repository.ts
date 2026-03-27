@@ -200,7 +200,7 @@ export class ConversationRepository {
     limit: number,
     filters?: HistoryFilters
   ): Promise<ConversationHybridRow[]> {
-    const candidateCount = limit * 3;
+    const candidateCount = limit * 5;
 
     // Vector KNN search (brute-force cosine similarity in JS)
     const vecResults = knnSearch(this.db, "conversation_history_vec", embedding, candidateCount);

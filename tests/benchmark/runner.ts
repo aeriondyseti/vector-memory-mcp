@@ -25,6 +25,7 @@ import {
   recallAtK,
   reciprocalRank,
   ndcgAtK,
+  averagePrecision,
   buildRelevanceScores,
 } from "./metrics";
 
@@ -145,6 +146,7 @@ export class BenchmarkRunner {
         recall5: recallAtK(retrievedIds, relevantSet, 5),
         reciprocalRank: reciprocalRank(retrievedIds, relevantSet),
         ndcg5: ndcgAtK(retrievedIds, relevanceScores, 5),
+        ap10: averagePrecision(retrievedIds, relevantSet, 10),
         passed: false, // Set by threshold check
       };
 
@@ -222,6 +224,7 @@ export class BenchmarkRunner {
         meanRecallAt5: 0,
         meanReciprocalRank: 0,
         meanNDCGAt5: 0,
+        meanAP10: 0,
         queryCount: 0,
       };
     }
@@ -233,6 +236,7 @@ export class BenchmarkRunner {
       meanReciprocalRank:
         results.reduce((s, r) => s + r.reciprocalRank, 0) / n,
       meanNDCGAt5: results.reduce((s, r) => s + r.ndcg5, 0) / n,
+      meanAP10: results.reduce((s, r) => s + r.ap10, 0) / n,
       queryCount: n,
     };
   }

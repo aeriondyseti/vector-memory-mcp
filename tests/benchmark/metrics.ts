@@ -6,6 +6,7 @@
  * - Recall@k: Fraction of relevant items found in top-k
  * - MRR: Mean Reciprocal Rank - average 1/rank of first relevant result
  * - NDCG: Normalized Discounted Cumulative Gain - ranking quality metric
+ * - AP: Average Precision - average of precision@k at each relevant hit position
  */
 
 /**
@@ -113,6 +114,34 @@ export function ndcgAtK(
   const idcg = computeDCG(idealOrder, relevanceScores);
 
   return idcg === 0 ? 0 : dcg / idcg;
+}
+
+/**
+ * Average Precision: Mean of precision@k at each position where a relevant result appears.
+ * Captures ranking quality across the ENTIRE result list, not just the first hit (like MRR).
+ *
+ * @param retrieved - IDs of retrieved items in ranked order
+ * @param relevant - Set of relevant item IDs
+ * @param k - Number of top results to consider
+ * @returns AP value between 0 and 1
+ */
+export function averagePrecision(
+  retrieved: string[],
+  relevant: Set<string>,
+  k: number
+): number {
+  if (relevant.size === 0) return 1.0;
+  if (k <= 0) return 0;
+  const topK = retrieved.slice(0, k);
+  let hits = 0;
+  let sumPrecision = 0;
+  for (let i = 0; i < topK.length; i++) {
+    if (relevant.has(topK[i])) {
+      hits++;
+      sumPrecision += hits / (i + 1);
+    }
+  }
+  return relevant.size === 0 ? 0 : sumPrecision / relevant.size;
 }
 
 /**

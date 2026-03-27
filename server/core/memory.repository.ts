@@ -199,7 +199,7 @@ export class MemoryRepository {
     query: string,
     limit: number,
   ): Promise<HybridRow[]> {
-    const candidateLimit = limit * 3;
+    const candidateLimit = limit * 5;
 
     // Vector KNN search (brute-force cosine similarity in JS)
     const vectorResults = knnSearch(this.db, "memories_vec", embedding, candidateLimit);

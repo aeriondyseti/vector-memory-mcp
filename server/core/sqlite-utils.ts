@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 
-/** RRF constant matching the previous LanceDB reranker default */
-export const RRF_K = 60;
+/** RRF constant — lower K gives sharper top-rank discrimination in the 1/(K+rank) formula */
+export const RRF_K = 10;
 
 /**
  * Maximum parameters per SQLite query to stay within SQLITE_MAX_VARIABLE_NUMBER.

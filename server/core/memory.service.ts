@@ -6,12 +6,14 @@ import type { MemoryRepository } from "./memory.repository";
 import type { EmbeddingsService } from "./embeddings.service";
 import type { ConversationHistoryService } from "./conversation.service";
 
+// Jitter values halved from original (0.02/0.05/0.15) because RRF_K=10 produces
+// ~6x more score spread than K=60, amplifying jitter's disruption effect.
 const INTENT_PROFILES: Record<SearchIntent, IntentProfile> = {
-  continuity: { weights: { relevance: 0.3, recency: 0.5, utility: 0.2 }, jitter: 0.02 },
-  fact_check: { weights: { relevance: 0.6, recency: 0.1, utility: 0.3 }, jitter: 0.02 },
-  frequent: { weights: { relevance: 0.2, recency: 0.2, utility: 0.6 }, jitter: 0.02 },
-  associative: { weights: { relevance: 0.7, recency: 0.1, utility: 0.2 }, jitter: 0.05 },
-  explore: { weights: { relevance: 0.4, recency: 0.3, utility: 0.3 }, jitter: 0.15 },
+  continuity: { weights: { relevance: 0.3, recency: 0.5, utility: 0.2 }, jitter: 0.01 },
+  fact_check: { weights: { relevance: 0.6, recency: 0.1, utility: 0.3 }, jitter: 0.01 },
+  frequent: { weights: { relevance: 0.2, recency: 0.2, utility: 0.6 }, jitter: 0.01 },
+  associative: { weights: { relevance: 0.7, recency: 0.1, utility: 0.2 }, jitter: 0.025 },
+  explore: { weights: { relevance: 0.4, recency: 0.3, utility: 0.3 }, jitter: 0.08 },
 };
 
 const sigmoid = (x: number): number => 1 / (1 + Math.exp(-x));

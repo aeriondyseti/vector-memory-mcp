@@ -112,6 +112,7 @@ export function formatReport(
   lines.push(`  Precision@5:                 ${formatMetric(o.meanPrecisionAt5)}`);
   lines.push(`  Recall@5:                    ${formatMetric(o.meanRecallAt5)}`);
   lines.push(`  NDCG@5:                      ${formatMetric(o.meanNDCGAt5)}`);
+  lines.push(`  MAP@10:                      ${formatMetric(o.meanAP10)}`);
   lines.push("");
 
   // Check overall thresholds
@@ -163,7 +164,8 @@ export function formatReport(
       `    MRR: ${formatMetric(metrics.meanReciprocalRank)}  ` +
         `P@1: ${formatMetric(metrics.meanPrecisionAt1)}  ` +
         `R@5: ${formatMetric(metrics.meanRecallAt5)}  ` +
-        `NDCG@5: ${formatMetric(metrics.meanNDCGAt5)}`
+        `NDCG@5: ${formatMetric(metrics.meanNDCGAt5)}  ` +
+        `MAP@10: ${formatMetric(metrics.meanAP10)}`
     );
 
     // Check category thresholds
@@ -254,6 +256,7 @@ export function formatCompactSummary(results: BenchmarkResults): string {
     `Benchmark: ${passed}/${total} queries passed | ` +
     `MRR: ${formatMetric(o.meanReciprocalRank)} | ` +
     `P@1: ${formatMetric(o.meanPrecisionAt1)} | ` +
-    `R@5: ${formatMetric(o.meanRecallAt5)}`
+    `R@5: ${formatMetric(o.meanRecallAt5)} | ` +
+    `MAP@10: ${formatMetric(o.meanAP10)}`
   );
 }
