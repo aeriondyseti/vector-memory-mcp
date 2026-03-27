@@ -1,6 +1,6 @@
 {
   "name": "vector-memory",
-  "version": "2.2.6-dev.2",
+  "version": "2.2.6-dev.3",
   "description": "RAG-powered session memory with waypoints for Claude Code",
   "author": {
     "name": "AerionDyseti",
