@@ -6,7 +6,9 @@
  */
 
 import { unlinkSync } from "fs";
-import { debug, getStatePath, indexAndLoadWaypoint } from "./hooks-lib.js";
+import { debug, icon, ansi, buildSystemMessage, getStatePath, indexAndLoadWaypoint, emitHookOutput, withHookTimeout } from "./hooks-lib.js";
+
+const HOOK_TIMEOUT = 45_000;
 
 interface HookInput {
   session_id: string;
@@ -30,9 +32,20 @@ async function main() {
     }
   }
 
-  await indexAndLoadWaypoint("session-clear");
+  await withHookTimeout("session-clear", HOOK_TIMEOUT, () =>
+    indexAndLoadWaypoint("session-clear")
+  );
 }
 
 main().catch((err) => {
-  debug("session-clear", `Unhandled error: ${err instanceof Error ? err.message : String(err)}`);
+  debug("session-clear", `Fatal: ${err?.message ?? err}`);
+  emitHookOutput({
+    systemMessage: buildSystemMessage("Vector Memory", [
+      {
+        icon: icon.warning,
+        iconColor: ansi.yellow,
+        text: `Hook error: ${err?.message ?? "unknown"}`,
+      },
+    ]),
+  });
 });

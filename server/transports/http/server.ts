@@ -111,8 +111,20 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
         embeddingDimension: config.embeddingDimension,
         historyEnabled: config.conversationHistory.enabled,
         pluginMode: config.pluginMode,
+        embeddingReady: memoryService.getEmbeddings().isReady,
       },
     });
+  });
+
+  // Warmup endpoint — triggers ONNX model load if not already cached
+  app.post("/warmup", async (c) => {
+    const embeddings = memoryService.getEmbeddings();
+    if (embeddings.isReady) {
+      return c.json({ status: "already_warm" });
+    }
+    const start = Date.now();
+    await embeddings.warmup();
+    return c.json({ status: "warmed", elapsed: Date.now() - start });
   });
 
   // Search endpoint

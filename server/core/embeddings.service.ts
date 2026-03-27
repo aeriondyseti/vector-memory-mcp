@@ -23,6 +23,14 @@ export class EmbeddingsService {
     return this._dimension;
   }
 
+  get isReady(): boolean {
+    return this.session !== null;
+  }
+
+  async warmup(): Promise<void> {
+    await this.initialize();
+  }
+
   private async initialize(): Promise<void> {
     if (this.session) return;
     if (!this.initPromise) {

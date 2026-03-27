@@ -168,6 +168,41 @@ export function emitHookOutput(output: HookOutput): void {
   console.log(JSON.stringify(output));
 }
 
+/**
+ * Run a hook's main function with a self-managed timeout.
+ * If the timeout fires, emits a user-visible warning instead of dying silently.
+ * Set the external hook timeout (hooks.json) higher than this as a safety net.
+ */
+export async function withHookTimeout(
+  label: string,
+  timeoutMs: number,
+  fn: () => Promise<void>
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), timeoutMs);
+  });
+
+  const result = await Promise.race([
+    fn().then(() => "done" as const),
+    timeout,
+  ]);
+  clearTimeout(timer!);
+
+  if (result === "timeout") {
+    debug(label, `Hook timed out after ${(timeoutMs / 1000).toFixed(0)}s`);
+    emitHookOutput({
+      systemMessage: buildSystemMessage("Vector Memory", [
+        {
+          icon: icon.warning,
+          iconColor: ansi.yellow,
+          text: `Hook timed out after ${(timeoutMs / 1000).toFixed(0)}s — run ${ansi.bold}/vector-memory:waypoint-get${ansi.reset} to load manually`,
+        },
+      ]),
+    });
+  }
+}
+
 // ── Monitor state ───────────────────────────────────────────────────
 
 export const STATE_DIR = join(tmpdir(), "claude-context-monitor");
@@ -270,7 +305,13 @@ interface HealthResponse {
     embeddingModel: string;
     embeddingDimension: number;
     historyEnabled: boolean;
+    embeddingReady: boolean;
   };
+}
+
+interface WarmupResponse {
+  status: "already_warm" | "warmed";
+  elapsed?: number;
 }
 
 interface IndexResponse {
@@ -338,13 +379,34 @@ export async function indexAndLoadWaypoint(label: string): Promise<void> {
 
   debug(label, "Server healthy");
 
-  // Steps 2 & 3: Index conversations + load waypoint in parallel
+  // Step 2: Warm up ONNX model if cold (must complete before indexing)
+  if (!health.data.config.embeddingReady) {
+    debug(label, "Embedding model cold — warming up");
+    const warmup = await fetchJson<WarmupResponse>(serverUrl, "/warmup", {
+      method: "POST",
+      timeout: 30000,
+    });
+    if (warmup.ok && warmup.data.status === "warmed") {
+      const secs = ((warmup.data.elapsed ?? 0) / 1000).toFixed(1);
+      userLines.push({
+        icon: icon.bolt,
+        iconColor: ansi.yellow,
+        text: `ONNX model warmed ${ansi.dim}(${secs}s)${ansi.reset}`,
+      });
+      debug(label, `Model warmed in ${secs}s`);
+    } else if (!warmup.ok) {
+      warnings.push(`Model warmup failed: ${warmup.error}`);
+      debug(label, `Warmup failed: ${warmup.error}`);
+    }
+  }
+
+  // Step 3: Index conversations + load waypoint in parallel
   const indexPromise = health.data.config.historyEnabled
     ? fetchJson<IndexResponse>(serverUrl, "/index-conversations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: "{}",
-        timeout: 10000,
+        timeout: 30000,
       })
     : null;
 
@@ -358,7 +420,7 @@ export async function indexAndLoadWaypoint(label: string): Promise<void> {
   // Process indexing result
   if (indexResult) {
     if (!indexResult.ok) {
-      warnings.push("Conversation indexing failed");
+      warnings.push(`Conversation indexing failed: ${indexResult.error}`);
       debug(label, `Indexing failed: ${indexResult.error}`);
     } else if (indexResult.data.indexed > 0 || (indexResult.data.errors?.length ?? 0) > 0) {
       const d = indexResult.data;

@@ -5,11 +5,15 @@
  * Discovers the server, indexes conversations, and loads the latest waypoint.
  */
 
-import { debug, icon, ansi, buildSystemMessage, indexAndLoadWaypoint, emitHookOutput } from "./hooks-lib.js";
+import { debug, icon, ansi, buildSystemMessage, indexAndLoadWaypoint, emitHookOutput, withHookTimeout } from "./hooks-lib.js";
+
+const HOOK_TIMEOUT = 45_000;
 
 async function main() {
   await Bun.stdin.text();
-  await indexAndLoadWaypoint("session-start");
+  await withHookTimeout("session-start", HOOK_TIMEOUT, () =>
+    indexAndLoadWaypoint("session-start")
+  );
 }
 
 main().catch((err) => {
