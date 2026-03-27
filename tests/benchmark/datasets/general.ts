@@ -11,7 +11,7 @@
  * Distractors are included for negative testing.
  */
 
-import type { BenchmarkDataset } from "../types";
+import type { BenchmarkDataset } from "../types.js";
 
 export const generalDataset: BenchmarkDataset = {
   name: "general",

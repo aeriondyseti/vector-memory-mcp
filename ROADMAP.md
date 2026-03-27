@@ -4,6 +4,8 @@ Current version: **2.4.0**
 
 ## Tech Debt
 
+- **Switch `moduleResolution` from `nodenext` to `bundler`**: The project runs on Bun which resolves `.ts` imports natively, but `tsc --noEmit` under `nodenext` resolution requires `.js` extensions on every relative import. Switching to `"moduleResolution": "bundler"` in tsconfig would eliminate the `.js` extension requirement and match how the code actually runs. Requires stripping `.js` from all relative imports across the codebase.
+
 - **Duplicate memory formatting in `handleSearchMemories`**: The memory-only code path (default, no `include_history`) formats results inline with the same logic as `formatSearchResult` for `source: "memory"`, minus the `Source:` label. Consolidating would require adding a `Source: memory` prefix to default output, changing existing behavior. Deferred to avoid breaking consumers that parse the output.
 
 - **Inconsistent parameter validation in MCP handlers**: `handleReindexSession` validates its required `session_id` arg defensively, but other handlers (`handleStoreMemories`, `handleDeleteMemories`, `handleReportMemoryUsefulness`, etc.) trust the MCP SDK schema validation and would throw unhandled `TypeError` on missing input. Low risk today since the SDK validates before calling handlers, but fragile if handlers are ever called directly (e.g. from HTTP routes).
