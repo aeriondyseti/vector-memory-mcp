@@ -12,7 +12,7 @@
  */
 
 import { readFileSync, mkdirSync } from "fs";
-import { tmpdir } from "os";
+import { homedir, tmpdir } from "os";
 import { join } from "path";
 
 // ── ANSI escape codes ───────────────────────────────────────────────
@@ -227,6 +227,16 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Compute the Claude Code session log directory for the current project.
+ * Claude Code encodes the project path by replacing `/` with `-`,
+ * e.g. `/home/user/project` → `-home-user-project`.
+ */
+function projectSessionLogPath(): string {
+  const encoded = process.cwd().replace(/\//g, "-");
+  return join(homedir(), ".claude", "projects", encoded);
+}
+
+/**
  * Try to read the lockfile and verify the PID is alive.
  * Returns the server URL or null if the lockfile is missing/stale.
  */
@@ -405,7 +415,7 @@ export async function indexAndLoadWaypoint(label: string): Promise<void> {
     ? fetchJson<IndexResponse>(serverUrl, "/index-conversations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: "{}",
+        body: JSON.stringify({ path: projectSessionLogPath() }),
         timeout: 30000,
       })
     : null;
