@@ -6,14 +6,15 @@
  */
 
 import { unlinkSync } from "fs";
-import { debug } from "../../../server/utils/formatting.js";
-import { getStatePath, indexAndLoadWaypoint } from "./hooks-lib.js";
+import { debug, getStatePath, indexAndLoadWaypoint, withHookTimeout, runHook } from "./hooks-lib.js";
+
+const HOOK_TIMEOUT = 45_000;
 
 interface HookInput {
   session_id: string;
 }
 
-async function main() {
+runHook("session-clear", async () => {
   const input: HookInput = await Bun.stdin.json();
   if (!input.session_id) return;
 
@@ -31,9 +32,7 @@ async function main() {
     }
   }
 
-  await indexAndLoadWaypoint("session-clear");
-}
-
-main().catch((err) => {
-  debug("session-clear", `Unhandled error: ${err instanceof Error ? err.message : String(err)}`);
+  await withHookTimeout("session-clear", HOOK_TIMEOUT, () =>
+    indexAndLoadWaypoint("session-clear")
+  );
 });

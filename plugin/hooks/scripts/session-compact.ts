@@ -6,8 +6,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from "fs";
-import { debug } from "../../../server/utils/formatting.js";
-import { getStatePath } from "./hooks-lib.js";
+import { debug, getStatePath } from "./hooks-lib.js";
 
 interface HookInput {
   session_id: string;
@@ -22,7 +21,6 @@ async function main() {
 
   let state = {
     last_offset: 0,
-    turn_count: 0,
     compressions: 0,
     context_length: 0,
   };

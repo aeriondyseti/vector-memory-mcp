@@ -1,11 +1,14 @@
 #!/usr/bin/env bun
 /**
- * Stop hook for vector-memory plugin.
+ * Context health monitor for vector-memory plugin.
+ *
+ * Runs on both Stop and PostToolUse events to provide timely feedback:
+ *   - Stop: fires at end of each turn (always evaluates)
+ *   - PostToolUse: fires after each tool call during autonomous runs (throttled to every 30s)
  *
  * Monitors session health via resource pressure signals from the transcript:
- *   1. Turn count (main chain only, excludes subagent/sidechain entries)
- *   2. Context length (input_tokens + cache_read_input_tokens + cache_creation_input_tokens)
- *   3. Compression count (tracked by PreCompact hook in session-compact.ts)
+ *   1. Context length (input_tokens + cache_read_input_tokens + cache_creation_input_tokens)
+ *   2. Compression count (tracked by PreCompact hook in session-compact.ts)
  * Always approves — uses systemMessage for waypoint recommendations.
  *
  * NOTE: Never use "block" in a Stop hook for monitoring purposes. It creates
@@ -21,7 +24,18 @@ import {
   closeSync,
   statSync,
 } from "fs";
-import { getStatePath } from "./hooks-lib.js";
+import { getStatePath, emitHookOutput } from "./hooks-lib.js";
+
+/** Emit the appropriate empty/pass-through response based on hook type. */
+function emitEmpty(): void {
+  emitHookOutput(IS_THROTTLED ? {} : { decision: "approve" });
+}
+
+/** Print health message to stderr (user-visible) without injecting into model context. */
+function emitMessage(message: string): void {
+  console.error(`\n⚠️  ${message}\n`);
+  emitEmpty();
+}
 
 interface HookInput {
   session_id: string;
@@ -30,15 +44,16 @@ interface HookInput {
   reason: string;
 }
 
+// When invoked from PostToolUse, throttle to avoid running after every tool call.
+// Stop hooks always evaluate (definitive end-of-turn feedback).
+const IS_THROTTLED = process.argv.includes("--throttled");
+const THROTTLE_SECONDS = 30;
+
 // ── Configuration (matching session-monitor.py) ─────────────────────
 
-const TURN_WARN = 120;
-const TURN_STRONG = 180;
-const TURN_CRITICAL = 250;
-
-const CONTEXT_WARN = 120_000; // tokens
+const CONTEXT_WARN = 100_000; // tokens
 const CONTEXT_STRONG = 150_000;
-const CONTEXT_CRITICAL = 175_000;
+const CONTEXT_CRITICAL = 200_000;
 
 const COMPRESS_WARN = 2;
 const COMPRESS_STRONG = 4;
@@ -48,9 +63,9 @@ const COMPRESS_CRITICAL = 6;
 
 interface MonitorState {
   last_offset: number;
-  turn_count: number;
   compressions: number;
   context_length: number;
+  last_checked_at: number;
 }
 
 function loadState(sessionId: string): MonitorState {
@@ -62,9 +77,9 @@ function loadState(sessionId: string): MonitorState {
   } catch {}
   return {
     last_offset: 0,
-    turn_count: 0,
     compressions: 0,
     context_length: 0,
+    last_checked_at: 0,
   };
 }
 
@@ -116,8 +131,6 @@ function analyzeTranscript(
       // Skip sidechain (subagent) entries and API errors
       if (data.isSidechain === true || data.isApiErrorMessage) continue;
 
-      state.turn_count += 1;
-
       // Track most recent main-chain entry by timestamp
       if (data.timestamp) {
         const entryTime = new Date(data.timestamp);
@@ -154,22 +167,10 @@ function maxSeverity(a: Severity, b: Severity): Severity {
 }
 
 function evaluate(state: MonitorState): string | null {
-  const { turn_count: turns, context_length: ctx, compressions } = state;
+  const { context_length: ctx, compressions } = state;
 
   const issues: string[] = [];
   let severity: Severity = "info";
-
-  // Turn count
-  if (turns >= TURN_CRITICAL) {
-    issues.push(`Session is at ${turns} turns (critical)`);
-    severity = "critical";
-  } else if (turns >= TURN_STRONG) {
-    issues.push(`Session is at ${turns} turns (high)`);
-    severity = "strong";
-  } else if (turns >= TURN_WARN) {
-    issues.push(`Session is at ${turns} turns`);
-    severity = "warn";
-  }
 
   // Context size (tokens)
   if (ctx >= CONTEXT_CRITICAL) {
@@ -241,29 +242,41 @@ async function main() {
   const input: HookInput = await Bun.stdin.json();
 
   if (!input.transcript_path || !input.session_id) {
-    console.log(JSON.stringify({ decision: "approve" }));
+    emitEmpty();
     return;
   }
 
   let state = loadState(input.session_id);
+
+  // PostToolUse hooks are throttled to avoid running after every tool call.
+  // Stop hooks always evaluate (definitive end-of-turn feedback).
+  if (IS_THROTTLED) {
+    const elapsed = (Date.now() - state.last_checked_at) / 1000;
+    if (elapsed < THROTTLE_SECONDS) {
+      emitEmpty();
+      return;
+    }
+  }
+
+  const prevOffset = state.last_offset;
   state = analyzeTranscript(input.transcript_path, state);
   const message = evaluate(state);
-  saveState(input.session_id, state);
+  state.last_checked_at = Date.now();
+
+  // Only write state if transcript advanced or throttle timer needs updating
+  if (state.last_offset !== prevOffset || IS_THROTTLED) {
+    saveState(input.session_id, state);
+  }
 
   if (message) {
-    console.log(
-      JSON.stringify({
-        decision: "approve",
-        systemMessage: message,
-      })
-    );
+    emitMessage(message);
   } else {
-    console.log(JSON.stringify({ decision: "approve" }));
+    emitEmpty();
   }
 }
 
 main().catch(() => {
   // On error, approve silently to avoid blocking the session
-  console.log(JSON.stringify({ decision: "approve" }));
+  emitEmpty();
   process.exit(0);
 });

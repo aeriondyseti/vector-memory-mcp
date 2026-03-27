@@ -1,12 +1,18 @@
 # Roadmap
 
-Current version: **2.0.0**
+Current version: **2.4.0**
 
 ## Tech Debt
+
+- **Switch `moduleResolution` from `nodenext` to `bundler`**: The project runs on Bun which resolves `.ts` imports natively, but `tsc --noEmit` under `nodenext` resolution requires `.js` extensions on every relative import. Switching to `"moduleResolution": "bundler"` in tsconfig would eliminate the `.js` extension requirement and match how the code actually runs. Requires stripping `.js` from all relative imports across the codebase.
 
 - **Duplicate memory formatting in `handleSearchMemories`**: The memory-only code path (default, no `include_history`) formats results inline with the same logic as `formatSearchResult` for `source: "memory"`, minus the `Source:` label. Consolidating would require adding a `Source: memory` prefix to default output, changing existing behavior. Deferred to avoid breaking consumers that parse the output.
 
 - **Inconsistent parameter validation in MCP handlers**: `handleReindexSession` validates its required `session_id` arg defensively, but other handlers (`handleStoreMemories`, `handleDeleteMemories`, `handleReportMemoryUsefulness`, etc.) trust the MCP SDK schema validation and would throw unhandled `TypeError` on missing input. Low risk today since the SDK validates before calling handlers, but fragile if handlers are ever called directly (e.g. from HTTP routes).
+
+- **Hardcoded model name in `update-benchmarks.ts`**: The benchmark report bakes in `"Xenova/all-MiniLM-L6-v2 (384d)"` as a string literal. Should read from `BenchmarkRunner` or config so the report stays accurate if the model changes (especially relevant for Feature 30 — embedding model evaluation).
+
+- **Untyped transcript parsing in `context-monitor.ts`**: `analyzeTranscript()` uses `any` for parsed JSON lines from the Claude Code transcript. Should define a `TranscriptEntry` interface for the fields it reads (`message.usage`, `isSidechain`, `isApiErrorMessage`, `timestamp`) to catch schema drift early.
 
 - **N individual upserts for access tracking in `getMultiple()`**: `memory.service.ts:getMultiple()` batches the read via `findByIds` (single IN query), but fans out to N individual `repository.upsert()` calls for access tracking. Each upsert does a SELECT (existence check) + UPDATE — 2N queries total. A `bulkUpdateAccess(ids, now)` repository method using a single `UPDATE ... WHERE id IN (...)` would collapse this to 1 query. Same pattern applies to `trackAccess()`.
 
@@ -27,6 +33,8 @@ Current version: **2.0.0**
 - **`waypointId()` produces non-RFC-4122 UUID**: The deterministic project-scoped waypoint ID is SHA-256 formatted as `8-4-4-4-12` but lacks version/variant bits, making it a pseudo-UUID that could theoretically collide with `randomUUID()` values in the same table. Low risk since waypoint IDs occupy a distinct semantic slot, but should either use proper UUIDv5 or a non-UUID format (e.g. `wp:<hex>`). Deferred since multi-project waypoints are experimental.
 
 - **No normalization of `project` string in waypoint operations**: The `project` parameter flows through `set_waypoint` / `get_waypoint` without trimming or case normalization, so `"MyProject"` and `"myproject"` silently produce different waypoint slots. Add boundary normalization (e.g. trim + lowercase) or document case-sensitivity. Deferred since multi-project waypoints are experimental.
+
+- **Migration and backfill testing**: `server/core/migrations.ts` has no dedicated test coverage. The `backfillVectors()` function (which re-embeds rows missing from `_vec` tables after the vec0-to-BLOB migration) was validated manually by restarting the live server and confirming `search_memories` returned ranked results, but no automated test exists. Should cover: migration sequencing, backfill detection of missing/empty vectors, idempotent re-runs, and edge cases like zero-vector waypoints.
 
 - **In-memory vector cache for brute-force KNN**: `knnSearch()` in `sqlite-utils.ts` does a full `SELECT id, vector FROM table` on every search call. For a personal memory system (<10K records, ~15MB) this is acceptable, but a write-through `Map<string, Float32Array>` cache invalidated on insert/update/delete would eliminate repeated I/O and allocation. Becomes more important as memory count grows.
 
@@ -139,6 +147,58 @@ Investigate and (if useful) implement a "memory menu" — a curated set of high-
 No schema changes anticipated — builds on pinned/metadata flags and existing retrieval. Primarily a service-layer + tool concern.
 
 **Integration point:** The Claude Code plugin (`github.com/aeriondyseti/cc-plugins`) already implements a `SessionStart` hook that fetches the most recent waypoint and injects it into context. The memory menu should integrate with this existing hook — either by extending `get_waypoint` to include the pinned memory summary alongside the waypoint, or by exposing a dedicated `get_session_context` tool that the plugin hook calls in addition to (or instead of) `get_waypoint`. The plugin hook is the primary consumer of this feature.
+
+#### 29. Federated Cross-Project Search
+Search across multiple projects' `.vector-memory/` databases without changing the per-project storage model. Each project keeps its own `memories.db`; federation happens at query time.
+
+**Architecture:**
+- **Auto-registry**: on server startup, register the current project (name + DB path) in `~/.config/vector-memory/projects.json`. Zero config.
+- **Federated search**: when `project_scope: '*'` is passed to `search_memories`, open all registered project DBs read-only, run KNN + FTS5 per project, merge results with global RRF ranking, return with project attribution.
+- **Graceful degradation**: missing/moved DBs are skipped silently. Schema mismatches are caught per-project.
+
+**Key design decisions:**
+- No `ATTACH DATABASE` — open separate read-only `Database` connections per project. Reuses existing `knnSearch()` and FTS5 queries verbatim. Simpler and avoids schema-qualified table name issues with `bun:sqlite`.
+- Global RRF across per-project ranked lists (not simple concatenation) to avoid biasing toward projects with more matches.
+- Privacy by default: normal searches hit only the current project. Cross-project is explicit opt-in.
+
+**New files:**
+- `server/core/project-registry.ts` — read/write `projects.json`, upsert on `dbPath`
+- `server/core/federated-search.service.ts` — multi-DB search, per-project KNN + FTS5, global RRF merge
+
+**Modified files:**
+- `server/core/conversation.ts` — add `projectScope` to `SearchOptions`, `'federated_memory'` to `source` union, `projectName?` to `SearchResult`
+- `server/core/memory.service.ts` — add `FederatedSearchService` setter, branch in `search()` on `projectScope`
+- `server/transports/mcp/tools.ts` — add `project_scope: "local" | "*"` param to `search_memories`
+- `server/transports/mcp/handlers.ts` — route `project_scope`, annotate federated results with project name
+- `server/index.ts` — instantiate registry, register project, wire federated service
+
+No schema changes. No changes to per-project storage.
+
+#### 30. Embedding Model Evaluation & Search Quality Investigation
+The v2.4.0 benchmark baseline shows overall MRR of 0.403 and P@1 of 0.326 (averaged over 5 runs). Semantic queries (MRR 0.426) and related concept queries (MRR 0.304) are the weakest categories. Several areas to investigate:
+
+**Search pipeline tuning:**
+- RRF k parameter (currently k=60) — experiment with different values
+- FTS5 vs vector weight balance in hybrid scoring
+- Intent-based jitter magnitude — may be too aggressive, causing score instability across runs
+- Candidate pool size for KNN search — may be too small for related-concept queries
+- FTS5 tokenization and query preprocessing — some semantic queries produce poor FTS candidates
+
+**Embedding model alternatives:**
+Evaluate alternatives to `Xenova/all-MiniLM-L6-v2` (384d). The current model is adequate but was chosen early; newer models may offer better retrieval quality, especially for code-heavy content.
+
+**Candidates to evaluate:**
+- all-MiniLM-L12-v2 (384d, deeper — same dimensions, drop-in swap)
+- all-mpnet-base-v2 (768d — often cited as best sentence-transformers model)
+- BGE models (bge-small-en, bge-base-en)
+- GTE models (gte-small, gte-base)
+- Nomic embed models (nomic-embed-text-v1, v1.5)
+- Code-specific embedding models
+- Any strong 2025-2026 local models compatible with `@huggingface/transformers`
+
+**Evaluation criteria:** MTEB/retrieval benchmarks, model size (download + memory), speed relative to MiniLM-L6, code/developer content performance, ONNX availability for transformers.js.
+
+**Migration concern:** changing dimensions requires re-embedding all stored memories. Prefer same-dimension (384d) candidates for a non-breaking swap. If a higher-dimension model wins, implement a background re-embedding migration in `migrations.ts`.
 
 ---
 
@@ -480,6 +540,8 @@ SQLite's single-file format makes backup straightforward — a file copy or `.ba
 | 6 | Database maintenance tools | 1 | No |
 | 7 | Response size controls | 1 | No |
 | 28 | Pinned memory menu (session context) | 1 | No (builds on #3) |
+| 29 | Federated cross-project search | 1 | No |
+| 30 | Embedding model evaluation | 1 | Possible (if dimensions change) |
 | 8 | Memory archiving | 2 | Yes — `archived` column |
 | 9 | Confidence & importance levels | 2 | Yes — two `Utf8` columns |
 | 10 | TTL (auto-expiry) | 2 | Yes — `expires_at` column |

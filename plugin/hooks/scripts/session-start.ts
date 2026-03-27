@@ -5,23 +5,13 @@
  * Discovers the server, indexes conversations, and loads the latest waypoint.
  */
 
-import { debug, icon, ansi, buildSystemMessage } from "../../../server/utils/formatting.js";
-import { indexAndLoadWaypoint, emitHookOutput } from "./hooks-lib.js";
+import { indexAndLoadWaypoint, withHookTimeout, runHook } from "./hooks-lib.js";
 
-async function main() {
+const HOOK_TIMEOUT = 45_000;
+
+runHook("session-start", async () => {
   await Bun.stdin.text();
-  await indexAndLoadWaypoint("session-start");
-}
-
-main().catch((err) => {
-  debug("session-start", `Fatal: ${err?.message ?? err}`);
-  emitHookOutput({
-    systemMessage: buildSystemMessage("Vector Memory", [
-      {
-        icon: icon.warning,
-        iconColor: ansi.yellow,
-        text: `Hook error: ${err?.message ?? "unknown"}`,
-      },
-    ]),
-  });
+  await withHookTimeout("session-start", HOOK_TIMEOUT, () =>
+    indexAndLoadWaypoint("session-start")
+  );
 });

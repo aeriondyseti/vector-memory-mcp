@@ -8,7 +8,7 @@
           {
             "type": "command",
             "command": "bun ${CLAUDE_PLUGIN_ROOT}/plugin/hooks/scripts/session-start.ts",
-            "timeout": 15
+            "timeout": 60
           }
         ]
       },
@@ -18,7 +18,7 @@
           {
             "type": "command",
             "command": "bun ${CLAUDE_PLUGIN_ROOT}/plugin/hooks/scripts/session-clear.ts",
-            "timeout": 15
+            "timeout": 60
           }
         ]
       },
@@ -40,6 +40,18 @@
           {
             "type": "command",
             "command": "bun ${CLAUDE_PLUGIN_ROOT}/plugin/hooks/scripts/context-monitor.ts",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/plugin/hooks/scripts/context-monitor.ts --throttled",
             "timeout": 10
           }
         ]
