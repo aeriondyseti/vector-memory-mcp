@@ -20,7 +20,7 @@ import { execSync } from "child_process";
 
 const ROOT = join(import.meta.dir, "..");
 const PKG_PATH = join(ROOT, "package.json");
-const PLUGIN_PATH = join(ROOT, "plugin", ".claude-plugin", "plugin.json");
+const PLUGIN_PATH = join(ROOT, ".claude-plugin", "plugin.json");
 const MARKETPLACE_PATH = join(ROOT, ".claude-plugin", "marketplace.json");
 const MCP_PATH = join(ROOT, "plugin", ".mcp.json");
 const PKG_NAME = "@aeriondyseti/vector-memory-mcp";

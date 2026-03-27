@@ -1,6 +1,7 @@
 {
+  "$schema": "./schemas/plugin.schema.json",
   "name": "vector-memory",
-  "version": "2.2.6-dev.3",
+  "version": "2.2.6-dev.4",
   "description": "RAG-powered session memory with waypoints for Claude Code",
   "author": {
     "name": "AerionDyseti",
@@ -15,6 +16,7 @@
     "session-persistence",
     "vector-search"
   ],
-  "hooks": "./hooks/hooks.json",
-  "skills": "./skills/"
+  "mcpServers": "./plugin/.mcp.json",
+  "hooks": "./plugin/hooks/hooks.json",
+  "skills": "./plugin/skills/"
 }

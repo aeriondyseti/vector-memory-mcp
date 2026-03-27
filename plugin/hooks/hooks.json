@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-start.ts",
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/plugin/hooks/scripts/session-start.ts",
             "timeout": 15
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-clear.ts",
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/plugin/hooks/scripts/session-clear.ts",
             "timeout": 15
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-compact.ts",
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/plugin/hooks/scripts/session-compact.ts",
             "timeout": 5
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/context-monitor.ts",
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/plugin/hooks/scripts/context-monitor.ts",
             "timeout": 10
           }
         ]
@@ -51,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/context-monitor.ts --throttled",
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/plugin/hooks/scripts/context-monitor.ts --throttled",
             "timeout": 10
           }
         ]
