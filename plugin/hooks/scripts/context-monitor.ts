@@ -24,22 +24,17 @@ import {
   closeSync,
   statSync,
 } from "fs";
-import { getStatePath, emitHookOutput, type HookOutput } from "./hooks-lib.js";
+import { getStatePath, emitHookOutput } from "./hooks-lib.js";
 
 /** Emit the appropriate empty/pass-through response based on hook type. */
 function emitEmpty(): void {
   emitHookOutput(IS_THROTTLED ? {} : { decision: "approve" });
 }
 
-/** Emit a message via the appropriate hook output field. */
+/** Print health message to stderr (user-visible) without injecting into model context. */
 function emitMessage(message: string): void {
-  if (IS_THROTTLED) {
-    emitHookOutput({
-      hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: message },
-    });
-  } else {
-    emitHookOutput({ decision: "approve", systemMessage: message });
-  }
+  console.error(`\n⚠️  ${message}\n`);
+  emitEmpty();
 }
 
 interface HookInput {
