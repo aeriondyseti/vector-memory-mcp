@@ -21,7 +21,6 @@ async function main() {
 
   let state = {
     last_offset: 0,
-    turn_count: 0,
     compressions: 0,
     context_length: 0,
   };

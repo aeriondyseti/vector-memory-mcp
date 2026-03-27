@@ -127,41 +127,23 @@ export async function backfillVectors(
   db: Database,
   embeddings: EmbeddingsService,
 ): Promise<void> {
-  // Fast sentinel check: skip the LEFT JOIN queries entirely when backfill is done
-  const sentinel = db
-    .prepare("SELECT 1 FROM memories_vec LIMIT 1")
-    .get();
-  const memoriesExist = db.prepare("SELECT 1 FROM memories LIMIT 1").get();
-  const convosExist = db.prepare("SELECT 1 FROM conversation_history LIMIT 1").get();
+  // Quick gap check: if no rows are missing vectors, skip the expensive backfill
+  const hasMemories = db.prepare("SELECT 1 FROM memories LIMIT 1").get();
+  const hasConvos = db.prepare("SELECT 1 FROM conversation_history LIMIT 1").get();
 
-  // If vec tables have data and source tables have data, backfill is likely complete.
-  // Only run the expensive LEFT JOIN when there's reason to suspect gaps.
-  const convoSentinel = db
-    .prepare("SELECT 1 FROM conversation_history_vec LIMIT 1")
-    .get();
-  const mayNeedMemoryBackfill = memoriesExist && !sentinel;
-  const mayNeedConvoBackfill = convosExist && !convoSentinel;
+  if (!hasMemories && !hasConvos) return;
 
-  // If both vec tables are populated, do a quick count check to confirm
-  if (!mayNeedMemoryBackfill && !mayNeedConvoBackfill) {
-    if (memoriesExist) {
-      const gap = db.prepare(
-        `SELECT 1 FROM memories m LEFT JOIN memories_vec v ON m.id = v.id
-         WHERE v.id IS NULL OR length(v.vector) = 0 LIMIT 1`,
-      ).get();
-      if (!gap && convosExist) {
-        const convoGap = db.prepare(
-          `SELECT 1 FROM conversation_history c LEFT JOIN conversation_history_vec v ON c.id = v.id
-           WHERE v.id IS NULL OR length(v.vector) = 0 LIMIT 1`,
-        ).get();
-        if (!convoGap) return;
-      } else if (!gap && !convosExist) {
-        return;
-      }
-    } else {
-      return; // No data at all
-    }
-  }
+  const memoryGap = hasMemories && db.prepare(
+    `SELECT 1 FROM memories m LEFT JOIN memories_vec v ON m.id = v.id
+     WHERE v.id IS NULL OR length(v.vector) = 0 LIMIT 1`,
+  ).get();
+
+  const convoGap = hasConvos && db.prepare(
+    `SELECT 1 FROM conversation_history c LEFT JOIN conversation_history_vec v ON c.id = v.id
+     WHERE v.id IS NULL OR length(v.vector) = 0 LIMIT 1`,
+  ).get();
+
+  if (!memoryGap && !convoGap) return;
 
   // ── Memories ──────────────────────────────────────────────────────
   const missingMemories = db

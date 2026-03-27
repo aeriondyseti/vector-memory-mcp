@@ -6,7 +6,7 @@
  */
 
 import { unlinkSync } from "fs";
-import { debug, icon, ansi, buildSystemMessage, getStatePath, indexAndLoadWaypoint, emitHookOutput, withHookTimeout } from "./hooks-lib.js";
+import { debug, getStatePath, indexAndLoadWaypoint, withHookTimeout, runHook } from "./hooks-lib.js";
 
 const HOOK_TIMEOUT = 45_000;
 
@@ -14,7 +14,7 @@ interface HookInput {
   session_id: string;
 }
 
-async function main() {
+runHook("session-clear", async () => {
   const input: HookInput = await Bun.stdin.json();
   if (!input.session_id) return;
 
@@ -35,17 +35,4 @@ async function main() {
   await withHookTimeout("session-clear", HOOK_TIMEOUT, () =>
     indexAndLoadWaypoint("session-clear")
   );
-}
-
-main().catch((err) => {
-  debug("session-clear", `Fatal: ${err?.message ?? err}`);
-  emitHookOutput({
-    systemMessage: buildSystemMessage("Vector Memory", [
-      {
-        icon: icon.warning,
-        iconColor: ansi.yellow,
-        text: `Hook error: ${err?.message ?? "unknown"}`,
-      },
-    ]),
-  });
 });

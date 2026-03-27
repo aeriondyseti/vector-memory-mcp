@@ -203,6 +203,24 @@ export async function withHookTimeout(
   }
 }
 
+/**
+ * Wrap a hook's main() in a .catch() that logs and emits a user-visible error.
+ */
+export function runHook(label: string, fn: () => Promise<void>): void {
+  fn().catch((err) => {
+    debug(label, `Fatal: ${err?.message ?? err}`);
+    emitHookOutput({
+      systemMessage: buildSystemMessage("Vector Memory", [
+        {
+          icon: icon.warning,
+          iconColor: ansi.yellow,
+          text: `Hook error: ${err?.message ?? "unknown"}`,
+        },
+      ]),
+    });
+  });
+}
+
 // ── Monitor state ───────────────────────────────────────────────────
 
 export const STATE_DIR = join(tmpdir(), "claude-context-monitor");

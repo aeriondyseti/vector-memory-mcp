@@ -258,10 +258,15 @@ async function main() {
     }
   }
 
+  const prevOffset = state.last_offset;
   state = analyzeTranscript(input.transcript_path, state);
   const message = evaluate(state);
   state.last_checked_at = Date.now();
-  saveState(input.session_id, state);
+
+  // Only write state if transcript advanced or throttle timer needs updating
+  if (state.last_offset !== prevOffset || IS_THROTTLED) {
+    saveState(input.session_id, state);
+  }
 
   if (message) {
     emitMessage(message);
