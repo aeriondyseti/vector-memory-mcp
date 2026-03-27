@@ -75,19 +75,24 @@ read_only: false
 #  * `think_about_whether_you_are_done`: Thinking tool for determining whether the task is truly completed.
 #  * `write_memory`: Writes a named memory (for future reference) to Serena's project-specific memory store.
 excluded_tools:
-- 'list_memories'
-- 'read_memory'
-- 'delete_memory'
-- 'write_memory'
 
 # initial prompt for the project. It will always be given to the LLM upon activating the project
 # (contrary to the memories, which are loaded on demand).
-initial_prompt: ""
+initial_prompt: |-
+  SURGICAL EXECUTION (Serena MCP)
+  You are forbidden from using standard `sed`, `grep`, or full-file overwrites to modify source code. 
+  - Use Serena's `find_symbol` to pull the exact AST node signature.
+  - Use Serena's `find_referencing_symbols` to ensure your changes will not break dependents.
+  - Execute changes exclusively using Serena's mutation tools (`replace_symbol_body`, `insert_after_symbol`, `rename_symbol`).
+
+  Execution Loop:
+  Understand intent (Vector) -> Locate structure (Repomap) -> Verify signature (Serena) -> Mutate AST (Serena).
+
 # the name by which the project can be referenced within Serena
 project_name: "vector-memory-mcp"
 
 # list of tools to include that would otherwise be disabled (particularly optional tools that are disabled by default)
-included_optional_tools: []
+included_optional_tools:
 
 # list of mode names to that are always to be included in the set of active modes
 # The full set of modes to be activated is base_modes + default_modes.
@@ -106,25 +111,25 @@ default_modes:
 
 # fixed set of tools to use as the base tool set (if non-empty), replacing Serena's default set of tools.
 # This cannot be combined with non-empty excluded_tools or included_optional_tools.
-fixed_tools: []
+fixed_tools:
 
 # time budget (seconds) per tool call for the retrieval of additional symbol information
 # such as docstrings or parameter information.
 # This overrides the corresponding setting in the global configuration; see the documentation there.
 # If null or missing, use the setting from the global configuration.
-symbol_info_budget:
+symbol_info_budget: 
 
 # The language backend to use for this project.
 # If not set, the global setting from serena_config.yml is used.
 # Valid values: LSP, JetBrains
 # Note: the backend is fixed at startup. If a project with a different backend
 # is activated post-init, an error will be returned.
-language_backend:
+language_backend: LSP
 
 # line ending convention to use when writing source files.
 # Possible values: unset (use global setting), "lf", "crlf", or "native" (platform default)
 # This does not affect Serena's own files (e.g. memories and configuration files), which always use native line endings.
-line_ending:
+line_ending: native
 
 # list of regex patterns which, when matched, mark a memory entry as read‑only.
 # Extends the list from the global configuration, merging the two lists.

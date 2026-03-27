@@ -23,20 +23,11 @@ async function warmup(): Promise<void> {
       process.exit(1);
     }
 
-    try {
-      await import("sharp");
-      console.log("  ✓ sharp loaded");
-    } catch (e) {
-      console.error("  ✗ sharp failed:", (e as Error).message);
-      process.exit(1);
-    }
-
     console.log();
 
     // Initialize embeddings service to download model
     console.log("📥 Downloading ML model (this may take a minute)...");
     console.log(`   Model: ${config.embeddingModel}`);
-    console.log(`   Cache: ~/.cache/huggingface/`);
     console.log();
 
     const embeddings = new EmbeddingsService(
