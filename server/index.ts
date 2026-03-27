@@ -25,16 +25,14 @@ async function main(): Promise<void> {
   const overrides = parseCliArgs(args);
   const config = loadConfig(overrides);
 
-  // Initialize database
+  // Initialize database and backfill any missing vectors before services start
   const db = connectToDatabase(config.dbPath);
+  const embeddings = new EmbeddingsService(config.embeddingModel, config.embeddingDimension);
+  await backfillVectors(db, embeddings);
 
   // Initialize layers
   const repository = new MemoryRepository(db);
-  const embeddings = new EmbeddingsService(config.embeddingModel, config.embeddingDimension);
   const memoryService = new MemoryService(repository, embeddings);
-
-  // Backfill any missing vectors (e.g. after vec0-to-BLOB migration)
-  await backfillVectors(db, embeddings);
 
   if (config.pluginMode) {
     console.error("[vector-memory-mcp] Running in plugin mode");

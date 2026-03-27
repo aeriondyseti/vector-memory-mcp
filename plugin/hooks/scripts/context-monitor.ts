@@ -7,9 +7,8 @@
  *   - PostToolUse: fires after each tool call during autonomous runs (throttled to every 30s)
  *
  * Monitors session health via resource pressure signals from the transcript:
- *   1. Turn count (main chain only, excludes subagent/sidechain entries)
- *   2. Context length (input_tokens + cache_read_input_tokens + cache_creation_input_tokens)
- *   3. Compression count (tracked by PreCompact hook in session-compact.ts)
+ *   1. Context length (input_tokens + cache_read_input_tokens + cache_creation_input_tokens)
+ *   2. Compression count (tracked by PreCompact hook in session-compact.ts)
  * Always approves — uses systemMessage for waypoint recommendations.
  *
  * NOTE: Never use "block" in a Stop hook for monitoring purposes. It creates
@@ -57,10 +56,6 @@ const THROTTLE_SECONDS = 30;
 
 // ── Configuration (matching session-monitor.py) ─────────────────────
 
-const TURN_WARN = 120;
-const TURN_STRONG = 180;
-const TURN_CRITICAL = 250;
-
 const CONTEXT_WARN = 100_000; // tokens
 const CONTEXT_STRONG = 150_000;
 const CONTEXT_CRITICAL = 200_000;
@@ -73,7 +68,6 @@ const COMPRESS_CRITICAL = 6;
 
 interface MonitorState {
   last_offset: number;
-  turn_count: number;
   compressions: number;
   context_length: number;
   last_checked_at: number;
@@ -88,7 +82,6 @@ function loadState(sessionId: string): MonitorState {
   } catch {}
   return {
     last_offset: 0,
-    turn_count: 0,
     compressions: 0,
     context_length: 0,
     last_checked_at: 0,
@@ -143,8 +136,6 @@ function analyzeTranscript(
       // Skip sidechain (subagent) entries and API errors
       if (data.isSidechain === true || data.isApiErrorMessage) continue;
 
-      state.turn_count += 1;
-
       // Track most recent main-chain entry by timestamp
       if (data.timestamp) {
         const entryTime = new Date(data.timestamp);
@@ -181,22 +172,10 @@ function maxSeverity(a: Severity, b: Severity): Severity {
 }
 
 function evaluate(state: MonitorState): string | null {
-  const { turn_count: turns, context_length: ctx, compressions } = state;
+  const { context_length: ctx, compressions } = state;
 
   const issues: string[] = [];
   let severity: Severity = "info";
-
-  // Turn count
-  if (turns >= TURN_CRITICAL) {
-    issues.push(`Session is at ${turns} turns (critical)`);
-    severity = "critical";
-  } else if (turns >= TURN_STRONG) {
-    issues.push(`Session is at ${turns} turns (high)`);
-    severity = "strong";
-  } else if (turns >= TURN_WARN) {
-    issues.push(`Session is at ${turns} turns`);
-    severity = "warn";
-  }
 
   // Context size (tokens)
   if (ctx >= CONTEXT_CRITICAL) {
