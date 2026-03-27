@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
-import type { EmbeddingsService } from "./embeddings.service.js";
-import { serializeVector } from "./sqlite-utils.js";
+import type { EmbeddingsService } from "./embeddings.service";
+import { serializeVector } from "./sqlite-utils";
 
 /**
  * Pre-migration step: remove vec0 virtual table entries from sqlite_master

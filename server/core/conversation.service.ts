@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { dirname, join } from "path";
-import type { ConversationRepository } from "./conversation.repository.js";
+import type { ConversationRepository } from "./conversation.repository";
 import type {
   ConversationChunk,
   ConversationHybridRow,
@@ -10,12 +10,12 @@ import type {
   ParsedMessage,
   SessionFileInfo,
   SessionIndexDetail,
-} from "./conversation.js";
-import type { ConversationHistoryConfig } from "../config/index.js";
-import { resolveSessionLogPath } from "../config/index.js";
-import type { EmbeddingsService } from "./embeddings.service.js";
-import type { SessionLogParser } from "./parsers/types.js";
-import { ClaudeCodeSessionParser } from "./parsers/claude-code.parser.js";
+} from "./conversation";
+import type { ConversationHistoryConfig } from "../config/index";
+import { resolveSessionLogPath } from "../config/index";
+import type { EmbeddingsService } from "./embeddings.service";
+import type { SessionLogParser } from "./parsers/types";
+import { ClaudeCodeSessionParser } from "./parsers/claude-code.parser";
 
 /**
  * Generate a deterministic chunk ID from session ID and message indices.
@@ -78,12 +78,7 @@ export function chunkMessages(
       messageIndexEnd: lastMsg.messageIndex,
       project: firstMsg.project,
       metadata: {
-        session_id: firstMsg.sessionId,
         timestamp: firstMsg.timestamp.toISOString(),
-        role,
-        message_index_start: firstMsg.messageIndex,
-        message_index_end: lastMsg.messageIndex,
-        project: firstMsg.project,
         git_branch: firstMsg.gitBranch,
         is_subagent: firstMsg.isSubagent,
         agent_id: firstMsg.agentId,
@@ -273,20 +268,24 @@ export class ConversationHistoryService {
       this.config.chunkOverlap
     );
 
-    // Delete existing chunks for re-indexing
-    await this.repository.deleteBySessionId(file.sessionId);
-
-    // Embed all chunks
+    // Embed all chunks FIRST (pure computation, no DB side effects)
     const embeddings = await this.embeddings.embedBatch(
       chunks.map((c) => c.content)
     );
 
-    // Insert all chunks
+    // Build rows
     const rows = chunks.map((chunk, i) => ({
       id: chunk.id,
       vector: embeddings[i],
       content: chunk.content,
-      metadata: JSON.stringify(chunk.metadata),
+      metadata: JSON.stringify({
+        ...chunk.metadata,
+        session_id: chunk.sessionId,
+        role: chunk.role,
+        message_index_start: chunk.messageIndexStart,
+        message_index_end: chunk.messageIndexEnd,
+        project: chunk.project,
+      }),
       created_at: chunk.timestamp.getTime(),
       session_id: chunk.sessionId,
       role: chunk.role,
@@ -295,7 +294,8 @@ export class ConversationHistoryService {
       project: chunk.project,
     }));
 
-    await this.repository.insertBatch(rows);
+    // Atomically replace old chunks with new ones
+    await this.repository.replaceSession(file.sessionId, rows);
 
     // Update index state
     const session: IndexedSession = {

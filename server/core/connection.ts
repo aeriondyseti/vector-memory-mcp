@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync } from "fs";
 import { dirname } from "path";
-import { removeVec0Tables, runMigrations } from "./migrations.js";
+import { removeVec0Tables, runMigrations } from "./migrations";
 
 /**
  * Open (or create) a SQLite database at the given path

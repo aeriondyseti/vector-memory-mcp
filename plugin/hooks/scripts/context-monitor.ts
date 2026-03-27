@@ -24,7 +24,7 @@ import {
   closeSync,
   statSync,
 } from "fs";
-import { getStatePath, emitHookOutput } from "./hooks-lib.js";
+import { getStatePath, emitHookOutput } from "./hooks-lib";
 
 /** Emit the appropriate empty/pass-through response based on hook type. */
 function emitEmpty(): void {
@@ -92,6 +92,21 @@ function saveState(sessionId: string, state: MonitorState): void {
 
 // ── Transcript analysis ─────────────────────────────────────────────
 
+interface TranscriptEntry {
+  message?: {
+    usage?: {
+      input_tokens?: number;
+      cache_read_input_tokens?: number;
+      cache_creation_input_tokens?: number;
+    };
+  };
+  isSidechain?: boolean;
+  isApiErrorMessage?: boolean;
+  timestamp?: string;
+}
+
+type TranscriptUsage = NonNullable<NonNullable<TranscriptEntry["message"]>["usage"]>;
+
 function analyzeTranscript(
   transcriptPath: string,
   state: MonitorState
@@ -111,14 +126,14 @@ function analyzeTranscript(
 
     // Track the most recent main-chain entry for context length
     // (matching ccstatusline's approach)
-    let mostRecentMainChainUsage: any = null;
+    let mostRecentMainChainUsage: TranscriptUsage | null = null;
     let mostRecentTimestamp: Date | null = null;
 
     for (const line of newContent.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
 
-      let data: any;
+      let data: TranscriptEntry;
       try {
         data = JSON.parse(trimmed);
       } catch {

@@ -1,7 +1,7 @@
 import { readFile, readdir, stat } from "fs/promises";
 import { basename, dirname, join } from "path";
-import type { ParsedMessage, SessionFileInfo } from "../conversation.js";
-import type { SessionLogParser } from "./types.js";
+import type { ParsedMessage, SessionFileInfo } from "../conversation";
+import type { SessionLogParser } from "./types";
 
 // UUID pattern for session IDs
 const UUID_PATTERN =
@@ -45,7 +45,7 @@ export class ClaudeCodeSessionParser implements SessionLogParser {
     const fileName = basename(filePath, ".jsonl");
     const parentDir = basename(dirname(filePath));
     // Check if this is inside a subagents directory
-    const isSubagentFile = filePath.includes("/subagents/");
+    const isSubagentFile = /[/\\]subagents[/\\]/.test(filePath);
 
     // For subagent files, project dir is 3 levels up: <project>/<session>/subagents/<file>
     // For main files, project dir is direct parent

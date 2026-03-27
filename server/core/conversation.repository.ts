@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import type {
   ConversationHybridRow,
   HistoryFilters,
-} from "./conversation.js";
+} from "./conversation";
 import {
   serializeVector,
   safeParseJsonObject,
@@ -10,7 +10,7 @@ import {
   hybridRRF,
   topByRRF,
   knnSearch,
-} from "./sqlite-utils.js";
+} from "./sqlite-utils";
 
 export class ConversationRepository {
   constructor(private db: Database) {}
@@ -105,6 +105,95 @@ export class ConversationRepository {
     tx();
   }
 
+  async replaceSession(
+    sessionId: string,
+    rows: Array<{
+      id: string;
+      vector: number[];
+      content: string;
+      metadata: string;
+      created_at: number;
+      session_id: string;
+      role: string;
+      message_index_start: number;
+      message_index_end: number;
+      project: string;
+    }>
+  ): Promise<void> {
+    const insertMain = this.db.prepare(
+      `INSERT OR REPLACE INTO conversation_history
+        (id, content, metadata, created_at, session_id, role, message_index_start, message_index_end, project)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const deleteVec = this.db.prepare(
+      `DELETE FROM conversation_history_vec WHERE id = ?`
+    );
+    const insertVec = this.db.prepare(
+      `INSERT INTO conversation_history_vec (id, vector) VALUES (?, ?)`
+    );
+    const deleteFts = this.db.prepare(
+      `DELETE FROM conversation_history_fts WHERE id = ?`
+    );
+    const insertFts = this.db.prepare(
+      `INSERT INTO conversation_history_fts (id, content) VALUES (?, ?)`
+    );
+
+    const tx = this.db.transaction(() => {
+      // Delete old chunks first
+      const idRows = this.db
+        .prepare(`SELECT id FROM conversation_history WHERE session_id = ?`)
+        .all(sessionId) as Array<{ id: string }>;
+
+      if (idRows.length > 0) {
+        const ids = idRows.map((r) => r.id);
+        const placeholders = ids.map(() => "?").join(", ");
+        this.db
+          .prepare(
+            `DELETE FROM conversation_history_vec WHERE id IN (${placeholders})`
+          )
+          .run(...ids);
+        this.db
+          .prepare(
+            `DELETE FROM conversation_history_fts WHERE id IN (${placeholders})`
+          )
+          .run(...ids);
+        this.db
+          .prepare(`DELETE FROM conversation_history WHERE session_id = ?`)
+          .run(sessionId);
+      }
+
+      // Insert new chunks
+      for (const row of rows) {
+        insertMain.run(
+          row.id,
+          row.content,
+          row.metadata,
+          row.created_at,
+          row.session_id,
+          row.role,
+          row.message_index_start,
+          row.message_index_end,
+          row.project
+        );
+        deleteVec.run(row.id);
+        insertVec.run(row.id, serializeVector(row.vector));
+        deleteFts.run(row.id);
+        insertFts.run(row.id, row.content);
+      }
+    });
+
+    tx();
+  }
+
+  /**
+   * Hybrid search combining vector KNN and FTS5, fused with Reciprocal Rank Fusion.
+   *
+   * NOTE: Filters (session, role, project, date) are applied AFTER candidate selection
+   * and RRF scoring, not pushed into the KNN/FTS queries. This is an intentional
+   * performance tradeoff — KNN is brute-force JS-side (no SQL pre-filter possible),
+   * and filtering post-RRF avoids duplicating filter logic across both retrieval paths.
+   * The consequence is that filtered queries may return fewer than `limit` results.
+   */
   async findHybrid(
     embedding: number[],
     query: string,

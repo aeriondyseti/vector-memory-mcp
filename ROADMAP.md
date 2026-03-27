@@ -1,40 +1,8 @@
 # Roadmap
 
-Current version: **2.4.0**
+Current version: **2.4.4**
 
 ## Tech Debt
-
-- **Switch `moduleResolution` from `nodenext` to `bundler`**: The project runs on Bun which resolves `.ts` imports natively, but `tsc --noEmit` under `nodenext` resolution requires `.js` extensions on every relative import. Switching to `"moduleResolution": "bundler"` in tsconfig would eliminate the `.js` extension requirement and match how the code actually runs. Requires stripping `.js` from all relative imports across the codebase.
-
-- **Duplicate memory formatting in `handleSearchMemories`**: The memory-only code path (default, no `include_history`) formats results inline with the same logic as `formatSearchResult` for `source: "memory"`, minus the `Source:` label. Consolidating would require adding a `Source: memory` prefix to default output, changing existing behavior. Deferred to avoid breaking consumers that parse the output.
-
-- **Inconsistent parameter validation in MCP handlers**: `handleReindexSession` validates its required `session_id` arg defensively, but other handlers (`handleStoreMemories`, `handleDeleteMemories`, `handleReportMemoryUsefulness`, etc.) trust the MCP SDK schema validation and would throw unhandled `TypeError` on missing input. Low risk today since the SDK validates before calling handlers, but fragile if handlers are ever called directly (e.g. from HTTP routes).
-
-- **Hardcoded model name in `update-benchmarks.ts`**: The benchmark report bakes in `"Xenova/all-MiniLM-L6-v2 (384d)"` as a string literal. Should read from `BenchmarkRunner` or config so the report stays accurate if the model changes (especially relevant for Feature 30 — embedding model evaluation).
-
-- **Untyped transcript parsing in `context-monitor.ts`**: `analyzeTranscript()` uses `any` for parsed JSON lines from the Claude Code transcript. Should define a `TranscriptEntry` interface for the fields it reads (`message.usage`, `isSidechain`, `isApiErrorMessage`, `timestamp`) to catch schema drift early.
-
-- **N individual upserts for access tracking in `getMultiple()`**: `memory.service.ts:getMultiple()` batches the read via `findByIds` (single IN query), but fans out to N individual `repository.upsert()` calls for access tracking. Each upsert does a SELECT (existence check) + UPDATE — 2N queries total. A `bulkUpdateAccess(ids, now)` repository method using a single `UPDATE ... WHERE id IN (...)` would collapse this to 1 query. Same pattern applies to `trackAccess()`.
-
-- **Unbounded IN clause in `findByIds()`**: `memory.repository.ts:findByIds()` builds a SQL IN clause from an unbounded array of IDs. SQLite has a default SQLITE_MAX_VARIABLE_NUMBER limit (usually 999). Add a size guard (e.g., 100 IDs) and batch if needed.
-
-- **GitHub Actions Node.js 20 deprecation**: `actions/checkout@v4` and `actions/setup-node@v4` run on Node.js 20, which GitHub will force to Node.js 24 starting June 2, 2026. Update to newer action versions that support Node.js 24 before then.
-
-- **Non-atomic delete-insert in conversation reindexing**: `conversation.service.ts` calls `deleteBySessionId()` before `embedBatch()`/`insertBatch()`. If embedding or insert fails after delete, the session's chunks are lost until the next re-index. Wrap in a SQLite transaction or insert-then-delete to make it crash-safe.
-
-- **ConversationChunk field duplication**: `ConversationChunk` duplicates `sessionId`, `role`, `messageIndexStart`, `messageIndexEnd`, and `project` at both the top level and inside `metadata`. Consolidate to one location to eliminate divergence risk.
-
-- **Conversation search filters applied post-candidate selection**: `conversation.repository.ts` runs KNN/FTS without applying session/role/date filters, then filters after RRF scoring. This can return fewer than `limit` results. Intentional performance tradeoff — document or push filters into candidate queries.
-
-- **Platform-dependent path separator in subagent detection**: `claude-code.parser.ts` uses hardcoded `/subagents/` check which won't match on Windows. Low priority since Bun runtime is Linux/macOS focused, but should use `path.sep` or a regex for correctness.
-
-- **Parameter sprawl in `MemoryService.search()`**: `limit` and `includeDeleted` are positional arguments while `offset`, `historyOnly`, etc. live in the `SearchOptions` bag. Consolidate all search-shaping params into `SearchOptions` for a cleaner `search(query, intent, options?)` signature.
-
-- **`waypointId()` produces non-RFC-4122 UUID**: The deterministic project-scoped waypoint ID is SHA-256 formatted as `8-4-4-4-12` but lacks version/variant bits, making it a pseudo-UUID that could theoretically collide with `randomUUID()` values in the same table. Low risk since waypoint IDs occupy a distinct semantic slot, but should either use proper UUIDv5 or a non-UUID format (e.g. `wp:<hex>`). Deferred since multi-project waypoints are experimental.
-
-- **No normalization of `project` string in waypoint operations**: The `project` parameter flows through `set_waypoint` / `get_waypoint` without trimming or case normalization, so `"MyProject"` and `"myproject"` silently produce different waypoint slots. Add boundary normalization (e.g. trim + lowercase) or document case-sensitivity. Deferred since multi-project waypoints are experimental.
-
-- **Migration and backfill testing**: `server/core/migrations.ts` has no dedicated test coverage. The `backfillVectors()` function (which re-embeds rows missing from `_vec` tables after the vec0-to-BLOB migration) was validated manually by restarting the live server and confirming `search_memories` returned ranked results, but no automated test exists. Should cover: migration sequencing, backfill detection of missing/empty vectors, idempotent re-runs, and edge cases like zero-vector waypoints.
 
 - **In-memory vector cache for brute-force KNN**: `knnSearch()` in `sqlite-utils.ts` does a full `SELECT id, vector FROM table` on every search call. For a personal memory system (<10K records, ~15MB) this is acceptable, but a write-through `Map<string, Float32Array>` cache invalidated on insert/update/delete would eliminate repeated I/O and allocation. Becomes more important as memory count grows.
 
@@ -45,6 +13,24 @@ Current version: **2.4.0**
 - **Multi-project waypoint support**: `set_waypoint` and `get_waypoint` now use deterministic per-project IDs (SHA-256 of project name). Each project gets its own waypoint slot instead of sharing a single global slot (`UUID_ZERO`). The legacy no-project path still reads/writes `UUID_ZERO` for backwards compatibility. This feature is experimental and may be removed or redesigned.
 
 ## Completed
+
+### v2.4.4 — Tech Debt Cleanup
+- Switched `moduleResolution` from `nodenext` to `bundler`; stripped `.js` from all 176 relative imports
+- Added `batchedQuery()` utility and `SQLITE_BATCH_SIZE` constant; `findByIds()` now batches IN clauses
+- Added `bulkUpdateAccess()` to `MemoryRepository`; `getMultiple()` and `trackAccess()` use single UPDATE instead of N upserts
+- Made conversation re-indexing atomic: embed first, then `replaceSession()` does delete+insert in one transaction
+- Consolidated `search()` API from `(query, intent, limit, includeDeleted, options?)` to `(query, intent, options?)`
+- Added `requireString()` handler validation for `report_memory_usefulness` and `set_waypoint`
+- Defined `TranscriptEntry` interface in `context-monitor.ts`, replacing `any` annotations
+- Removed duplicated fields from `ConversationChunkMetadata`; top-level `ConversationChunk` is source of truth
+- Extracted `formatSearchResult()` helper from inline formatting in `handleSearchMemories`
+- Exported `MODEL_NAME`/`MODEL_DIMENSION` from benchmark runner; replaced hardcoded string in `update-benchmarks.ts`
+- Documented post-filter design tradeoff in `findHybrid()` JSDoc
+- Used cross-platform regex for subagent path detection
+- Added project string normalization (`trim().toLowerCase()`) in `waypointId()`
+- Switched waypoint IDs from pseudo-UUID to `wp:<hex>` format with legacy fallback migration
+- Added 14 migration and backfill tests (`tests/migrations.test.ts`)
+- Verified GitHub Actions already uses `actions/checkout@v6` (Node.js 20 deprecation resolved)
 
 ### Post-v2.1.1 — Quick Wins Batch 1
 - Extracted `errorResult()` helper in `handlers.ts`, replacing 11 inline error-response constructions (tech debt)

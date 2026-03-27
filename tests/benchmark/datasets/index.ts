@@ -2,4 +2,4 @@
  * Benchmark Datasets
  */
 
-export { generalDataset } from "./general.js";
+export { generalDataset } from "./general";

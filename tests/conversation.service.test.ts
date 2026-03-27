@@ -2,12 +2,12 @@ import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { ConversationHistoryService, chunkMessages } from "../server/core/conversation.service.js";
-import type { ConversationRepository } from "../server/core/conversation.repository.js";
-import type { EmbeddingsService } from "../server/core/embeddings.service.js";
-import type { SessionLogParser } from "../server/core/parsers/types.js";
-import type { ConversationHistoryConfig } from "../server/config/index.js";
-import type { ParsedMessage, SessionFileInfo, ConversationHybridRow } from "../server/core/conversation.js";
+import { ConversationHistoryService, chunkMessages } from "../server/core/conversation.service";
+import type { ConversationRepository } from "../server/core/conversation.repository";
+import type { EmbeddingsService } from "../server/core/embeddings.service";
+import type { SessionLogParser } from "../server/core/parsers/types";
+import type { ConversationHistoryConfig } from "../server/config/index";
+import type { ParsedMessage, SessionFileInfo, ConversationHybridRow } from "../server/core/conversation";
 
 // --- Helpers ---
 
@@ -44,6 +44,7 @@ function createMockRepository(): ConversationRepository {
   return {
     insertBatch: mock(() => Promise.resolve()),
     deleteBySessionId: mock(() => Promise.resolve()),
+    replaceSession: mock(() => Promise.resolve()),
     findHybrid: mock(() => Promise.resolve([])),
   } as unknown as ConversationRepository;
 }
@@ -150,8 +151,8 @@ describe("ConversationHistoryService", () => {
 
       // Verify embeddings were generated
       expect(mockEmbeddings.embedBatch).toHaveBeenCalled();
-      // Verify chunks were inserted
-      expect(mockRepo.insertBatch).toHaveBeenCalled();
+      // Verify chunks were atomically replaced
+      expect(mockRepo.replaceSession).toHaveBeenCalled();
     });
 
     test("skips unchanged session files", async () => {
@@ -179,13 +180,13 @@ describe("ConversationHistoryService", () => {
 
       // First pass — indexes
       await service.indexConversations("/tmp");
-      expect(mockRepo.insertBatch).toHaveBeenCalledTimes(1);
+      expect(mockRepo.replaceSession).toHaveBeenCalledTimes(1);
 
       // Second pass — same lastModified, should skip
       const result = await service.indexConversations("/tmp");
       expect(result.indexed).toBe(0);
       expect(result.skipped).toBe(1);
-      expect(mockRepo.insertBatch).toHaveBeenCalledTimes(1); // No additional call
+      expect(mockRepo.replaceSession).toHaveBeenCalledTimes(1); // No additional call
     });
 
     test("re-indexes when file lastModified changes", async () => {
@@ -229,8 +230,8 @@ describe("ConversationHistoryService", () => {
       const result = await service.indexConversations("/tmp");
       expect(result.indexed).toBe(1);
       expect(result.skipped).toBe(0);
-      // Should have deleted old chunks first
-      expect(mockRepo.deleteBySessionId).toHaveBeenCalledWith("session-1");
+      // Should have atomically replaced old chunks with new ones
+      expect(mockRepo.replaceSession).toHaveBeenCalledWith("session-1", expect.any(Array));
     });
 
     test("handles parse errors gracefully", async () => {
@@ -409,8 +410,8 @@ describe("ConversationHistoryService", () => {
       const result = await service.reindexSession("session-1");
       expect(result.success).toBe(true);
       expect(result.chunkCount).toBeGreaterThan(0);
-      // Should have called deleteBySessionId again for re-index
-      expect(mockRepo.deleteBySessionId).toHaveBeenCalledWith("session-1");
+      // Should have called replaceSession for the re-index
+      expect(mockRepo.replaceSession).toHaveBeenCalledWith("session-1", expect.any(Array));
     });
   });
 

@@ -8,7 +8,7 @@
  *   bun test --preload ./tests/preload.ts
  */
 
-import { warmupModel, getModelState } from "./utils/model-loader.js";
+import { warmupModel, getModelState } from "./utils/model-loader";
 
 console.log("🔄 Warming up embedding model...");
 const startTime = Date.now();
@@ -26,4 +26,4 @@ if (state.available) {
 }
 
 // Export for use in test setup
-export { warmupModel, getModelState } from "./utils/model-loader.js";
+export { warmupModel, getModelState } from "./utils/model-loader";

@@ -1,9 +1,9 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { MemoryService } from "../../core/memory.service.js";
-import type { ConversationHistoryService } from "../../core/conversation.service.js";
-import type { SearchIntent } from "../../core/memory.js";
-import type { HistoryFilters, SearchResult } from "../../core/conversation.js";
-import { DEBUG } from "../../config/index.js";
+import type { MemoryService } from "../../core/memory.service";
+import type { ConversationHistoryService } from "../../core/conversation.service";
+import type { SearchIntent } from "../../core/memory";
+import type { HistoryFilters, SearchResult } from "../../core/conversation";
+import { DEBUG } from "../../config/index";
 
 /**
  * Safely coerce a tool argument to an array. Handles the case where the MCP
@@ -49,6 +49,14 @@ function parseDate(value: unknown, fieldName: string): Date | undefined {
     throw new Error(`${fieldName} is not a valid date`);
   }
   return date;
+}
+
+function requireString(args: Record<string, unknown> | undefined, field: string): string {
+  const value = args?.[field];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${field} is required`);
+  }
+  return value;
 }
 
 export async function handleStoreMemories(
@@ -189,7 +197,9 @@ export async function handleSearchMemories(
     return errorResult(errorText(e));
   }
 
-  const results = await service.search(query, intent, limit, includeDeleted, {
+  const results = await service.search(query, intent, {
+    limit,
+    includeDeleted,
     includeHistory,
     historyOnly,
     historyFilters,
@@ -202,19 +212,7 @@ export async function handleSearchMemories(
     };
   }
 
-  const formatted = results.map((r: SearchResult) => {
-    let result = `[${r.source}] ID: ${r.id}\nContent: ${r.content}`;
-    if (r.metadata && Object.keys(r.metadata).length > 0) {
-      result += `\nMetadata: ${JSON.stringify(r.metadata)}`;
-    }
-    if (r.source === "memory" && includeDeleted && r.supersededBy) {
-      result += `\n[DELETED]`;
-    }
-    if (r.source === "conversation_history" && r.sessionId) {
-      result += `\nSession: ${r.sessionId}`;
-    }
-    return result;
-  });
+  const formatted = results.map((r) => formatSearchResult(r, includeDeleted));
 
   return {
     content: [{ type: "text", text: formatted.join("\n\n---\n\n") }],
@@ -237,6 +235,20 @@ function formatMemoryDetail(
   result += `\nUpdated: ${memory.updatedAt.toISOString()}`;
   if (memory.supersededBy) {
     result += `\nSuperseded by: ${memory.supersededBy}`;
+  }
+  return result;
+}
+
+function formatSearchResult(r: SearchResult, includeDeleted: boolean): string {
+  let result = `[${r.source}] ID: ${r.id}\nContent: ${r.content}`;
+  if (r.metadata && Object.keys(r.metadata).length > 0) {
+    result += `\nMetadata: ${JSON.stringify(r.metadata)}`;
+  }
+  if (r.source === "memory" && includeDeleted && r.supersededBy) {
+    result += `\n[DELETED]`;
+  }
+  if (r.source === "conversation_history" && r.sessionId) {
+    result += `\nSession: ${r.sessionId}`;
   }
   return result;
 }
@@ -267,8 +279,11 @@ export async function handleReportMemoryUsefulness(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const memoryId = args?.memory_id as string;
-  const useful = args?.useful as boolean;
+  const memoryId = requireString(args, "memory_id");
+  const useful = args?.useful;
+  if (typeof useful !== "boolean") {
+    return errorResult("useful is required and must be a boolean");
+  }
 
   const memory = await service.vote(memoryId, useful ? 1 : -1);
 
@@ -290,10 +305,19 @@ export async function handleSetWaypoint(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
+  let project: string;
+  let summary: string;
+  try {
+    project = requireString(args, "project");
+    summary = requireString(args, "summary");
+  } catch (e) {
+    return errorResult(errorText(e));
+  }
+
   const memory = await service.setWaypoint({
-    project: args?.project as string,
+    project,
     branch: args?.branch as string | undefined,
-    summary: args?.summary as string,
+    summary,
     completed: (args?.completed as string[] | undefined) ?? [],
     in_progress_blocked: (args?.in_progress_blocked as string[] | undefined) ?? [],
     key_decisions: (args?.key_decisions as string[] | undefined) ?? [],

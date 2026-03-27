@@ -8,28 +8,28 @@
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { connectToDatabase } from "../../server/core/connection.js";
-import { MemoryRepository } from "../../server/core/memory.repository.js";
-import { EmbeddingsService } from "../../server/core/embeddings.service.js";
-import { MemoryService } from "../../server/core/memory.service.js";
+import { connectToDatabase } from "../../server/core/connection";
+import { MemoryRepository } from "../../server/core/memory.repository";
+import { EmbeddingsService } from "../../server/core/embeddings.service";
+import { MemoryService } from "../../server/core/memory.service";
 import type {
   BenchmarkDataset,
   BenchmarkResults,
   CategoryMetrics,
   QueryCategory,
   QueryResult,
-} from "./types.js";
-import type { SearchIntent } from "../../server/core/memory.js";
+} from "./types";
+import type { SearchIntent } from "../../server/core/memory";
 import {
   precisionAtK,
   recallAtK,
   reciprocalRank,
   ndcgAtK,
   buildRelevanceScores,
-} from "./metrics.js";
+} from "./metrics";
 
-const MODEL_NAME = "Xenova/all-MiniLM-L6-v2";
-const MODEL_DIMENSION = 384;
+export const MODEL_NAME = "Xenova/all-MiniLM-L6-v2";
+export const MODEL_DIMENSION = 384;
 
 /**
  * Thresholds for pass/fail by query category.
@@ -115,7 +115,7 @@ export class BenchmarkRunner {
       // Run search - fetch more than needed to measure recall
       // Use "fact_check" intent for benchmarks as it emphasizes relevance
       const intent: SearchIntent = "fact_check";
-      const results = await this.service.search(query.query, intent, 10);
+      const results = await this.service.search(query.query, intent, { limit: 10 });
       const retrievedIds = results.map((m) => m.id);
 
       // Map expected IDs to actual stored IDs

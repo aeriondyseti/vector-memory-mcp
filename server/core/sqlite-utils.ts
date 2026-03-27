@@ -4,6 +4,28 @@ import type { Database } from "bun:sqlite";
 export const RRF_K = 60;
 
 /**
+ * Maximum parameters per SQLite query to stay within SQLITE_MAX_VARIABLE_NUMBER.
+ */
+export const SQLITE_BATCH_SIZE = 100;
+
+/**
+ * Execute a query in batches when the number of parameters exceeds SQLITE_BATCH_SIZE.
+ * Splits the ids array and concatenates results.
+ */
+export function batchedQuery<T>(
+  db: Database,
+  ids: string[],
+  queryFn: (batch: string[]) => T[]
+): T[] {
+  if (ids.length <= SQLITE_BATCH_SIZE) return queryFn(ids);
+  const results: T[] = [];
+  for (let i = 0; i < ids.length; i += SQLITE_BATCH_SIZE) {
+    results.push(...queryFn(ids.slice(i, i + SQLITE_BATCH_SIZE)));
+  }
+  return results;
+}
+
+/**
  * Serialize a number[] embedding to raw float32 bytes for BLOB storage.
  */
 export function serializeVector(vec: number[]): Buffer {

@@ -1,10 +1,10 @@
 import { randomUUID, createHash } from "crypto";
-import type { Memory, SearchIntent, IntentProfile, HybridRow } from "./memory.js";
-import { isDeleted } from "./memory.js";
-import type { SearchResult, SearchOptions } from "./conversation.js";
-import type { MemoryRepository } from "./memory.repository.js";
-import type { EmbeddingsService } from "./embeddings.service.js";
-import type { ConversationHistoryService } from "./conversation.service.js";
+import type { Memory, SearchIntent, IntentProfile, HybridRow } from "./memory";
+import { isDeleted } from "./memory";
+import type { SearchResult, SearchOptions } from "./conversation";
+import type { MemoryRepository } from "./memory.repository";
+import type { EmbeddingsService } from "./embeddings.service";
+import type { ConversationHistoryService } from "./conversation.service";
 
 const INTENT_PROFILES: Record<SearchIntent, IntentProfile> = {
   continuity: { weights: { relevance: 0.3, recency: 0.5, utility: 0.2 }, jitter: 0.02 },
@@ -87,19 +87,10 @@ export class MemoryService {
   async getMultiple(ids: string[]): Promise<Memory[]> {
     if (ids.length === 0) return [];
     const memories = await this.repository.findByIds(ids);
-    // Track access in bulk
     const now = new Date();
-    const live = memories.filter((m) => !isDeleted(m));
-    await Promise.all(
-      live.map((m) =>
-        this.repository.upsert({
-          ...m,
-          accessCount: m.accessCount + 1,
-          lastAccessed: now,
-        })
-      )
-    );
-    return live;
+    const liveIds = memories.filter((m) => !isDeleted(m)).map((m) => m.id);
+    this.repository.bulkUpdateAccess(liveIds, now);
+    return memories.filter((m) => !isDeleted(m));
   }
 
   async delete(id: string): Promise<boolean> {
@@ -186,10 +177,10 @@ export class MemoryService {
   async search(
     query: string,
     intent: SearchIntent,
-    limit: number = 10,
-    includeDeleted: boolean = false,
     options?: SearchOptions
   ): Promise<SearchResult[]> {
+    const limit = options?.limit ?? 10;
+    const includeDeleted = options?.includeDeleted ?? false;
     const queryEmbedding = await this.embeddings.embed(query);
     const profile = INTENT_PROFILES[intent];
     const now = new Date();
@@ -272,19 +263,7 @@ export class MemoryService {
 
   async trackAccess(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
-    const memories = await this.repository.findByIds(ids);
-    const now = new Date();
-    await Promise.all(
-      memories
-        .filter((m) => !isDeleted(m))
-        .map((m) =>
-          this.repository.upsert({
-            ...m,
-            accessCount: m.accessCount + 1,
-            lastAccessed: now,
-          })
-        )
-    );
+    this.repository.bulkUpdateAccess(ids, new Date());
   }
 
   private static readonly UUID_ZERO =
@@ -292,8 +271,16 @@ export class MemoryService {
 
   private static waypointId(project?: string): string {
     if (!project?.length) return MemoryService.UUID_ZERO;
-    const hex = createHash("sha256").update(`waypoint:${project}`).digest("hex");
-    // Format as UUID: 8-4-4-4-12
+    const normalized = project.trim().toLowerCase();
+    const hex = createHash("sha256").update(`waypoint:${normalized}`).digest("hex");
+    return `wp:${hex.slice(0, 32)}`;
+  }
+
+  /** Legacy UUID-formatted waypoint ID for migration fallback reads. */
+  private static legacyWaypointId(project?: string): string | null {
+    if (!project?.length) return null; // UUID_ZERO is still current for no-project
+    const normalized = project.trim().toLowerCase();
+    const hex = createHash("sha256").update(`waypoint:${normalized}`).digest("hex");
     return [
       hex.slice(0, 8),
       hex.slice(8, 12),
@@ -386,6 +373,20 @@ ${list(args.memory_ids)}`;
   }
 
   async getLatestWaypoint(project?: string): Promise<Memory | null> {
-    return await this.get(MemoryService.waypointId(project));
+    const waypoint = await this.get(MemoryService.waypointId(project));
+    if (waypoint) return waypoint;
+
+    // Fallback: try legacy UUID-formatted waypoint ID and migrate on read
+    const legacyId = MemoryService.legacyWaypointId(project);
+    if (!legacyId) return null;
+
+    const legacy = await this.repository.findById(legacyId);
+    if (!legacy) return null;
+
+    // Migrate: write under new ID, delete old
+    const newId = MemoryService.waypointId(project);
+    await this.repository.upsert({ ...legacy, id: newId });
+    await this.repository.markDeleted(legacyId);
+    return { ...legacy, id: newId };
   }
 }

@@ -3,11 +3,11 @@ import { cors } from "hono/cors";
 import { createServer } from "net";
 import { writeFileSync, mkdirSync, unlinkSync } from "fs";
 import { join } from "path";
-import type { MemoryService } from "../../core/memory.service.js";
-import type { Config } from "../../config/index.js";
-import { isDeleted } from "../../core/memory.js";
-import { createMcpRoutes } from "./mcp-transport.js";
-import type { Memory, SearchIntent } from "../../core/memory.js";
+import type { MemoryService } from "../../core/memory.service";
+import type { Config } from "../../config/index";
+import { isDeleted } from "../../core/memory";
+import { createMcpRoutes } from "./mcp-transport";
+import type { Memory, SearchIntent } from "../../core/memory";
 
 
 /**
@@ -139,7 +139,7 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
         return c.json({ error: "Missing or invalid 'query' field" }, 400);
       }
 
-      const results = await memoryService.search(query, intent, limit);
+      const results = await memoryService.search(query, intent, { limit });
 
       return c.json({
         results: results.map((r) => ({

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { parseCliArgs, loadConfig } from "../server/config/index.js";
+import { parseCliArgs, loadConfig } from "../server/config/index";
 
 describe("parseCliArgs", () => {
   test("returns empty overrides for no args", () => {

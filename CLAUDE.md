@@ -136,7 +136,7 @@ This repo ships two independent artifacts from one codebase:
 - **Classes**: PascalCase (`MemoryService`)
 - **Functions/methods**: camelCase (`findById`)
 - **Constants**: SCREAMING_SNAKE_CASE (`DEFAULT_HTTP_PORT`)
-- **Imports**: include `.js` extension (NodeNext resolution); use `import type` for type-only imports
+- **Imports**: no `.js` extensions (Bundler resolution); use `import type` for type-only imports
 - **No JSDoc**: TypeScript types serve as documentation
 - **No linter/formatter**: Bun/TypeScript handles style; follow existing patterns
 - **No console.log**: except server startup messages
@@ -147,6 +147,10 @@ This repo ships two independent artifacts from one codebase:
 - `bun run test:quick` / `bun test` skip embedding-dependent tests (faster iteration)
 - `bun run test:coverage` for coverage reports
 - Run a specific file: `bun test tests/memory.test.ts`
+
+## Memory Usage
+
+Be proactive about saving memories. Any time something potentially useful for future sessions happens — decisions, debugging insights, architectural rationale, gotchas, user preferences, workarounds, or anything that took effort to figure out — store a memory immediately. Err on the side of saving too many; memories get pruned over time, so over-saving is far better than forgetting.
 
 ## Important Conventions
 

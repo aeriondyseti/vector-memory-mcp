@@ -7,12 +7,14 @@ import {
   hybridRRF,
   topByRRF,
   knnSearch,
-} from "./sqlite-utils.js";
+  batchedQuery,
+  SQLITE_BATCH_SIZE,
+} from "./sqlite-utils";
 import {
   type Memory,
   type HybridRow,
   DELETED_TOMBSTONE,
-} from "./memory.js";
+} from "./memory";
 
 export class MemoryRepository {
   constructor(private db: Database) {}
@@ -144,14 +146,16 @@ export class MemoryRepository {
   async findByIds(ids: string[]): Promise<Memory[]> {
     if (ids.length === 0) return [];
 
-    const placeholders = ids.map(() => "?").join(", ");
-    const rows = this.db
-      .prepare(`SELECT * FROM memories WHERE id IN (${placeholders})`)
-      .all(...ids) as Array<Record<string, unknown>>;
+    return batchedQuery(this.db, ids, (batch) => {
+      const placeholders = batch.map(() => "?").join(", ");
+      const rows = this.db
+        .prepare(`SELECT * FROM memories WHERE id IN (${placeholders})`)
+        .all(...batch) as Array<Record<string, unknown>>;
 
-    return rows.map((row) => {
-      const embedding = this.getEmbedding(row.id as string);
-      return this.rowToMemory(row, embedding);
+      return rows.map((row) => {
+        const embedding = this.getEmbedding(row.id as string);
+        return this.rowToMemory(row, embedding);
+      });
     });
   }
 
@@ -163,6 +167,28 @@ export class MemoryRepository {
       .run(DELETED_TOMBSTONE, Date.now(), id);
 
     return result.changes > 0;
+  }
+
+  /**
+   * Increment access_count and update last_accessed for multiple memories in batch.
+   * Uses batched IN clauses to stay within SQLite parameter limits.
+   */
+  bulkUpdateAccess(ids: string[], now: Date): void {
+    if (ids.length === 0) return;
+    const ts = now.getTime();
+
+    const runBatch = (batch: string[]) => {
+      const placeholders = batch.map(() => "?").join(", ");
+      this.db
+        .prepare(
+          `UPDATE memories SET access_count = access_count + 1, last_accessed = ? WHERE id IN (${placeholders})`
+        )
+        .run(ts, ...batch);
+    };
+
+    for (let i = 0; i < ids.length; i += SQLITE_BATCH_SIZE) {
+      runBatch(ids.slice(i, i + SQLITE_BATCH_SIZE));
+    }
   }
 
   /**
