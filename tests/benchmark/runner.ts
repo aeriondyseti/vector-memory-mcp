@@ -28,8 +28,8 @@ import {
   buildRelevanceScores,
 } from "./metrics";
 
-const MODEL_NAME = "Xenova/all-MiniLM-L6-v2";
-const MODEL_DIMENSION = 384;
+export const MODEL_NAME = "Xenova/all-MiniLM-L6-v2";
+export const MODEL_DIMENSION = 384;
 
 /**
  * Thresholds for pass/fail by query category.

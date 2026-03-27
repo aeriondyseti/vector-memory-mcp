@@ -185,6 +185,15 @@ export class ConversationRepository {
     tx();
   }
 
+  /**
+   * Hybrid search combining vector KNN and FTS5, fused with Reciprocal Rank Fusion.
+   *
+   * NOTE: Filters (session, role, project, date) are applied AFTER candidate selection
+   * and RRF scoring, not pushed into the KNN/FTS queries. This is an intentional
+   * performance tradeoff — KNN is brute-force JS-side (no SQL pre-filter possible),
+   * and filtering post-RRF avoids duplicating filter logic across both retrieval paths.
+   * The consequence is that filtered queries may return fewer than `limit` results.
+   */
   async findHybrid(
     embedding: number[],
     query: string,

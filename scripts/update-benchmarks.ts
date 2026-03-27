@@ -12,7 +12,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
-import { BenchmarkRunner } from "../tests/benchmark/runner";
+import { BenchmarkRunner, MODEL_NAME, MODEL_DIMENSION } from "../tests/benchmark/runner";
 import { generalDataset } from "../tests/benchmark/datasets/index";
 import type {
   BenchmarkResults,
@@ -105,7 +105,7 @@ const lines: string[] = [];
 lines.push(`## v${version} (${date})`);
 lines.push("");
 lines.push(
-  `**Model:** Xenova/all-MiniLM-L6-v2 (384d) | ` +
+  `**Model:** ${MODEL_NAME} (${MODEL_DIMENSION}d) | ` +
   `**Dataset:** ${generalDataset.name} (${generalDataset.memories.length} memories, ${generalDataset.queries.length} queries) | ` +
   `**Queries passed:** ~${avgPassed}/${total} | ` +
   `**Averaged over ${RUNS} runs**`

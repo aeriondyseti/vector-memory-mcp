@@ -271,7 +271,8 @@ export class MemoryService {
 
   private static waypointId(project?: string): string {
     if (!project?.length) return MemoryService.UUID_ZERO;
-    const hex = createHash("sha256").update(`waypoint:${project}`).digest("hex");
+    const normalized = project.trim().toLowerCase();
+    const hex = createHash("sha256").update(`waypoint:${normalized}`).digest("hex");
     // Format as UUID: 8-4-4-4-12
     return [
       hex.slice(0, 8),

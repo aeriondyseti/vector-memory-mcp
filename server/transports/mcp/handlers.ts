@@ -212,19 +212,7 @@ export async function handleSearchMemories(
     };
   }
 
-  const formatted = results.map((r: SearchResult) => {
-    let result = `[${r.source}] ID: ${r.id}\nContent: ${r.content}`;
-    if (r.metadata && Object.keys(r.metadata).length > 0) {
-      result += `\nMetadata: ${JSON.stringify(r.metadata)}`;
-    }
-    if (r.source === "memory" && includeDeleted && r.supersededBy) {
-      result += `\n[DELETED]`;
-    }
-    if (r.source === "conversation_history" && r.sessionId) {
-      result += `\nSession: ${r.sessionId}`;
-    }
-    return result;
-  });
+  const formatted = results.map((r) => formatSearchResult(r, includeDeleted));
 
   return {
     content: [{ type: "text", text: formatted.join("\n\n---\n\n") }],
@@ -247,6 +235,20 @@ function formatMemoryDetail(
   result += `\nUpdated: ${memory.updatedAt.toISOString()}`;
   if (memory.supersededBy) {
     result += `\nSuperseded by: ${memory.supersededBy}`;
+  }
+  return result;
+}
+
+function formatSearchResult(r: SearchResult, includeDeleted: boolean): string {
+  let result = `[${r.source}] ID: ${r.id}\nContent: ${r.content}`;
+  if (r.metadata && Object.keys(r.metadata).length > 0) {
+    result += `\nMetadata: ${JSON.stringify(r.metadata)}`;
+  }
+  if (r.source === "memory" && includeDeleted && r.supersededBy) {
+    result += `\n[DELETED]`;
+  }
+  if (r.source === "conversation_history" && r.sessionId) {
+    result += `\nSession: ${r.sessionId}`;
   }
   return result;
 }
