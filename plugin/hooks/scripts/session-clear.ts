@@ -6,8 +6,7 @@
  */
 
 import { unlinkSync } from "fs";
-import { debug } from "../../../server/utils/formatting.js";
-import { getStatePath, indexAndLoadWaypoint } from "./hooks-lib.js";
+import { debug, getStatePath, indexAndLoadWaypoint } from "./hooks-lib.js";
 
 interface HookInput {
   session_id: string;
