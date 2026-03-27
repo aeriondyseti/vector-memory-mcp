@@ -51,6 +51,14 @@ function parseDate(value: unknown, fieldName: string): Date | undefined {
   return date;
 }
 
+function requireString(args: Record<string, unknown> | undefined, field: string): string {
+  const value = args?.[field];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${field} is required`);
+  }
+  return value;
+}
+
 export async function handleStoreMemories(
   args: Record<string, unknown> | undefined,
   service: MemoryService
@@ -269,8 +277,11 @@ export async function handleReportMemoryUsefulness(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const memoryId = args?.memory_id as string;
-  const useful = args?.useful as boolean;
+  const memoryId = requireString(args, "memory_id");
+  const useful = args?.useful;
+  if (typeof useful !== "boolean") {
+    return errorResult("useful is required and must be a boolean");
+  }
 
   const memory = await service.vote(memoryId, useful ? 1 : -1);
 
@@ -292,10 +303,19 @@ export async function handleSetWaypoint(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
+  let project: string;
+  let summary: string;
+  try {
+    project = requireString(args, "project");
+    summary = requireString(args, "summary");
+  } catch (e) {
+    return errorResult(errorText(e));
+  }
+
   const memory = await service.setWaypoint({
-    project: args?.project as string,
+    project,
     branch: args?.branch as string | undefined,
-    summary: args?.summary as string,
+    summary,
     completed: (args?.completed as string[] | undefined) ?? [],
     in_progress_blocked: (args?.in_progress_blocked as string[] | undefined) ?? [],
     key_decisions: (args?.key_decisions as string[] | undefined) ?? [],

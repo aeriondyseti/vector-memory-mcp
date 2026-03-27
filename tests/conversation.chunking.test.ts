@@ -81,12 +81,15 @@ describe("chunkMessages", () => {
   test("sets metadata correctly", () => {
     const messages = [makeMessage(0), makeMessage(1)];
     const chunks = chunkMessages(messages, 5, 0);
-    const meta = chunks[0].metadata;
-    expect(meta.session_id).toBe("session-1");
-    expect(meta.project).toBe("test-project");
-    expect(meta.message_index_start).toBe(0);
-    expect(meta.message_index_end).toBe(1);
-    expect(meta.is_subagent).toBe(false);
+    const chunk = chunks[0];
+    // Top-level fields are source of truth
+    expect(chunk.sessionId).toBe("session-1");
+    expect(chunk.project).toBe("test-project");
+    expect(chunk.messageIndexStart).toBe(0);
+    expect(chunk.messageIndexEnd).toBe(1);
+    // Metadata-only fields
+    expect(chunk.metadata.is_subagent).toBe(false);
+    expect(chunk.metadata.timestamp).toBe(messages[0].timestamp.toISOString());
   });
 
   test("always advances at least 1 message to prevent infinite loops", () => {

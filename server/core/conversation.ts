@@ -14,12 +14,7 @@ export interface ParsedMessage {
 
 /** Metadata stored per conversation chunk in the database */
 export interface ConversationChunkMetadata {
-  session_id: string;
   timestamp: string;
-  role: string;
-  message_index_start: number;
-  message_index_end: number;
-  project: string;
   git_branch?: string;
   is_subagent: boolean;
   agent_id?: string;
