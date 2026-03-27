@@ -5,23 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.3.0] - 2026-03-26
+## [2.4.0] - 2026-03-27
 
 ### Added
-- **Plugin setup hook**: New `plugin-setup.sh` SessionStart hook that auto-installs dependencies and warms up the embedding model on first plugin use. Uses a cached hash of `package.json` to skip reinstalls when nothing changed.
+- **ONNX Runtime embeddings**: Replaced `@huggingface/transformers` with direct `onnxruntime-node` + `@huggingface/tokenizers`. Downloads ONNX model files on demand, runs inference directly via ONNX Runtime with manual mean pooling + normalization. Faster cold-start and smaller install footprint.
+- **Model warmup endpoint**: `EmbeddingsService` gains `isReady` getter and `warmup()` method. HTTP server exposes `POST /warmup` endpoint and `embeddingReady` field in health response. Session-start hook warms the model before indexing to prevent cold-start timeouts.
+- **Project-scoped conversation indexing**: Session-start hook now computes the project-specific session log path and passes it to `POST /index-conversations`, instead of scanning all projects (~327 sessions).
+- **Hook timeout utility**: `withHookTimeout()` in hooks-lib.ts wraps hook main functions with self-managed timeouts that emit user-visible warnings instead of dying silently.
+- **Plugin setup hook**: New `plugin-setup.sh` SessionStart hook that auto-installs dependencies and warms up the embedding model on first plugin use.
+- **Benchmark tracking**: `bun run benchmark:update` snapshots search quality metrics (MRR, P@1, P@5, R@5, NDCG@5) into BENCHMARKS.md, averaged over multiple runs.
 
 ### Fixed
 - **Context monitor for autonomous sessions**: Run context monitor on `PostToolUse` events, not just `Notification`, so it fires during autonomous agent sessions.
 - **Port collision test stability**: Stabilized flaky port collision test with deterministic port allocation.
 - **Vector backfill after migration**: Backfill missing vectors in `_vec` tables after the vec0-to-BLOB migration, ensuring search works immediately after upgrade.
+- **Plugin manifest detection**: Fixed marketplace and MCP server detection issues with plugin directory structure.
 
 ### Changed
+- **Self-contained plugin directory**: `plugin/` has zero imports from `server/`. Shared utilities (ANSI codes, icons, message builders) are duplicated in `plugin/hooks/scripts/hooks-lib.ts`.
 - **Removed legacy LanceDB migration code**: Dropped `@lancedb/lancedb` and `apache-arrow` dependencies and all associated migration paths. Users on 1.x must upgrade through 2.2.x first.
+- **Removed RC branch tier**: Simplified release flow to `dev` → `main` only. No more `rc/*` branches.
 - **Removed publish skill**: Publishing workflow now documented in CLAUDE.md instead of a skill file.
-
-### Roadmap
-- Added Feature 29: Federated cross-project search (search across multiple projects' databases)
-- Added Feature 30: Embedding model evaluation (alternatives to all-MiniLM-L6-v2)
 
 ## [2.2.3] - 2026-03-23
 
@@ -242,7 +246,7 @@ LanceDB (`@lancedb/lancedb`, `apache-arrow`) ships as a production dependency in
 - Initial MCP server implementation
 - Basic project structure
 
-[2.3.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v2.2.3...v2.3.0
+[2.4.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v2.2.3...v2.4.0
 [2.0.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.0.1...v1.0.2

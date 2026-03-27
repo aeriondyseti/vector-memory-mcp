@@ -1,6 +1,6 @@
 # Roadmap
 
-Current version: **2.3.0-rc.2**
+Current version: **2.4.0**
 
 ## Tech Debt
 
@@ -168,7 +168,17 @@ Search across multiple projects' `.vector-memory/` databases without changing th
 
 No schema changes. No changes to per-project storage.
 
-#### 30. Embedding Model Evaluation
+#### 30. Embedding Model Evaluation & Search Quality Investigation
+The v2.4.0 benchmark baseline shows overall MRR of 0.403 and P@1 of 0.326 (averaged over 5 runs). Semantic queries (MRR 0.426) and related concept queries (MRR 0.304) are the weakest categories. Several areas to investigate:
+
+**Search pipeline tuning:**
+- RRF k parameter (currently k=60) — experiment with different values
+- FTS5 vs vector weight balance in hybrid scoring
+- Intent-based jitter magnitude — may be too aggressive, causing score instability across runs
+- Candidate pool size for KNN search — may be too small for related-concept queries
+- FTS5 tokenization and query preprocessing — some semantic queries produce poor FTS candidates
+
+**Embedding model alternatives:**
 Evaluate alternatives to `Xenova/all-MiniLM-L6-v2` (384d). The current model is adequate but was chosen early; newer models may offer better retrieval quality, especially for code-heavy content.
 
 **Candidates to evaluate:**

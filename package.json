@@ -1,6 +1,6 @@
 {
   "name": "@aeriondyseti/vector-memory-mcp",
-  "version": "2.2.6-dev.6",
+  "version": "2.4.0",
   "description": "A zero-configuration RAG memory server for MCP clients",
   "type": "module",
   "main": "server/index.ts",
@@ -30,6 +30,7 @@
     "test:quick": "bun test",
     "test:coverage": "bun test --preload ./tests/preload.ts --coverage",
     "benchmark": "bun test tests/benchmark.test.ts --preload ./tests/preload.ts",
+    "benchmark:update": "bun run scripts/update-benchmarks.ts",
     "test:preload": "bun run tests/preload.ts",
     "smoke": "bun run scripts/smoke-test.ts",
     "warmup": "bun run scripts/warmup.ts",
