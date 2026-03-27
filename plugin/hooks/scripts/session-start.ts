@@ -5,7 +5,7 @@
  * Discovers the server, indexes conversations, and loads the latest waypoint.
  */
 
-import { indexAndLoadWaypoint, withHookTimeout, runHook } from "./hooks-lib.js";
+import { indexAndLoadWaypoint, withHookTimeout, runHook } from "./hooks-lib";
 
 const HOOK_TIMEOUT = 45_000;
 

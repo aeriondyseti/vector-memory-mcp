@@ -2,7 +2,7 @@
 /**
  * ANSI color test hook — verifies hook-output module rendering.
  */
-import { ansi, icon, buildSystemMessage, debug, emitHookOutput } from "./hooks-lib.js";
+import { ansi, icon, buildSystemMessage, debug, emitHookOutput } from "./hooks-lib";
 
 // Read stdin (hook protocol)
 await Bun.stdin.text();

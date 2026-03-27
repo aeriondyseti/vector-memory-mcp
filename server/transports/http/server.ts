@@ -3,11 +3,11 @@ import { cors } from "hono/cors";
 import { createServer } from "net";
 import { writeFileSync, mkdirSync, unlinkSync } from "fs";
 import { join } from "path";
-import type { MemoryService } from "../../core/memory.service.js";
-import type { Config } from "../../config/index.js";
-import { isDeleted } from "../../core/memory.js";
-import { createMcpRoutes } from "./mcp-transport.js";
-import type { Memory, SearchIntent } from "../../core/memory.js";
+import type { MemoryService } from "../../core/memory.service";
+import type { Config } from "../../config/index";
+import { isDeleted } from "../../core/memory";
+import { createMcpRoutes } from "./mcp-transport";
+import type { Memory, SearchIntent } from "../../core/memory";
 
 
 /**

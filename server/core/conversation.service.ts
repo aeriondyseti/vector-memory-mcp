@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { dirname, join } from "path";
-import type { ConversationRepository } from "./conversation.repository.js";
+import type { ConversationRepository } from "./conversation.repository";
 import type {
   ConversationChunk,
   ConversationHybridRow,
@@ -10,12 +10,12 @@ import type {
   ParsedMessage,
   SessionFileInfo,
   SessionIndexDetail,
-} from "./conversation.js";
-import type { ConversationHistoryConfig } from "../config/index.js";
-import { resolveSessionLogPath } from "../config/index.js";
-import type { EmbeddingsService } from "./embeddings.service.js";
-import type { SessionLogParser } from "./parsers/types.js";
-import { ClaudeCodeSessionParser } from "./parsers/claude-code.parser.js";
+} from "./conversation";
+import type { ConversationHistoryConfig } from "../config/index";
+import { resolveSessionLogPath } from "../config/index";
+import type { EmbeddingsService } from "./embeddings.service";
+import type { SessionLogParser } from "./parsers/types";
+import { ClaudeCodeSessionParser } from "./parsers/claude-code.parser";
 
 /**
  * Generate a deterministic chunk ID from session ID and message indices.

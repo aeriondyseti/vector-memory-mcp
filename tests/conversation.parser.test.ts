@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
-import { ClaudeCodeSessionParser } from "../server/core/parsers/claude-code.parser.js";
+import { ClaudeCodeSessionParser } from "../server/core/parsers/claude-code.parser";
 
 const TEST_DIR = join(import.meta.dir, ".test-sessions");
 const PROJECT_DIR = join(TEST_DIR, "-home-user-project");

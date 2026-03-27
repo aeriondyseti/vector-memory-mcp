@@ -2,12 +2,12 @@ import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { ConversationHistoryService, chunkMessages } from "../server/core/conversation.service.js";
-import type { ConversationRepository } from "../server/core/conversation.repository.js";
-import type { EmbeddingsService } from "../server/core/embeddings.service.js";
-import type { SessionLogParser } from "../server/core/parsers/types.js";
-import type { ConversationHistoryConfig } from "../server/config/index.js";
-import type { ParsedMessage, SessionFileInfo, ConversationHybridRow } from "../server/core/conversation.js";
+import { ConversationHistoryService, chunkMessages } from "../server/core/conversation.service";
+import type { ConversationRepository } from "../server/core/conversation.repository";
+import type { EmbeddingsService } from "../server/core/embeddings.service";
+import type { SessionLogParser } from "../server/core/parsers/types";
+import type { ConversationHistoryConfig } from "../server/config/index";
+import type { ParsedMessage, SessionFileInfo, ConversationHybridRow } from "../server/core/conversation";
 
 // --- Helpers ---
 

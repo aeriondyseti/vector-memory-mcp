@@ -24,7 +24,7 @@ import {
   closeSync,
   statSync,
 } from "fs";
-import { getStatePath, emitHookOutput } from "./hooks-lib.js";
+import { getStatePath, emitHookOutput } from "./hooks-lib";
 
 /** Emit the appropriate empty/pass-through response based on hook type. */
 function emitEmpty(): void {

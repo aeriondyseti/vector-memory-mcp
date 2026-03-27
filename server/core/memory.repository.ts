@@ -7,12 +7,12 @@ import {
   hybridRRF,
   topByRRF,
   knnSearch,
-} from "./sqlite-utils.js";
+} from "./sqlite-utils";
 import {
   type Memory,
   type HybridRow,
   DELETED_TOMBSTONE,
-} from "./memory.js";
+} from "./memory";
 
 export class MemoryRepository {
   constructor(private db: Database) {}

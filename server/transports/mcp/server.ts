@@ -6,12 +6,12 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { resources, readResource } from "./resources.js";
+import { resources, readResource } from "./resources";
 
-import { tools } from "./tools.js";
-import { handleToolCall } from "./handlers.js";
-import type { MemoryService } from "../../core/memory.service.js";
-import { VERSION } from "../../config/index.js";
+import { tools } from "./tools";
+import { handleToolCall } from "./handlers";
+import type { MemoryService } from "../../core/memory.service";
+import { VERSION } from "../../config/index";
 
 export const SERVER_INSTRUCTIONS = `This server is the user's canonical memory system. It provides persistent, semantic vector memory that survives across conversations and sessions.
 

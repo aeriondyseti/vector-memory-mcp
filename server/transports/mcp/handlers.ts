@@ -1,9 +1,9 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { MemoryService } from "../../core/memory.service.js";
-import type { ConversationHistoryService } from "../../core/conversation.service.js";
-import type { SearchIntent } from "../../core/memory.js";
-import type { HistoryFilters, SearchResult } from "../../core/conversation.js";
-import { DEBUG } from "../../config/index.js";
+import type { MemoryService } from "../../core/memory.service";
+import type { ConversationHistoryService } from "../../core/conversation.service";
+import type { SearchIntent } from "../../core/memory";
+import type { HistoryFilters, SearchResult } from "../../core/conversation";
+import { DEBUG } from "../../config/index";
 
 /**
  * Safely coerce a tool argument to an array. Handles the case where the MCP

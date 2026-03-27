@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
 
-import { loadConfig, parseCliArgs } from "./config/index.js";
-import { connectToDatabase } from "./core/connection.js";
-import { backfillVectors } from "./core/migrations.js";
-import { MemoryRepository } from "./core/memory.repository.js";
-import { ConversationRepository } from "./core/conversation.repository.js";
-import { EmbeddingsService } from "./core/embeddings.service.js";
-import { MemoryService } from "./core/memory.service.js";
-import { ConversationHistoryService } from "./core/conversation.service.js";
-import { startServer } from "./transports/mcp/server.js";
-import { startHttpServer } from "./transports/http/server.js";
+import { loadConfig, parseCliArgs } from "./config/index";
+import { connectToDatabase } from "./core/connection";
+import { backfillVectors } from "./core/migrations";
+import { MemoryRepository } from "./core/memory.repository";
+import { ConversationRepository } from "./core/conversation.repository";
+import { EmbeddingsService } from "./core/embeddings.service";
+import { MemoryService } from "./core/memory.service";
+import { ConversationHistoryService } from "./core/conversation.service";
+import { startServer } from "./transports/mcp/server";
+import { startHttpServer } from "./transports/http/server";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);

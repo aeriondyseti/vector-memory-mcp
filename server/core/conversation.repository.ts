@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import type {
   ConversationHybridRow,
   HistoryFilters,
-} from "./conversation.js";
+} from "./conversation";
 import {
   serializeVector,
   safeParseJsonObject,
@@ -10,7 +10,7 @@ import {
   hybridRRF,
   topByRRF,
   knnSearch,
-} from "./sqlite-utils.js";
+} from "./sqlite-utils";
 
 export class ConversationRepository {
   constructor(private db: Database) {}

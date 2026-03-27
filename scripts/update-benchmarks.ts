@@ -12,13 +12,13 @@
 
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
-import { BenchmarkRunner } from "../tests/benchmark/runner.js";
-import { generalDataset } from "../tests/benchmark/datasets/index.js";
+import { BenchmarkRunner } from "../tests/benchmark/runner";
+import { generalDataset } from "../tests/benchmark/datasets/index";
 import type {
   BenchmarkResults,
   CategoryMetrics,
   QueryCategory,
-} from "../tests/benchmark/types.js";
+} from "../tests/benchmark/types";
 
 const BENCHMARKS_PATH = join(import.meta.dir, "..", "BENCHMARKS.md");
 const RUNS = 5;

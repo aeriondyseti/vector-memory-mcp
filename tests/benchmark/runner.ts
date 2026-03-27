@@ -8,25 +8,25 @@
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { connectToDatabase } from "../../server/core/connection.js";
-import { MemoryRepository } from "../../server/core/memory.repository.js";
-import { EmbeddingsService } from "../../server/core/embeddings.service.js";
-import { MemoryService } from "../../server/core/memory.service.js";
+import { connectToDatabase } from "../../server/core/connection";
+import { MemoryRepository } from "../../server/core/memory.repository";
+import { EmbeddingsService } from "../../server/core/embeddings.service";
+import { MemoryService } from "../../server/core/memory.service";
 import type {
   BenchmarkDataset,
   BenchmarkResults,
   CategoryMetrics,
   QueryCategory,
   QueryResult,
-} from "./types.js";
-import type { SearchIntent } from "../../server/core/memory.js";
+} from "./types";
+import type { SearchIntent } from "../../server/core/memory";
 import {
   precisionAtK,
   recallAtK,
   reciprocalRank,
   ndcgAtK,
   buildRelevanceScores,
-} from "./metrics.js";
+} from "./metrics";
 
 const MODEL_NAME = "Xenova/all-MiniLM-L6-v2";
 const MODEL_DIMENSION = 384;

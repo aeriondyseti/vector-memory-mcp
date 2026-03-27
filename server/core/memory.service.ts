@@ -1,10 +1,10 @@
 import { randomUUID, createHash } from "crypto";
-import type { Memory, SearchIntent, IntentProfile, HybridRow } from "./memory.js";
-import { isDeleted } from "./memory.js";
-import type { SearchResult, SearchOptions } from "./conversation.js";
-import type { MemoryRepository } from "./memory.repository.js";
-import type { EmbeddingsService } from "./embeddings.service.js";
-import type { ConversationHistoryService } from "./conversation.service.js";
+import type { Memory, SearchIntent, IntentProfile, HybridRow } from "./memory";
+import { isDeleted } from "./memory";
+import type { SearchResult, SearchOptions } from "./conversation";
+import type { MemoryRepository } from "./memory.repository";
+import type { EmbeddingsService } from "./embeddings.service";
+import type { ConversationHistoryService } from "./conversation.service";
 
 const INTENT_PROFILES: Record<SearchIntent, IntentProfile> = {
   continuity: { weights: { relevance: 0.3, recency: 0.5, utility: 0.2 }, jitter: 0.02 },
