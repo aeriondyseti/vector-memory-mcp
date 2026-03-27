@@ -31,7 +31,10 @@ const version: string = explicit ?? pkg.version;
 
 // ── Detect branch and resolve dist-tag ──────────────────────────────
 
-function getCurrentBranch(): string {
+function getCurrentRef(): string {
+  // In GitHub Actions, git may be in detached HEAD state (e.g. tag checkouts).
+  // Use GITHUB_REF_NAME which is always set correctly.
+  if (process.env.GITHUB_REF_NAME) return process.env.GITHUB_REF_NAME;
   try {
     return execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf-8" }).trim();
   } catch {
@@ -39,13 +42,15 @@ function getCurrentBranch(): string {
   }
 }
 
-function resolveDistTag(branch: string): string {
-  if (branch === "main") return "latest";
-  if (branch.startsWith("rc/")) return "rc";
+function resolveDistTag(ref: string): string {
+  // Tag pushes (v2.4.0, etc.) resolve to @latest
+  if (/^v\d/.test(ref)) return "latest";
+  if (ref === "main") return "latest";
+  if (ref.startsWith("rc/")) return "rc";
   return "dev";
 }
 
-const branch = getCurrentBranch();
+const branch = getCurrentRef();
 const distTag = resolveDistTag(branch);
 
 // ── Stamp plugin.json ───────────────────────────────────────────────

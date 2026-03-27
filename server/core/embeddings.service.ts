@@ -108,6 +108,12 @@ export class EmbeddingsService {
 
   private meanPool(data: Float32Array, mask: number[], seqLen: number): number[] {
     const dim = this._dimension;
+    const expectedLen = seqLen * dim;
+    if (data.length < expectedLen) {
+      throw new Error(
+        `ONNX output size ${data.length} < expected ${expectedLen} (seqLen=${seqLen}, dim=${dim}). Model/dimension mismatch?`,
+      );
+    }
     const pooled = new Array(dim).fill(0);
     let maskSum = 0;
     for (let t = 0; t < seqLen; t++) {

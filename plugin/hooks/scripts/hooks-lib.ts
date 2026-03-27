@@ -183,11 +183,15 @@ export async function withHookTimeout(
     timer = setTimeout(() => resolve("timeout"), timeoutMs);
   });
 
-  const result = await Promise.race([
-    fn().then(() => "done" as const),
-    timeout,
-  ]);
-  clearTimeout(timer!);
+  let result: "done" | "timeout";
+  try {
+    result = await Promise.race([
+      fn().then(() => "done" as const),
+      timeout,
+    ]);
+  } finally {
+    clearTimeout(timer!);
+  }
 
   if (result === "timeout") {
     debug(label, `Hook timed out after ${(timeoutMs / 1000).toFixed(0)}s`);
