@@ -116,6 +116,49 @@ export function hybridRRF(
   return scores;
 }
 
+import type { SearchSignals } from "./memory";
+
+/**
+ * Compute hybrid RRF scores while preserving per-result search signals
+ * (cosine similarity, FTS match, rank positions) for confidence scoring.
+ */
+export function hybridRRFWithSignals(
+  vectorResults: Array<{ id: string; distance: number }>,
+  ftsResults: Array<{ id: string }>,
+  k: number = RRF_K
+): Map<string, SearchSignals & { rrfScore: number }> {
+  const knnMap = new Map<string, { similarity: number; rank: number }>();
+  vectorResults.forEach((r, i) => {
+    knnMap.set(r.id, { similarity: 1 - r.distance, rank: i + 1 });
+  });
+
+  const ftsMap = new Map<string, number>();
+  ftsResults.forEach((r, i) => {
+    ftsMap.set(r.id, i + 1);
+  });
+
+  const allIds = new Set([...knnMap.keys(), ...ftsMap.keys()]);
+  const results = new Map<string, SearchSignals & { rrfScore: number }>();
+
+  for (const id of allIds) {
+    const knn = knnMap.get(id);
+    const ftsRank = ftsMap.get(id) ?? null;
+    let rrfScore = 0;
+    if (knn) rrfScore += 1 / (k + knn.rank);
+    if (ftsRank !== null) rrfScore += 1 / (k + ftsRank);
+
+    results.set(id, {
+      rrfScore,
+      cosineSimilarity: knn?.similarity ?? null,
+      ftsMatch: ftsRank !== null,
+      knnRank: knn?.rank ?? null,
+      ftsRank,
+    });
+  }
+
+  return results;
+}
+
 /**
  * Sort ids by RRF score descending and return top N.
  */

@@ -147,6 +147,7 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
           content: r.content,
           metadata: r.metadata,
           source: r.source,
+          confidence: r.confidence,
           createdAt: r.createdAt.toISOString(),
         })),
         count: results.length,

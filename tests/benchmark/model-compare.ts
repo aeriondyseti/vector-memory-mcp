@@ -79,7 +79,7 @@ function aggregateMetrics(results: QueryResult[]): CategoryMetrics {
   const n = results.length;
   if (n === 0)
     return { meanPrecisionAt1: 0, meanPrecisionAt5: 0, meanRecallAt5: 0,
-             meanReciprocalRank: 0, meanNDCGAt5: 0, meanAP10: 0, queryCount: 0 };
+             meanReciprocalRank: 0, meanNDCGAt5: 0, meanAP10: 0, meanTopConfidence: 0, queryCount: 0 };
   return {
     meanPrecisionAt1: results.reduce((s, r) => s + r.precision1, 0) / n,
     meanPrecisionAt5: results.reduce((s, r) => s + r.precision5, 0) / n,
@@ -87,6 +87,7 @@ function aggregateMetrics(results: QueryResult[]): CategoryMetrics {
     meanReciprocalRank: results.reduce((s, r) => s + r.reciprocalRank, 0) / n,
     meanNDCGAt5: results.reduce((s, r) => s + r.ndcg5, 0) / n,
     meanAP10: results.reduce((s, r) => s + r.ap10, 0) / n,
+    meanTopConfidence: results.reduce((s, r) => s + r.topConfidence, 0) / n,
     queryCount: n,
   };
 }
@@ -100,6 +101,7 @@ function averageOfMetrics(runs: CategoryMetrics[]): CategoryMetrics {
     meanReciprocalRank: runs.reduce((s, r) => s + r.meanReciprocalRank, 0) / n,
     meanNDCGAt5: runs.reduce((s, r) => s + r.meanNDCGAt5, 0) / n,
     meanAP10: runs.reduce((s, r) => s + r.meanAP10, 0) / n,
+    meanTopConfidence: runs.reduce((s, r) => s + r.meanTopConfidence, 0) / n,
     queryCount: runs[0].queryCount,
   };
 }
@@ -152,6 +154,7 @@ async function runQualityBenchmark(
 
       const results = await service.search(searchText, intent, { limit: 10 });
       const retrievedIds = results.map((m) => m.id);
+      const confidences = results.map((m) => m.confidence);
 
       const expectedActualIds = query.relevantMemoryIds
         .map((id) => memoryIdMap.get(id))
@@ -162,6 +165,14 @@ async function runQualityBenchmark(
 
       const relevantSet = new Set(expectedActualIds);
       const relevanceScores = buildRelevanceScores(expectedActualIds, partialActualIds);
+
+      let firstRelevantConfidence: number | null = null;
+      for (let i = 0; i < retrievedIds.length; i++) {
+        if (relevantSet.has(retrievedIds[i])) {
+          firstRelevantConfidence = confidences[i];
+          break;
+        }
+      }
 
       const result: QueryResult = {
         queryId: query.id,
@@ -175,6 +186,8 @@ async function runQualityBenchmark(
         reciprocalRank: reciprocalRank(retrievedIds, relevantSet),
         ndcg5: ndcgAtK(retrievedIds, relevanceScores, 5),
         ap10: averagePrecision(retrievedIds, relevantSet, 10),
+        topConfidence: confidences[0] ?? 0,
+        firstRelevantConfidence,
         passed: true,
       };
       queryResults.push(result);

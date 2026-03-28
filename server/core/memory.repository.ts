@@ -4,7 +4,7 @@ import {
   deserializeVector,
   safeParseJsonObject,
   sanitizeFtsQuery,
-  hybridRRF,
+  hybridRRFWithSignals,
   topByRRF,
   knnSearch,
   batchedQuery,
@@ -214,8 +214,10 @@ export class MemoryRepository {
           .all(ftsQuery, candidateLimit) as Array<{ id: string }>)
       : [];
 
-    // Compute RRF scores and pick top ids
-    const rrfScores = hybridRRF(vectorResults, ftsResults);
+    // Compute RRF scores with search signals for confidence scoring
+    const signalsMap = hybridRRFWithSignals(vectorResults, ftsResults);
+    const rrfScores = new Map<string, number>();
+    for (const [id, s] of signalsMap) rrfScores.set(id, s.rrfScore);
     const topIds = topByRRF(rrfScores, limit);
 
     if (topIds.length === 0) return [];
@@ -242,9 +244,16 @@ export class MemoryRepository {
 
       const memEmbedding = this.getEmbedding(id);
       const memory = this.rowToMemory(row, memEmbedding);
+      const signals = signalsMap.get(id)!;
       results.push({
         ...memory,
-        rrfScore: rrfScores.get(id) ?? 0,
+        rrfScore: signals.rrfScore,
+        signals: {
+          cosineSimilarity: signals.cosineSimilarity,
+          ftsMatch: signals.ftsMatch,
+          knnRank: signals.knnRank,
+          ftsRank: signals.ftsRank,
+        },
       });
     }
 

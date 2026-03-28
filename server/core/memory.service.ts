@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from "crypto";
 import type { Memory, SearchIntent, IntentProfile, HybridRow } from "./memory";
-import { isDeleted } from "./memory";
+import { isDeleted, computeConfidence } from "./memory";
 import type { SearchResult, SearchOptions } from "./conversation";
 import type { MemoryRepository } from "./memory.repository";
 import type { EmbeddingsService } from "./embeddings.service";
@@ -216,6 +216,7 @@ export class MemoryService {
                   updatedAt: candidate.updatedAt,
                   source: "memory" as const,
                   score: this.computeMemoryScore(candidate, profile, now),
+                  confidence: computeConfidence(candidate.signals),
                   supersededBy: candidate.supersededBy,
                   usefulness: candidate.usefulness,
                   accessCount: candidate.accessCount,
@@ -242,6 +243,7 @@ export class MemoryService {
                 updatedAt: row.createdAt,
                 source: "conversation_history" as const,
                 score: row.rrfScore * historyWeight,
+                confidence: computeConfidence(row.signals),
                 supersededBy: null,
                 sessionId: (row.metadata?.session_id as string) ?? "",
                 role: (row.metadata?.role as string) ?? "unknown",

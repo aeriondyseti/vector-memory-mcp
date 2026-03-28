@@ -43,12 +43,12 @@ export const MODEL_DIMENSION = 384;
  */
 const CATEGORY_THRESHOLDS: Record<
   QueryCategory,
-  { minMRR?: number; minPrecision1?: number; minRecall5?: number }
+  { minMRR?: number; minPrecision1?: number; minRecall5?: number; maxTopConfidence?: number; minFirstRelevantConfidence?: number }
 > = {
-  exact_match: { minMRR: 0.65, minPrecision1: 0.45 }, // Adjusted for hybrid + jitter + CI variance
+  exact_match: { minMRR: 0.65, minPrecision1: 0.45 },
   semantic: { minMRR: 0.45 },
   related_concept: { minRecall5: 0.4 },
-  negative: {}, // Special handling - no false positives
+  negative: { maxTopConfidence: 0.6 }, // Abstention: top result should NOT be highly confident
   edge_case: { minMRR: 0.3 },
 };
 
@@ -118,6 +118,7 @@ export class BenchmarkRunner {
       const intent: SearchIntent = "fact_check";
       const results = await this.service.search(query.query, intent, { limit: 10 });
       const retrievedIds = results.map((m) => m.id);
+      const confidences = results.map((m) => m.confidence);
 
       // Map expected IDs to actual stored IDs
       const expectedActualIds = query.relevantMemoryIds
@@ -135,6 +136,15 @@ export class BenchmarkRunner {
         partialActualIds
       );
 
+      // Find confidence of first relevant result
+      let firstRelevantConfidence: number | null = null;
+      for (let i = 0; i < retrievedIds.length; i++) {
+        if (relevantSet.has(retrievedIds[i])) {
+          firstRelevantConfidence = confidences[i];
+          break;
+        }
+      }
+
       const result: QueryResult = {
         queryId: query.id,
         query: query.query,
@@ -147,6 +157,8 @@ export class BenchmarkRunner {
         reciprocalRank: reciprocalRank(retrievedIds, relevantSet),
         ndcg5: ndcgAtK(retrievedIds, relevanceScores, 5),
         ap10: averagePrecision(retrievedIds, relevantSet, 10),
+        topConfidence: confidences[0] ?? 0,
+        firstRelevantConfidence,
         passed: false, // Set by threshold check
       };
 
@@ -179,12 +191,14 @@ export class BenchmarkRunner {
   private meetsThreshold(result: QueryResult): boolean {
     const thresholds = CATEGORY_THRESHOLDS[result.category];
 
-    // Special handling for negative queries
+    // Negative queries: pass if top confidence is below threshold (abstention)
     if (result.category === "negative") {
-      // For negative tests, we don't have relevant items defined
-      // The test passes if we don't have false positives
-      // Since we can't easily measure this without relevance labels,
-      // we consider negative tests as passed (informational only)
+      if (
+        thresholds.maxTopConfidence !== undefined &&
+        result.topConfidence > thresholds.maxTopConfidence
+      ) {
+        return false;
+      }
       return true;
     }
 
@@ -209,6 +223,14 @@ export class BenchmarkRunner {
       return false;
     }
 
+    if (
+      thresholds.minFirstRelevantConfidence !== undefined &&
+      (result.firstRelevantConfidence === null ||
+        result.firstRelevantConfidence < thresholds.minFirstRelevantConfidence)
+    ) {
+      return false;
+    }
+
     return true;
   }
 
@@ -225,6 +247,7 @@ export class BenchmarkRunner {
         meanReciprocalRank: 0,
         meanNDCGAt5: 0,
         meanAP10: 0,
+        meanTopConfidence: 0,
         queryCount: 0,
       };
     }
@@ -237,6 +260,7 @@ export class BenchmarkRunner {
         results.reduce((s, r) => s + r.reciprocalRank, 0) / n,
       meanNDCGAt5: results.reduce((s, r) => s + r.ndcg5, 0) / n,
       meanAP10: results.reduce((s, r) => s + r.ap10, 0) / n,
+      meanTopConfidence: results.reduce((s, r) => s + r.topConfidence, 0) / n,
       queryCount: n,
     };
   }

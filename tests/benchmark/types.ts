@@ -85,6 +85,10 @@ export interface QueryResult {
   ndcg5: number;
   /** Average Precision at k=10 (full result list quality) */
   ap10: number;
+  /** Confidence of rank-1 result (0-1, or 0 if no results) */
+  topConfidence: number;
+  /** Confidence of first relevant result (null if not found) */
+  firstRelevantConfidence: number | null;
   /** Whether this query met its category threshold */
   passed: boolean;
 }
@@ -105,6 +109,8 @@ export interface CategoryMetrics {
   meanNDCGAt5: number;
   /** Mean Average Precision@10 */
   meanAP10: number;
+  /** Mean confidence of rank-1 results */
+  meanTopConfidence: number;
   /** Number of queries in this category */
   queryCount: number;
 }

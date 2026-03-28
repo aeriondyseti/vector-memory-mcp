@@ -240,7 +240,7 @@ function formatMemoryDetail(
 }
 
 function formatSearchResult(r: SearchResult, includeDeleted: boolean): string {
-  let result = `[${r.source}] ID: ${r.id}\nContent: ${r.content}`;
+  let result = `[${r.source}] ID: ${r.id}\nConfidence: ${r.confidence.toFixed(2)}\nContent: ${r.content}`;
   if (r.metadata && Object.keys(r.metadata).length > 0) {
     result += `\nMetadata: ${JSON.stringify(r.metadata)}`;
   }

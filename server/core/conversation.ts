@@ -47,6 +47,8 @@ export interface IndexedSession {
   lastMessageAt: Date;
 }
 
+import type { SearchSignals } from "./memory";
+
 /** Raw row from conversation_history table with RRF score */
 export interface ConversationHybridRow {
   id: string;
@@ -54,6 +56,7 @@ export interface ConversationHybridRow {
   metadata: Record<string, unknown>;
   createdAt: Date;
   rrfScore: number;
+  signals: SearchSignals;
 }
 
 /** Unified search result with source provenance */
@@ -65,6 +68,8 @@ export interface SearchResult {
   updatedAt: Date;
   source: "memory" | "conversation_history";
   score: number;
+  /** Absolute relevance confidence (0.0-1.0). Based on cosine similarity + retrieval agreement. */
+  confidence: number;
   // Memory-specific fields
   supersededBy: string | null;
   usefulness?: number;

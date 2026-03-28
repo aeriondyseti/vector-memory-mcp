@@ -113,6 +113,7 @@ export function formatReport(
   lines.push(`  Recall@5:                    ${formatMetric(o.meanRecallAt5)}`);
   lines.push(`  NDCG@5:                      ${formatMetric(o.meanNDCGAt5)}`);
   lines.push(`  MAP@10:                      ${formatMetric(o.meanAP10)}`);
+  lines.push(`  Mean Top Confidence:         ${formatMetric(o.meanTopConfidence)}`);
   lines.push("");
 
   // Check overall thresholds

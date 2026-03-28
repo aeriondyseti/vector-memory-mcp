@@ -7,7 +7,7 @@ import {
   serializeVector,
   safeParseJsonObject,
   sanitizeFtsQuery,
-  hybridRRF,
+  hybridRRFWithSignals,
   topByRRF,
   knnSearch,
 } from "./sqlite-utils";
@@ -216,8 +216,10 @@ export class ConversationRepository {
       )
       .all(ftsQuery, candidateCount) as Array<{ id: string }>;
 
-    // Compute RRF scores and get top ids
-    const rrfScores = hybridRRF(vecResults, ftsResults);
+    // Compute RRF scores with search signals for confidence scoring
+    const signalsMap = hybridRRFWithSignals(vecResults, ftsResults);
+    const rrfScores = new Map<string, number>();
+    for (const [id, s] of signalsMap) rrfScores.set(id, s.rrfScore);
     const topIds = topByRRF(rrfScores, limit);
 
     if (topIds.length === 0) return [];
@@ -274,17 +276,23 @@ export class ConversationRepository {
       project: string;
     }>;
 
-    // Build a lookup for ordering by RRF score
-    const scoreMap = new Map(topIds.map((id) => [id, rrfScores.get(id)!]));
-
     return fullRows
-      .map((row) => ({
-        id: row.id,
-        content: row.content,
-        metadata: safeParseJsonObject(row.metadata),
-        createdAt: new Date(row.created_at),
-        rrfScore: scoreMap.get(row.id) ?? 0,
-      }))
+      .map((row) => {
+        const signals = signalsMap.get(row.id)!;
+        return {
+          id: row.id,
+          content: row.content,
+          metadata: safeParseJsonObject(row.metadata),
+          createdAt: new Date(row.created_at),
+          rrfScore: signals.rrfScore,
+          signals: {
+            cosineSimilarity: signals.cosineSimilarity,
+            ftsMatch: signals.ftsMatch,
+            knnRank: signals.knnRank,
+            ftsRank: signals.ftsRank,
+          },
+        };
+      })
       .sort((a, b) => b.rrfScore - a.rrfScore);
   }
 }

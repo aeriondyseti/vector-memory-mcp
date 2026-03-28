@@ -717,6 +717,7 @@ describe("mcp", () => {
               },
               createdAt: new Date(),
               rrfScore: 0.8,
+              signals: { cosineSimilarity: 0.8, ftsMatch: true, knnRank: 1, ftsRank: 1 },
             } satisfies ConversationHybridRow,
           ])
         ),
@@ -746,6 +747,7 @@ describe("mcp", () => {
               metadata: { session_id: "s1", role: "user" },
               createdAt: new Date(),
               rrfScore: 0.9,
+              signals: { cosineSimilarity: 0.9, ftsMatch: true, knnRank: 1, ftsRank: 1 },
             } satisfies ConversationHybridRow,
           ])
         ),
