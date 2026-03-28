@@ -58,16 +58,17 @@ export type HybridRow = WithRrfScore<Memory>;
  * mapped through a sigmoid with an agreement bonus for dual-path matches.
  * The midpoint and steepness are calibrated for all-MiniLM-L6-v2 embeddings.
  */
-const CONFIDENCE_STEEPNESS = 10;
-const CONFIDENCE_MIDPOINT = 0.45;
-const CONFIDENCE_AGREEMENT_BONUS = 0.10;
+// Calibrated against all-MiniLM-L6-v2: noise ceiling ~0.25, weak-relevant floor ~0.30
+const CONFIDENCE_STEEPNESS = 14;
+const CONFIDENCE_MIDPOINT = 0.35;
+const CONFIDENCE_AGREEMENT_BONUS = 0.08;
 
 export function computeConfidence(signals: SearchSignals): number {
   const sim = signals.cosineSimilarity;
 
   if (sim === null) {
     // FTS-only result — keyword match but no semantic confirmation
-    return signals.ftsMatch ? 0.45 : 0.0;
+    return signals.ftsMatch ? 0.40 : 0.0;
   }
 
   // Shifted sigmoid: maps cosine similarity to interpretable confidence

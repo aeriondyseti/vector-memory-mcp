@@ -48,7 +48,7 @@ const CATEGORY_THRESHOLDS: Record<
   exact_match: { minMRR: 0.65, minPrecision1: 0.45 },
   semantic: { minMRR: 0.45 },
   related_concept: { minRecall5: 0.4 },
-  negative: { maxTopConfidence: 0.6 }, // Abstention: top result should NOT be highly confident
+  negative: { maxTopConfidence: 0.4 }, // Abstention: top result should have low confidence
   edge_case: { minMRR: 0.3 },
 };
 
