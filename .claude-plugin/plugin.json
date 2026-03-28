@@ -1,7 +1,7 @@
 {
   "$schema": "./schemas/plugin.schema.json",
   "name": "vector-memory",
-  "version": "2.4.4",
+  "version": "2.4.4-dev.1",
   "description": "RAG-powered session memory with waypoints for Claude Code",
   "author": {
     "name": "AerionDyseti",
