@@ -29,4 +29,4 @@ export type {
   GroundTruthMemory,
   GroundTruthQuery,
 } from "./types";
-export { generalDataset } from "./datasets";
+export { generalDataset, loadConvoMemDataset } from "./datasets";
