@@ -332,11 +332,11 @@ export async function handleSetWaypoint(
     project,
     branch: args?.branch as string | undefined,
     summary,
-    completed: (args?.completed as string[] | undefined) ?? [],
-    in_progress_blocked: (args?.in_progress_blocked as string[] | undefined) ?? [],
-    key_decisions: (args?.key_decisions as string[] | undefined) ?? [],
-    next_steps: (args?.next_steps as string[] | undefined) ?? [],
-    memory_ids: (args?.memory_ids as string[] | undefined) ?? [],
+    completed: args?.completed ? asArray(args.completed, "completed") : [],
+    in_progress_blocked: args?.in_progress_blocked ? asArray(args.in_progress_blocked, "in_progress_blocked") : [],
+    key_decisions: args?.key_decisions ? asArray(args.key_decisions, "key_decisions") : [],
+    next_steps: args?.next_steps ? asArray(args.next_steps, "next_steps") : [],
+    memory_ids: args?.memory_ids ? asArray(args.memory_ids, "memory_ids") : [],
     metadata: (args?.metadata as Record<string, unknown>) ?? {},
   });
 
