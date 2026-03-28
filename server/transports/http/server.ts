@@ -10,6 +10,8 @@ import { createMcpRoutes } from "./mcp-transport";
 import type { Memory, SearchIntent } from "../../core/memory";
 import { resolveDateFilters } from "../../core/time-expr";
 
+const VALID_INTENTS = new Set(["continuity", "fact_check", "frequent", "associative", "explore"]);
+
 
 /**
  * Check if a port is available by attempting to bind to it
@@ -133,12 +135,14 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
     try {
       const body = await c.req.json();
       const query = body.query;
-      const intent = (body.intent as SearchIntent) ?? "fact_check";
-      const limit = body.limit ?? 10;
-
       if (!query || typeof query !== "string") {
         return c.json({ error: "Missing or invalid 'query' field" }, 400);
       }
+      if (body.intent && !VALID_INTENTS.has(body.intent)) {
+        return c.json({ error: "Invalid 'intent' value" }, 400);
+      }
+      const intent = (body.intent as SearchIntent) ?? "fact_check";
+      const limit = Math.max(1, Math.min(1000, Math.floor(typeof body.limit === "number" ? body.limit : 10)));
 
       let dateFilters: { after?: Date; before?: Date };
       try {
@@ -170,16 +174,20 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
   app.post("/store", async (c) => {
     try {
       const body = await c.req.json();
-      const { content, metadata, embeddingText } = body;
+      const { content, embeddingText } = body;
 
       if (!content || typeof content !== "string") {
         return c.json({ error: "Missing or invalid 'content' field" }, 400);
       }
 
+      const metadata = typeof body.metadata === "object" && body.metadata !== null && !Array.isArray(body.metadata)
+        ? body.metadata as Record<string, unknown>
+        : {};
+
       const memory = await memoryService.store(
         content,
-        metadata ?? {},
-        embeddingText
+        metadata,
+        typeof embeddingText === "string" ? embeddingText : undefined
       );
 
       return c.json({
@@ -248,16 +256,14 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
 
       const body = await c.req.json().catch(() => ({}));
       let since: Date | undefined;
-      if (body.since) {
-        since = new Date(body.since as string);
+      if (typeof body.since === "string") {
+        since = new Date(body.since);
         if (isNaN(since.getTime())) {
           return c.json({ error: "Invalid 'since' date format" }, 400);
         }
       }
-      const result = await conversationService.indexConversations(
-        body.path as string | undefined,
-        since
-      );
+      const path = typeof body.path === "string" ? body.path : undefined;
+      const result = await conversationService.indexConversations(path, since);
 
       return c.json(result);
     } catch (error) {

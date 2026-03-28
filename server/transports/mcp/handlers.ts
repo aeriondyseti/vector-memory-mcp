@@ -60,6 +60,32 @@ function requireString(args: Record<string, unknown> | undefined, field: string)
   return value;
 }
 
+const VALID_INTENTS = new Set(["continuity", "fact_check", "frequent", "associative", "explore"]);
+
+function asIntent(value: unknown): SearchIntent {
+  if (typeof value === "string" && VALID_INTENTS.has(value)) return value as SearchIntent;
+  return "fact_check";
+}
+
+function asInt(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(value)));
+}
+
+function asBool(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function asOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 export async function handleStoreMemories(
   args: Record<string, unknown> | undefined,
   service: MemoryService
@@ -183,13 +209,13 @@ export async function handleSearchMemories(
   if (typeof query !== "string" || query.trim() === "") {
     return errorResult("query is required and must be a non-empty string");
   }
-  const intent = (args?.intent as SearchIntent) ?? "fact_check";
-  const limit = (args?.limit as number) ?? 10;
-  const offset = (args?.offset as number) ?? 0;
-  const includeDeleted = (args?.include_deleted as boolean) ?? false;
-  const historyOnly = (args?.history_only as boolean) ?? false;
+  const intent = asIntent(args?.intent);
+  const limit = asInt(args?.limit, 10, 1, 1000);
+  const offset = asInt(args?.offset, 0, 0, 10000);
+  const includeDeleted = asBool(args?.include_deleted, false);
+  const historyOnly = asBool(args?.history_only, false);
   // history_only implies include_history
-  const includeHistory = historyOnly ? true : (args?.include_history as boolean | undefined);
+  const includeHistory = historyOnly ? true : (typeof args?.include_history === "boolean" ? args.include_history : undefined);
 
   let historyFilters: HistoryFilters;
   try {
@@ -330,14 +356,14 @@ export async function handleSetWaypoint(
 
   const memory = await service.setWaypoint({
     project,
-    branch: args?.branch as string | undefined,
+    branch: asOptionalString(args?.branch),
     summary,
     completed: args?.completed ? asArray(args.completed, "completed") : [],
     in_progress_blocked: args?.in_progress_blocked ? asArray(args.in_progress_blocked, "in_progress_blocked") : [],
     key_decisions: args?.key_decisions ? asArray(args.key_decisions, "key_decisions") : [],
     next_steps: args?.next_steps ? asArray(args.next_steps, "next_steps") : [],
     memory_ids: args?.memory_ids ? asArray(args.memory_ids, "memory_ids") : [],
-    metadata: (args?.metadata as Record<string, unknown>) ?? {},
+    metadata: asObject(args?.metadata),
   });
 
   return {
@@ -349,7 +375,7 @@ export async function handleGetWaypoint(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  const project = args?.project as string | undefined;
+  const project = asOptionalString(args?.project);
   const waypoint = await service.getLatestWaypoint(project);
 
   if (!waypoint) {
@@ -379,8 +405,8 @@ function parseHistoryFilters(
   args: Record<string, unknown> | undefined
 ): HistoryFilters {
   return {
-    sessionId: args?.session_id as string | undefined,
-    role: args?.role_filter as string | undefined,
+    sessionId: asOptionalString(args?.session_id),
+    role: asOptionalString(args?.role_filter),
     after: parseDate(args?.history_after, "history_after"),
     before: parseDate(args?.history_before, "history_before"),
   };
@@ -408,8 +434,8 @@ export async function handleIndexConversations(
   if ("error" in conv) return conv.error;
   const conversationService = conv.service;
 
-  const path = args?.path as string | undefined;
-  const sinceStr = args?.since as string | undefined;
+  const path = asOptionalString(args?.path);
+  const sinceStr = asOptionalString(args?.since);
   const since = sinceStr ? new Date(sinceStr) : undefined;
   if (since && isNaN(since.getTime())) {
     return errorResult("Invalid 'since' date format");
@@ -439,8 +465,8 @@ export async function handleListIndexedSessions(
   if ("error" in conv) return conv.error;
   const conversationService = conv.service;
 
-  const limit = (args?.limit as number) ?? 20;
-  const offset = (args?.offset as number) ?? 0;
+  const limit = asInt(args?.limit, 20, 1, 1000);
+  const offset = asInt(args?.offset, 0, 0, 10000);
   const { sessions, total } =
     await conversationService.listIndexedSessions(limit, offset);
 
@@ -478,7 +504,7 @@ export async function handleReindexSession(
   if ("error" in conv) return conv.error;
   const conversationService = conv.service;
 
-  const sessionId = args?.session_id as string | undefined;
+  const sessionId = asOptionalString(args?.session_id);
   if (!sessionId) {
     return errorResult("session_id is required");
   }
