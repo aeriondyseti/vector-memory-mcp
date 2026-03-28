@@ -3,6 +3,7 @@ import type { MemoryService } from "../../core/memory.service";
 import type { ConversationHistoryService } from "../../core/conversation.service";
 import type { SearchIntent } from "../../core/memory";
 import type { HistoryFilters, SearchResult } from "../../core/conversation";
+import { resolveDateFilters } from "../../core/time-expr";
 import { DEBUG } from "../../config/index";
 
 /**
@@ -197,6 +198,17 @@ export async function handleSearchMemories(
     return errorResult(errorText(e));
   }
 
+  let dateFilters: { after?: Date; before?: Date };
+  try {
+    dateFilters = resolveDateFilters({
+      after: args?.after,
+      before: args?.before,
+      time_expr: args?.time_expr,
+    });
+  } catch (e) {
+    return errorResult(errorText(e));
+  }
+
   const results = await service.search(query, intent, {
     limit,
     includeDeleted,
@@ -204,6 +216,8 @@ export async function handleSearchMemories(
     historyOnly,
     historyFilters,
     offset,
+    after: dateFilters.after,
+    before: dateFilters.before,
   });
 
   if (results.length === 0) {

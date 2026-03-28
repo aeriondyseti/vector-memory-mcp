@@ -1,7 +1,7 @@
 import { randomUUID, createHash } from "crypto";
 import type { Memory, SearchIntent, IntentProfile, HybridRow } from "./memory";
 import { isDeleted, computeConfidence } from "./memory";
-import type { SearchResult, SearchOptions } from "./conversation";
+import type { SearchResult, SearchOptions, HistoryFilters } from "./conversation";
 import type { MemoryRepository } from "./memory.repository";
 import type { EmbeddingsService } from "./embeddings.service";
 import type { ConversationHistoryService } from "./conversation.service";
@@ -200,11 +200,27 @@ export class MemoryService {
     // Widen the candidate pool to account for offset
     const effectiveLimit = offset + limit;
 
+    const hasDateFilters = options?.after || options?.before;
+    const dateFilters = hasDateFilters
+      ? { after: options.after, before: options.before }
+      : undefined;
+
+    // Merge top-level date filters into history filters so after/before
+    // apply uniformly. Explicit history_after/history_before take precedence.
+    const historyFilters = options?.historyFilters;
+    const effectiveHistoryFilters: HistoryFilters | undefined = hasDateFilters
+      ? {
+          ...historyFilters,
+          after: historyFilters?.after ?? options?.after,
+          before: historyFilters?.before ?? options?.before,
+        }
+      : historyFilters;
+
     // Run memory + history queries in parallel
     const memoryPromise =
       !historyOnly
         ? this.repository
-            .findHybrid(queryEmbedding, query, effectiveLimit * 5)
+            .findHybrid(queryEmbedding, query, effectiveLimit * 5, dateFilters)
             .then((candidates) =>
               candidates
                 .filter((m) => includeDeleted || !isDeleted(m))
@@ -232,7 +248,7 @@ export class MemoryService {
               query,
               queryEmbedding,
               historyOnly ? effectiveLimit * 5 : effectiveLimit * 3,
-              options?.historyFilters
+              effectiveHistoryFilters
             )
             .then((historyRows) =>
               historyRows.map((row) => ({

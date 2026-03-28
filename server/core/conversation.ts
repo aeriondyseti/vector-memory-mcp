@@ -121,4 +121,8 @@ export interface SearchOptions {
   historyWeight?: number;
   historyFilters?: HistoryFilters;
   offset?: number;
+  /** Filter both memories and history created after this date. Merged into historyFilters; explicit historyFilters.after takes precedence. */
+  after?: Date;
+  /** Filter both memories and history created before this date. Merged into historyFilters; explicit historyFilters.before takes precedence. */
+  before?: Date;
 }

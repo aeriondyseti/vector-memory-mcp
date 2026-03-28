@@ -201,6 +201,21 @@ When in doubt, search. Missing context is costlier than an extra query.`,
         type: "string",
         description: "Filter conversation history results before this ISO date.",
       },
+      after: {
+        type: "string",
+        description:
+          "Filter memories created after this ISO date (e.g. '2025-06-01'). Applies to both memories and conversation history.",
+      },
+      before: {
+        type: "string",
+        description:
+          "Filter memories created before this ISO date (e.g. '2026-01-01'). Applies to both memories and conversation history.",
+      },
+      time_expr: {
+        type: "string",
+        description:
+          "Natural relative time filter, resolved to 'after' date. Examples: 'past 7 days', 'last 2 weeks', 'past 3 hours'. Ignored if explicit 'after' is provided.",
+      },
     },
     required: ["query", "intent", "reason_for_search"],
   },

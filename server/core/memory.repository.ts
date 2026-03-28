@@ -193,11 +193,15 @@ export class MemoryRepository {
 
   /**
    * Hybrid search combining vector KNN and FTS5, fused with Reciprocal Rank Fusion.
+   * Date filters are applied post-RRF on the final row fetch (same pattern as
+   * conversation.repository.ts) because KNN is brute-force JS-side and cannot
+   * be pre-filtered. This means filtered queries may return fewer than `limit`.
    */
   async findHybrid(
     embedding: number[],
     query: string,
     limit: number,
+    filters?: { after?: Date; before?: Date },
   ): Promise<HybridRow[]> {
     const candidateLimit = limit * 5;
 
@@ -222,13 +226,28 @@ export class MemoryRepository {
 
     if (topIds.length === 0) return [];
 
-    // Fetch full rows for the winning ids (service layer handles deleted filtering)
+    // Fetch full rows for the winning ids, applying date filters if present
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+
     const placeholders = topIds.map(() => "?").join(", ");
+    conditions.push(`id IN (${placeholders})`);
+    params.push(...topIds);
+
+    if (filters?.after) {
+      conditions.push("created_at > ?");
+      params.push(filters.after.getTime());
+    }
+    if (filters?.before) {
+      conditions.push("created_at < ?");
+      params.push(filters.before.getTime());
+    }
+
     const rows = this.db
       .prepare(
-        `SELECT * FROM memories WHERE id IN (${placeholders})`,
+        `SELECT * FROM memories WHERE ${conditions.join(" AND ")}`,
       )
-      .all(...topIds) as Array<Record<string, unknown>>;
+      .all(...params) as Array<Record<string, unknown>>;
 
     // Build a lookup for quick access
     const rowMap = new Map<string, Record<string, unknown>>();

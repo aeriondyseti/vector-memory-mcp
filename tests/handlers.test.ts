@@ -66,6 +66,8 @@ describe("handleSearchMemories", () => {
         before: undefined,
       },
       offset: 0,
+      after: undefined,
+      before: undefined,
     });
   });
 
@@ -95,6 +97,8 @@ describe("handleSearchMemories", () => {
         before: undefined,
       },
       offset: 0,
+      after: undefined,
+      before: undefined,
     });
   });
 
@@ -145,6 +149,98 @@ describe("handleSearchMemories", () => {
       service,
     );
     expect(result.content[0]).toHaveProperty("text", "No results found matching your query.");
+  });
+
+  it("passes after and before dates to search", async () => {
+    const service = createMockService(null);
+    await handleSearchMemories(
+      {
+        query: "test",
+        intent: "fact_check",
+        reason_for_search: "test",
+        after: "2025-06-01",
+        before: "2026-01-01",
+      },
+      service,
+    );
+
+    const call = (service.search as ReturnType<typeof mock>).mock.calls[0];
+    const opts = call[2];
+    expect(opts.after).toEqual(new Date("2025-06-01"));
+    expect(opts.before).toEqual(new Date("2026-01-01"));
+  });
+
+  it("resolves time_expr to after date", async () => {
+    const service = createMockService(null);
+    const before = Date.now();
+    await handleSearchMemories(
+      {
+        query: "test",
+        intent: "fact_check",
+        reason_for_search: "test",
+        time_expr: "past 7 days",
+      },
+      service,
+    );
+    const after = Date.now();
+
+    const call = (service.search as ReturnType<typeof mock>).mock.calls[0];
+    const opts = call[2];
+    expect(opts.after).toBeInstanceOf(Date);
+    // Should be approximately 7 days ago
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    expect(opts.after.getTime()).toBeGreaterThanOrEqual(before - sevenDaysMs - 100);
+    expect(opts.after.getTime()).toBeLessThanOrEqual(after - sevenDaysMs + 100);
+    expect(opts.before).toBeUndefined();
+  });
+
+  it("explicit after takes precedence over time_expr", async () => {
+    const service = createMockService(null);
+    await handleSearchMemories(
+      {
+        query: "test",
+        intent: "fact_check",
+        reason_for_search: "test",
+        after: "2025-06-01",
+        time_expr: "past 7 days",
+      },
+      service,
+    );
+
+    const call = (service.search as ReturnType<typeof mock>).mock.calls[0];
+    const opts = call[2];
+    expect(opts.after).toEqual(new Date("2025-06-01"));
+  });
+
+  it("returns error for invalid time_expr", async () => {
+    const service = createMockService(null);
+    const result = await handleSearchMemories(
+      {
+        query: "test",
+        intent: "fact_check",
+        reason_for_search: "test",
+        time_expr: "7 days ago",
+      },
+      service,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toHaveProperty("text", expect.stringContaining("Unsupported time_expr"));
+  });
+
+  it("returns error when after >= before", async () => {
+    const service = createMockService(null);
+    const result = await handleSearchMemories(
+      {
+        query: "test",
+        intent: "fact_check",
+        reason_for_search: "test",
+        after: "2026-01-01",
+        before: "2025-06-01",
+      },
+      service,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toHaveProperty("text", expect.stringContaining("must be before"));
   });
 });
 
