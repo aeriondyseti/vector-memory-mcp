@@ -14,6 +14,9 @@ import {
   MEMORY_IMPORTANCE_LEVELS,
 } from "../../core/memory";
 import { MaintenanceService } from "../../core/maintenance.service";
+import { BackupService } from "../../core/backup.service";
+import { DocumentIngestionService } from "../../core/document-ingestion.service";
+import { HandoffService } from "../../core/handoff.service";
 import type { HistoryFilters, SearchResult } from "../../core/conversation";
 import { resolveDateFilters } from "../../core/time-expr";
 import { DEBUG } from "../../config/index";
@@ -144,14 +147,19 @@ function parseAttributes(obj: Record<string, unknown>): MemoryAttributes {
   return a;
 }
 
+/** Resolve the on-disk path of the service's main database (from the connection). */
+function dbPathFor(service: MemoryService): string {
+  const db = service.getRepository().getDb();
+  return (
+    (db.prepare("PRAGMA database_list").all() as Array<{ name: string; file: string }>)
+      .find((r) => r.name === "main")?.file ?? ""
+  );
+}
+
 /** Build a MaintenanceService bound to the service's live db connection. */
 function maintenanceFor(service: MemoryService): MaintenanceService {
   const repo = service.getRepository();
-  const db = repo.getDb();
-  const dbPath =
-    (db.prepare("PRAGMA database_list").all() as Array<{ name: string; file: string }>)
-      .find((r) => r.name === "main")?.file ?? "";
-  return new MaintenanceService(db, dbPath, repo);
+  return new MaintenanceService(repo.getDb(), dbPathFor(service), repo);
 }
 
 export async function handleStoreMemories(
@@ -907,6 +915,410 @@ export async function handleExpireMemories(
   );
 }
 
+// ── Quality scoring (Feature 15) ──────────────────────────────────────
+
+export async function handleScoreMemories(
+  _args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const r = await service.scoreMemories();
+  return textResult(
+    `Rescored ${r.scored} memories. Average quality: ${r.averageScore.toFixed(3)}.`,
+  );
+}
+
+// ── Episodic chains (Feature 23) ──────────────────────────────────────
+
+export async function handleGetEpisode(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const episodeId = requireString(args, "episode_id");
+  const memories = service.getEpisode(episodeId);
+  if (memories.length === 0) {
+    return textResult(`No memories in episode "${episodeId}".`);
+  }
+  const blocks = memories.map(
+    (m, i) => `${i + 1}. [${m.id}] ${m.content}`,
+  );
+  return textResult(`Episode "${episodeId}" (${memories.length}):\n${blocks.join("\n")}`);
+}
+
+export async function handleListEpisodes(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const limit = asInt(args?.limit, 20, 1, 1000);
+  const offset = asInt(args?.offset, 0, 0, 10000);
+  const episodes = service.listEpisodes(limit, offset);
+  if (episodes.length === 0) return textResult("No episodes recorded.");
+  const lines = episodes.map(
+    (e) => `- ${e.episodeId} — ${e.count} memories, last ${e.lastCreatedAt.toISOString()}`,
+  );
+  return textResult(`Episodes:\n${lines.join("\n")}`);
+}
+
+// ── Proactive context (Feature 24) ────────────────────────────────────
+
+export async function handleProactiveContext(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const context = requireString(args, "context");
+  const maxResults = asInt(args?.max_results, 5, 1, 50);
+  const threshold =
+    typeof args?.threshold === "number" ? Math.max(0, Math.min(1, args.threshold)) : 0.65;
+  const autoIngest = asBool(args?.auto_ingest, false);
+
+  const results = await service.proactiveContext(context, maxResults, threshold, autoIngest);
+  if (results.length === 0) {
+    return textResult("No sufficiently relevant memories for the current context.");
+  }
+  const blocks = results.map(
+    (r) => `[${r.confidence.toFixed(2)}] ${r.id}: ${r.content}`,
+  );
+  return textResult(`Relevant memories:\n${blocks.join("\n")}`);
+}
+
+// ── Tag management (Feature 16) ───────────────────────────────────────
+
+export async function handleListTags(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const sortBy = args?.sort_by === "name" ? "name" : "count";
+  const limit = asInt(args?.limit, 100, 1, 10000);
+  const offset = asInt(args?.offset, 0, 0, 10000);
+  const tags = service.listTags(sortBy, limit, offset);
+  if (tags.length === 0) return textResult("No tags found.");
+  return textResult(tags.map((t) => `${t.tag} (${t.count})`).join("\n"));
+}
+
+export async function handleRenameTag(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const oldTag = requireString(args, "old");
+  const newTag = requireString(args, "new");
+  const changed = await service.renameTag(oldTag, newTag);
+  return textResult(`Renamed tag "${oldTag}" → "${newTag}" across ${changed} memories.`);
+}
+
+export async function handleMergeTags(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  let sources: string[];
+  try {
+    sources = asArray(args?.sources, "sources");
+  } catch (e) {
+    return errorResult(errorText(e));
+  }
+  const target = requireString(args, "target");
+  const changed = await service.mergeTags(sources, target);
+  return textResult(`Merged tags [${sources.join(", ")}] → "${target}" across ${changed} memories.`);
+}
+
+export async function handleDeleteTag(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const tag = requireString(args, "tag");
+  const changed = await service.deleteTag(tag);
+  return textResult(`Removed tag "${tag}" from ${changed} memories.`);
+}
+
+// ── Duplicate detection & merge (Feature 14) ──────────────────────────
+
+export async function handleFindDuplicates(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const threshold =
+    typeof args?.similarity_threshold === "number"
+      ? Math.max(0.5, Math.min(1, args.similarity_threshold))
+      : 0.92;
+  const clusters = service.findDuplicates(threshold);
+  if (clusters.length === 0) {
+    return textResult(`No duplicate clusters found at threshold ${threshold}.`);
+  }
+  const blocks = clusters.map(
+    (c, i) =>
+      `Cluster ${i + 1}: keep ${c.keepId}, duplicates: ${c.duplicateIds.join(", ")}`,
+  );
+  return textResult(`${clusters.length} duplicate clusters (threshold ${threshold}):\n${blocks.join("\n")}`);
+}
+
+export async function handleMergeDuplicates(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const keepId = requireString(args, "keep_id");
+  let mergeIds: string[];
+  try {
+    mergeIds = asArray(args?.merge_ids, "merge_ids");
+  } catch (e) {
+    return errorResult(errorText(e));
+  }
+  const strategy =
+    args?.merge_strategy === "keep_content" || args?.merge_strategy === "combine_content"
+      ? args.merge_strategy
+      : "keep_newest";
+  const merged = await service.mergeDuplicates(keepId, mergeIds, strategy);
+  if (!merged) return errorResult(`Memory ${keepId} not found`);
+  return textResult(
+    `Merged ${mergeIds.length} duplicates into ${keepId} (strategy: ${strategy}).`,
+  );
+}
+
+export async function handleCleanupDuplicates(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const threshold =
+    typeof args?.similarity_threshold === "number"
+      ? Math.max(0.5, Math.min(1, args.similarity_threshold))
+      : 0.92;
+  const r = await service.cleanupDuplicates(threshold);
+  return textResult(
+    `Cleaned up ${r.clusters} clusters, removed ${r.deleted} duplicate memories.`,
+  );
+}
+
+// ── Memory consolidation (Feature 18) ─────────────────────────────────
+
+export async function handleConsolidateMemories(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const action =
+    args?.action === "run" || args?.action === "status" ? args.action : "recommend";
+  const timeHorizon =
+    args?.time_horizon === "daily" || args?.time_horizon === "monthly"
+      ? args.time_horizon
+      : "weekly";
+  const r = await service.consolidateMemories(action, timeHorizon);
+  const lines = [
+    `Consolidation (${r.action}, ${r.timeHorizon}):`,
+    `- Live memories: ${r.total} | Avg quality: ${r.averageQuality.toFixed(3)}`,
+    `- Duplicate clusters: ${r.duplicateClusters} | Forget candidates: ${r.forgetCandidates}`,
+  ];
+  if (r.action === "run") {
+    lines.push(
+      `- Rescored: ${r.rescored} | Compressed (merged): ${r.compressed} | Forgotten (archived): ${r.forgotten}`,
+    );
+  }
+  return textResult(lines.join("\n"));
+}
+
+// ── Session handoff (Feature 20) ──────────────────────────────────────
+
+function handoffFor(service: MemoryService): HandoffService {
+  return new HandoffService(dbPathFor(service));
+}
+
+export async function handlePrepareHandoff(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  let summary: string;
+  try {
+    summary = requireString(args, "summary");
+  } catch (e) {
+    return errorResult(errorText(e));
+  }
+  const arr = (key: string): string[] | undefined =>
+    args?.[key] !== undefined ? asArray<string>(args[key], key) : undefined;
+
+  let handoff;
+  try {
+    handoff = handoffFor(service).prepare({
+      summary,
+      completed: arr("completed"),
+      inProgress: arr("in_progress"),
+      keyDecisions: arr("key_decisions"),
+      nextSteps: arr("next_steps"),
+      memoryIds: arr("memory_ids"),
+      branch: asOptionalString(args?.branch),
+      project: asOptionalString(args?.project) ?? service.getProject(),
+    });
+  } catch (e) {
+    return errorResult(errorText(e));
+  }
+  return textResult(`Handoff saved with id: ${handoff.id}`);
+}
+
+export async function handleResumeFromHandoff(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const id = asOptionalString(args?.handoff_id);
+  const project = asOptionalString(args?.project) ?? service.getProject();
+  const handoff = handoffFor(service).resume(id, project);
+  if (!handoff) return textResult("No handoff found to resume.");
+  return textResult(HandoffService.render(handoff));
+}
+
+export async function handleListHandoffs(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const limit = asInt(args?.limit, 20, 1, 1000);
+  const project = asOptionalString(args?.project) ?? service.getProject();
+  const handoffs = handoffFor(service).list(limit, project);
+  if (handoffs.length === 0) return textResult("No handoffs recorded.");
+  const lines = handoffs.map(
+    (h) =>
+      `- ${h.id} | ${h.createdAt}${h.resumedAt ? " (resumed)" : ""} — ${h.summary.slice(0, 80)}`,
+  );
+  return textResult(`Handoffs:\n${lines.join("\n")}`);
+}
+
+export async function handleGetStartupContext(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const query = asOptionalString(args?.query);
+  const project = service.getProject();
+  const latest = handoffFor(service).latest(project);
+
+  const parts: string[] = [];
+  if (latest) parts.push(HandoffService.render(latest));
+
+  if (query) {
+    const results = await service.search(query, "continuity", {
+      limit: asInt(args?.max_memories, 5, 1, 50),
+      includeHistory: false,
+    });
+    if (results.length > 0) {
+      parts.push(
+        `\n# Relevant Memories\n${results.map((r) => `- [${r.id}] ${r.content}`).join("\n")}`,
+      );
+    }
+  }
+
+  if (parts.length === 0) {
+    return textResult("No handoff or matching memories for startup context.");
+  }
+  return textResult(parts.join("\n"));
+}
+
+// ── Backup & restore (Feature 26) ─────────────────────────────────────
+
+function backupFor(service: MemoryService): BackupService {
+  return new BackupService(dbPathFor(service));
+}
+
+export async function handleBackupCreate(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const info = backupFor(service).create(asOptionalString(args?.description));
+  return textResult(
+    `Backup created: ${info.id}\n- Path: ${info.path}\n- Size: ${formatBytes(info.sizeBytes)}\n- SHA-256: ${info.sha256}`,
+  );
+}
+
+export async function handleBackupList(
+  _args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const backups = backupFor(service).list();
+  if (backups.length === 0) return textResult("No backups found.");
+  const lines = backups.map(
+    (b) => `- ${b.id} | ${formatBytes(b.sizeBytes)} | ${b.createdAt}${b.description ? ` | ${b.description}` : ""}`,
+  );
+  return textResult(`Backups (newest first):\n${lines.join("\n")}`);
+}
+
+export async function handleBackupVerify(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const id = requireString(args, "backup_id");
+  const r = backupFor(service).verify(id);
+  if (!r.exists) return textResult(`Backup ${id} not found.`);
+  return textResult(
+    r.valid
+      ? `Backup ${id} is valid (SHA-256 matches).`
+      : `Backup ${id} is CORRUPT: expected ${r.expectedSha256}, got ${r.actualSha256}.`,
+  );
+}
+
+export async function handleBackupRestore(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const id = requireString(args, "backup_id");
+  const confirm = asBool(args?.confirm, false);
+  const r = backupFor(service).restore(id, confirm);
+  if (!r.restored) {
+    return textResult(
+      r.reason === "confirmation required"
+        ? "Restore requires confirm: true. A safety backup of the current database is taken automatically before restoring. NOTE: restart the server after restoring."
+        : `Restore failed: ${r.reason}`,
+    );
+  }
+  return textResult(
+    `Restored from backup ${id}. Safety backup of the previous database: ${r.safetyBackupId}. Restart the server to use the restored database.`,
+  );
+}
+
+export async function handleBackupPurge(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const keepLastN = asInt(args?.keep_last_n, 5, 0, 10000);
+  const r = backupFor(service).purge(keepLastN);
+  return textResult(`Purged ${r.deleted.length} old backups, kept the newest ${keepLastN}.`);
+}
+
+// ── Document ingestion (Feature 17) ───────────────────────────────────
+
+export async function handleIngestDocument(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const filePath = asOptionalString(args?.file_path);
+  const directoryPath = asOptionalString(args?.directory_path);
+  if (!filePath && !directoryPath) {
+    return errorResult("Provide either file_path or directory_path.");
+  }
+  let tags: string[] | undefined;
+  if (args?.tags !== undefined) {
+    try {
+      tags = asArray(args.tags, "tags");
+    } catch (e) {
+      return errorResult(errorText(e));
+    }
+  }
+
+  const ingestion = new DocumentIngestionService(service);
+  let result;
+  try {
+    result = await ingestion.ingest({
+      filePath,
+      directoryPath,
+      tags,
+      chunkSize: typeof args?.chunk_size === "number" ? args.chunk_size : undefined,
+      chunkOverlap: typeof args?.chunk_overlap === "number" ? args.chunk_overlap : undefined,
+      extensions: args?.extensions !== undefined ? asArray<string>(args.extensions, "extensions") : undefined,
+      maxFiles: typeof args?.max_files === "number" ? args.max_files : undefined,
+      project: asOptionalString(args?.project),
+    });
+  } catch (e) {
+    return errorResult(errorText(e));
+  }
+
+  const lines = [
+    `Ingested ${result.filesProcessed} file(s) into ${result.chunks} memory chunks.`,
+  ];
+  if (result.errors.length > 0) {
+    lines.push(`Errors (${result.errors.length}):`, ...result.errors.map((e) => `- ${e}`));
+  }
+  return textResult(lines.join("\n"));
+}
+
 export async function handleToolCall(
   name: string,
   args: Record<string, unknown> | undefined,
@@ -957,6 +1369,50 @@ export async function handleToolCall(
       return handleArchiveMemory(args, service, false);
     case "expire_memories":
       return handleExpireMemories(args, service);
+    case "score_memories":
+      return handleScoreMemories(args, service);
+    case "get_episode":
+      return handleGetEpisode(args, service);
+    case "list_episodes":
+      return handleListEpisodes(args, service);
+    case "proactive_context":
+      return handleProactiveContext(args, service);
+    case "list_tags":
+      return handleListTags(args, service);
+    case "rename_tag":
+      return handleRenameTag(args, service);
+    case "merge_tags":
+      return handleMergeTags(args, service);
+    case "delete_tag":
+      return handleDeleteTag(args, service);
+    case "find_duplicates":
+      return handleFindDuplicates(args, service);
+    case "merge_duplicates":
+      return handleMergeDuplicates(args, service);
+    case "cleanup_duplicates":
+      return handleCleanupDuplicates(args, service);
+    case "consolidate_memories":
+      return handleConsolidateMemories(args, service);
+    case "prepare_handoff":
+      return handlePrepareHandoff(args, service);
+    case "resume_from_handoff":
+      return handleResumeFromHandoff(args, service);
+    case "list_handoffs":
+      return handleListHandoffs(args, service);
+    case "get_startup_context":
+      return handleGetStartupContext(args, service);
+    case "backup_create":
+      return handleBackupCreate(args, service);
+    case "backup_list":
+      return handleBackupList(args, service);
+    case "backup_verify":
+      return handleBackupVerify(args, service);
+    case "backup_restore":
+      return handleBackupRestore(args, service);
+    case "backup_purge":
+      return handleBackupPurge(args, service);
+    case "ingest_document":
+      return handleIngestDocument(args, service);
     default:
       return errorResult(`Unknown tool: ${name}`);
   }

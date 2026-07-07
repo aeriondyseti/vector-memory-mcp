@@ -688,6 +688,295 @@ export const expireMemoriesTool: Tool = {
   inputSchema: { type: "object", properties: {} },
 };
 
+const idsArray = {
+  type: "array" as const,
+  items: { type: "string" as const },
+};
+
+export const scoreMemoriesTool: Tool = {
+  name: "score_memories",
+  description:
+    "Recompute the quality_score (0–1) of every memory from usefulness, access frequency, recency, type, and importance. Run periodically or after bulk changes; hybrid search and stale detection use these scores.",
+  inputSchema: { type: "object", properties: {} },
+};
+
+export const getEpisodeTool: Tool = {
+  name: "get_episode",
+  description: "Retrieve all memories in an episode, ordered by sequence number then creation time.",
+  inputSchema: {
+    type: "object",
+    properties: { episode_id: { type: "string", description: "The episode id." } },
+    required: ["episode_id"],
+  },
+};
+
+export const listEpisodesTool: Tool = {
+  name: "list_episodes",
+  description: "Browse episodes (named groups of related memories) by recency, with member counts.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      limit: { type: "integer", description: "Max episodes (default 20)." },
+      offset: { type: "integer", description: "Pagination offset (default 0)." },
+    },
+  },
+};
+
+export const proactiveContextTool: Tool = {
+  name: "proactive_context",
+  description:
+    "Given the current user message or task description, surface relevant memories without an explicit search query. Designed to be called mid-conversation (e.g. from a UserPromptSubmit hook). Returns memories above a relevance threshold.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      context: { type: "string", description: "The current message / task description." },
+      max_results: { type: "integer", description: "Max memories to surface (default 5)." },
+      threshold: { type: "number", description: "Minimum confidence 0–1 (default 0.65)." },
+      auto_ingest: {
+        type: "boolean",
+        description: "Also store the context string as an observation memory (default false).",
+      },
+    },
+    required: ["context"],
+  },
+};
+
+export const listTagsTool: Tool = {
+  name: "list_tags",
+  description: "List all tags in use with their memory counts.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      sort_by: { type: "string", enum: ["count", "name"], description: "Sort order (default count)." },
+      limit: { type: "integer", description: "Max tags (default 100)." },
+      offset: { type: "integer", description: "Pagination offset (default 0)." },
+    },
+  },
+};
+
+export const renameTagTool: Tool = {
+  name: "rename_tag",
+  description: "Rename a tag across every memory that carries it.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      old: { type: "string", description: "The existing tag." },
+      new: { type: "string", description: "The replacement tag." },
+    },
+    required: ["old", "new"],
+  },
+};
+
+export const mergeTagsTool: Tool = {
+  name: "merge_tags",
+  description: "Merge several source tags into one target tag across all memories.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      sources: { ...idsArray, description: "Tags to merge away." },
+      target: { type: "string", description: "The tag to merge them into." },
+    },
+    required: ["sources", "target"],
+  },
+};
+
+export const deleteTagTool: Tool = {
+  name: "delete_tag",
+  description: "Remove a tag from every memory that carries it.",
+  inputSchema: {
+    type: "object",
+    properties: { tag: { type: "string", description: "The tag to remove." } },
+    required: ["tag"],
+  },
+};
+
+export const findDuplicatesTool: Tool = {
+  name: "find_duplicates",
+  description:
+    "Find clusters of near-duplicate memories by embedding similarity. Returns groups with a suggested survivor (the newest). Review before merging.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      similarity_threshold: {
+        type: "number",
+        description: "Cosine similarity 0.5–1.0 to treat memories as duplicates (default 0.92).",
+      },
+    },
+  },
+};
+
+export const mergeDuplicatesTool: Tool = {
+  name: "merge_duplicates",
+  description:
+    "Merge duplicate memories into one survivor and soft-delete the rest. Strategies: keep_content, keep_newest (default), combine_content.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      keep_id: { type: "string", description: "The surviving memory id." },
+      merge_ids: { ...idsArray, description: "Duplicate memory ids to merge away." },
+      merge_strategy: {
+        type: "string",
+        enum: ["keep_content", "keep_newest", "combine_content"],
+        description: "How to derive the survivor's content (default keep_newest).",
+      },
+    },
+    required: ["keep_id", "merge_ids"],
+  },
+};
+
+export const cleanupDuplicatesTool: Tool = {
+  name: "cleanup_duplicates",
+  description:
+    "Automatically merge every near-duplicate cluster at a safe threshold (keeps the newest of each). Use find_duplicates first to preview.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      similarity_threshold: { type: "number", description: "Cosine similarity threshold (default 0.92)." },
+    },
+  },
+};
+
+export const consolidateMemoriesTool: Tool = {
+  name: "consolidate_memories",
+  description:
+    "Periodic maintenance that prevents quality drift: rescore (decay), cluster + merge near-duplicates (compress), and archive low-quality unprotected memories (forget). action: 'recommend' (default, preview), 'status' (counts), or 'run' (perform).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["run", "status", "recommend"], description: "Default recommend." },
+      time_horizon: {
+        type: "string",
+        enum: ["daily", "weekly", "monthly"],
+        description: "Prune aggressiveness (default weekly).",
+      },
+    },
+  },
+};
+
+export const prepareHandoffTool: Tool = {
+  name: "prepare_handoff",
+  description:
+    "Save a structured, history-preserving session handoff (unlike set_waypoint, handoffs are never overwritten — each gets a unique id). Use resume_from_handoff / list_handoffs to retrieve.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      summary: { type: "string", description: "2–3 sentences on goal and current status." },
+      completed: { ...idsArray, description: "What got done." },
+      in_progress: { ...idsArray, description: "Work in flight or blocked." },
+      key_decisions: { ...idsArray, description: "Decisions made and why." },
+      next_steps: { ...idsArray, description: "Concrete next actions." },
+      memory_ids: { ...idsArray, description: "Related memory ids." },
+      branch: { type: "string", description: "Branch name (optional)." },
+      project: { type: "string", description: "Project (defaults to current)." },
+    },
+    required: ["summary"],
+  },
+};
+
+export const resumeFromHandoffTool: Tool = {
+  name: "resume_from_handoff",
+  description: "Load a session handoff (the given id, or the most recent for the project) and mark it resumed.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      handoff_id: { type: "string", description: "Specific handoff id (defaults to most recent)." },
+      project: { type: "string", description: "Project scope (defaults to current)." },
+    },
+  },
+};
+
+export const listHandoffsTool: Tool = {
+  name: "list_handoffs",
+  description: "Browse session handoffs newest-first with timestamps and resume status.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      limit: { type: "integer", description: "Max handoffs (default 20)." },
+      project: { type: "string", description: "Project scope (defaults to current)." },
+    },
+  },
+};
+
+export const getStartupContextTool: Tool = {
+  name: "get_startup_context",
+  description:
+    "Query-aware startup context: the most recent handoff for the project plus (if a query is given) the most relevant memories, aggregated for injection at conversation start.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Optional focus query for relevant memories." },
+      max_memories: { type: "integer", description: "Max relevant memories (default 5)." },
+    },
+  },
+};
+
+export const backupCreateTool: Tool = {
+  name: "backup_create",
+  description: "Create a verified (SHA-256) snapshot of the database in a timestamped backup directory.",
+  inputSchema: {
+    type: "object",
+    properties: { description: { type: "string", description: "Optional label for the backup." } },
+  },
+};
+
+export const backupListTool: Tool = {
+  name: "backup_list",
+  description: "List database backups with timestamps, sizes, and descriptions.",
+  inputSchema: { type: "object", properties: {} },
+};
+
+export const backupVerifyTool: Tool = {
+  name: "backup_verify",
+  description: "Verify a backup's SHA-256 integrity without restoring it.",
+  inputSchema: {
+    type: "object",
+    properties: { backup_id: { type: "string", description: "The backup id." } },
+    required: ["backup_id"],
+  },
+};
+
+export const backupRestoreTool: Tool = {
+  name: "backup_restore",
+  description:
+    "Restore the database from a backup. Requires confirm: true. A safety backup of the current database is taken first. Restart the server afterward.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      backup_id: { type: "string", description: "The backup id to restore." },
+      confirm: { type: "boolean", description: "Must be true to proceed." },
+    },
+    required: ["backup_id"],
+  },
+};
+
+export const backupPurgeTool: Tool = {
+  name: "backup_purge",
+  description: "Delete old backups beyond a retention count.",
+  inputSchema: {
+    type: "object",
+    properties: { keep_last_n: { type: "integer", description: "How many newest backups to keep (default 5)." } },
+  },
+};
+
+export const ingestDocumentTool: Tool = {
+  name: "ingest_document",
+  description:
+    "Ingest a document (or a directory of documents) into memory: chunk at sentence boundaries and store each chunk as a searchable memory with the source path in metadata. Supports Markdown, plain text, and JSON.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      file_path: { type: "string", description: "Path to a single file to ingest." },
+      directory_path: { type: "string", description: "Path to a directory to ingest recursively." },
+      tags: { ...idsArray, description: "Tags to apply to every stored chunk." },
+      chunk_size: { type: "integer", description: "Target chunk size in characters (default 1000)." },
+      chunk_overlap: { type: "integer", description: "Sentences of overlap between chunks (default 1)." },
+      extensions: { ...idsArray, description: "File extensions to include (default .md, .txt, .json)." },
+      max_files: { type: "integer", description: "Max files in directory mode (default 100)." },
+      project: { type: "string", description: "Project to tag chunks with (defaults to current)." },
+    },
+  },
+};
+
 export const tools: Tool[] = [
   storeMemoriesTool,
   updateMemoriesTool,
@@ -711,4 +1000,26 @@ export const tools: Tool[] = [
   archiveMemoryTool,
   unarchiveMemoryTool,
   expireMemoriesTool,
+  scoreMemoriesTool,
+  getEpisodeTool,
+  listEpisodesTool,
+  proactiveContextTool,
+  listTagsTool,
+  renameTagTool,
+  mergeTagsTool,
+  deleteTagTool,
+  findDuplicatesTool,
+  mergeDuplicatesTool,
+  cleanupDuplicatesTool,
+  consolidateMemoriesTool,
+  prepareHandoffTool,
+  resumeFromHandoffTool,
+  listHandoffsTool,
+  getStartupContextTool,
+  backupCreateTool,
+  backupListTool,
+  backupVerifyTool,
+  backupRestoreTool,
+  backupPurgeTool,
+  ingestDocumentTool,
 ];

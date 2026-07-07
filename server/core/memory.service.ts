@@ -12,6 +12,7 @@ import {
   isDeleted,
   isProtected,
   computeConfidence,
+  computeQualityScore,
   CONFIDENCE_RANK,
   IMPORTANCE_RANK,
 } from "./memory";
@@ -140,6 +141,7 @@ export class MemoryService {
       sequenceNumber: attributes?.sequenceNumber ?? null,
       precedingMemoryId: attributes?.precedingMemoryId ?? null,
     };
+    memory.qualityScore = computeQualityScore(memory, now);
 
     await this.repository.insert(memory);
     return memory;
@@ -235,13 +237,15 @@ export class MemoryService {
     }
 
     // Vote also tracks access (explicit utilization signal)
+    const now = new Date();
     const updatedMemory: Memory = {
       ...existing,
       usefulness: existing.usefulness + value,
       accessCount: existing.accessCount + 1,
-      lastAccessed: new Date(),
-      updatedAt: new Date(),
+      lastAccessed: now,
+      updatedAt: now,
     };
+    updatedMemory.qualityScore = computeQualityScore(updatedMemory, now);
 
     await this.repository.upsert(updatedMemory);
     return updatedMemory;
@@ -516,6 +520,27 @@ export class MemoryService {
   }
 
   /**
+   * Recompute quality_score for every live memory (Feature 15). Returns the
+   * number of memories rescored and the resulting score distribution.
+   */
+  async scoreMemories(now: Date = new Date()): Promise<{
+    scored: number;
+    averageScore: number;
+  }> {
+    const memories = this.repository.queryMemories({ includeArchived: true });
+    const entries = memories.map((m) => ({
+      id: m.id,
+      score: computeQualityScore(m, now),
+    }));
+    this.repository.setQualityScoreBulk(entries);
+    const avg =
+      entries.length > 0
+        ? entries.reduce((s, e) => s + e.score, 0) / entries.length
+        : 0;
+    return { scored: entries.length, averageScore: avg };
+  }
+
+  /**
    * Archive or unarchive memories (Feature 8). Archived memories are excluded
    * from search unless include_archived is set. Returns the count changed.
    */
@@ -577,6 +602,257 @@ export class MemoryService {
         : tags.some((t) => memTags.has(t));
     });
     return matched.slice(offset, offset + limit);
+  }
+
+  // ── Episodic chains (Feature 23) ────────────────────────────────────
+
+  /** All memories in an episode, ordered by sequence then creation. */
+  getEpisode(episodeId: string): Memory[] {
+    return this.repository.findByEpisode(episodeId);
+  }
+
+  /** Browse episodes by recency. */
+  listEpisodes(limit = 20, offset = 0): Array<{
+    episodeId: string;
+    count: number;
+    lastCreatedAt: Date;
+  }> {
+    return this.repository.listEpisodes(limit, offset);
+  }
+
+  // ── Proactive context (Feature 24) ──────────────────────────────────
+
+  /**
+   * Surface memories relevant to the current conversation context without an
+   * explicit query. Returns results whose confidence meets `threshold`.
+   * When `autoIngest` is set, the context itself is stored as an observation.
+   */
+  async proactiveContext(
+    context: string,
+    maxResults = 5,
+    threshold = 0.65,
+    autoIngest = false,
+  ): Promise<SearchResult[]> {
+    const results = await this.search(context, "associative", {
+      limit: maxResults * 3,
+      includeHistory: false,
+    });
+    const filtered = results
+      .filter((r) => r.confidence >= threshold)
+      .slice(0, maxResults);
+    if (autoIngest) {
+      await this.store(context, { type: "observation", auto_ingested: true });
+    }
+    return filtered;
+  }
+
+  // ── Tag management (Feature 16) ─────────────────────────────────────
+
+  listTags(
+    sortBy: "count" | "name" = "count",
+    limit = 100,
+    offset = 0,
+  ): Array<{ tag: string; count: number }> {
+    const entries = [...this.repository.tagCounts().entries()].map(
+      ([tag, count]) => ({ tag, count }),
+    );
+    entries.sort((a, b) =>
+      sortBy === "name" ? a.tag.localeCompare(b.tag) : b.count - a.count,
+    );
+    return entries.slice(offset, offset + limit);
+  }
+
+  /** Rewrite one tag to another across all memories; returns count changed. */
+  async renameTag(oldTag: string, newTag: string): Promise<number> {
+    return this.rewriteTags((tags) => {
+      if (!tags.includes(oldTag)) return null;
+      const next = tags.filter((t) => t !== oldTag);
+      if (!next.includes(newTag)) next.push(newTag);
+      return next;
+    });
+  }
+
+  /** Merge several source tags into one target tag; returns count changed. */
+  async mergeTags(sources: string[], target: string): Promise<number> {
+    const srcSet = new Set(sources);
+    return this.rewriteTags((tags) => {
+      if (!tags.some((t) => srcSet.has(t))) return null;
+      const next = tags.filter((t) => !srcSet.has(t));
+      if (!next.includes(target)) next.push(target);
+      return next;
+    });
+  }
+
+  /** Remove a tag from all memories; returns count changed. */
+  async deleteTag(tag: string): Promise<number> {
+    return this.rewriteTags((tags) =>
+      tags.includes(tag) ? tags.filter((t) => t !== tag) : null,
+    );
+  }
+
+  /**
+   * Apply a tag transform to every live memory carrying tags. The transform
+   * returns the new tag list, or null to skip. Only metadata is rewritten
+   * (vectors/content untouched).
+   */
+  private async rewriteTags(
+    transform: (tags: string[]) => string[] | null,
+  ): Promise<number> {
+    const memories = this.repository.queryMemories({ includeArchived: true });
+    const updates: Array<{ id: string; metadata: Record<string, unknown> }> = [];
+    for (const m of memories) {
+      const tags = memoryTags(m.metadata);
+      if (tags.length === 0) continue;
+      const next = transform(tags);
+      if (next === null) continue;
+      updates.push({ id: m.id, metadata: { ...m.metadata, tags: next } });
+    }
+    return this.repository.setMetadataBulk(updates);
+  }
+
+  // ── Memory consolidation (Feature 18) ──────────────────────────────
+
+  /**
+   * Periodic maintenance pass that prevents quality degradation (Feature 18):
+   *  - decay:   re-score all memories (recency-aware quality)
+   *  - cluster: find near-duplicate groups
+   *  - compress: merge each cluster (keep newest)
+   *  - forget:  archive unprotected memories below the quality threshold
+   *
+   * `action` selects the depth: "status" reports counts only; "recommend"
+   * returns what a run would do without changing anything; "run" performs it.
+   */
+  async consolidateMemories(
+    action: "run" | "status" | "recommend" = "recommend",
+    timeHorizon: "daily" | "weekly" | "monthly" = "weekly",
+  ): Promise<{
+    action: string;
+    timeHorizon: string;
+    total: number;
+    duplicateClusters: number;
+    forgetCandidates: number;
+    rescored?: number;
+    compressed?: number;
+    forgotten?: number;
+    averageQuality: number;
+  }> {
+    // Longer horizons prune more aggressively.
+    const forgetThreshold =
+      timeHorizon === "daily" ? 0.15 : timeHorizon === "monthly" ? 0.3 : 0.22;
+    const dupThreshold = 0.93;
+    const now = new Date();
+
+    const live = this.repository.queryMemories({ includeArchived: false });
+    const scored = live.map((m) => computeQualityScore(m, now));
+    const avgQuality =
+      scored.length > 0 ? scored.reduce((a, b) => a + b, 0) / scored.length : 0;
+    const forgetCandidates = live.filter(
+      (m, i) => scored[i] < forgetThreshold && !isProtected(m),
+    );
+    const clusters = this.repository.findDuplicateClusters(dupThreshold);
+
+    if (action === "status" || action === "recommend") {
+      return {
+        action,
+        timeHorizon,
+        total: live.length,
+        duplicateClusters: clusters.length,
+        forgetCandidates: forgetCandidates.length,
+        averageQuality: avgQuality,
+      };
+    }
+
+    // action === "run"
+    const { scored: rescored } = await this.scoreMemories(now);
+    let compressed = 0;
+    for (const c of clusters) {
+      await this.mergeDuplicates(c.keepId, c.duplicateIds, "keep_newest");
+      compressed += c.duplicateIds.length;
+    }
+    const forgotten = await this.setArchived(
+      forgetCandidates.map((m) => m.id),
+      true,
+    );
+
+    return {
+      action,
+      timeHorizon,
+      total: live.length,
+      duplicateClusters: clusters.length,
+      forgetCandidates: forgetCandidates.length,
+      rescored,
+      compressed,
+      forgotten,
+      averageQuality: avgQuality,
+    };
+  }
+
+  // ── Duplicate detection & merge (Feature 14) ────────────────────────
+
+  /** Find near-duplicate clusters at the given cosine threshold (0.5–1.0). */
+  findDuplicates(
+    threshold = 0.92,
+  ): Array<{ keepId: string; duplicateIds: string[] }> {
+    return this.repository.findDuplicateClusters(threshold);
+  }
+
+  /**
+   * Merge duplicate memories into `keepId`. Strategies:
+   *  - keep_content: keep the survivor's content as-is
+   *  - keep_newest:  adopt the newest member's content
+   *  - combine_content: concatenate all distinct contents (re-embedded)
+   * The merged-away memories are soft-deleted. Returns the survivor.
+   */
+  async mergeDuplicates(
+    keepId: string,
+    mergeIds: string[],
+    strategy: "keep_content" | "keep_newest" | "combine_content" = "keep_newest",
+  ): Promise<Memory | null> {
+    const keep = await this.repository.findById(keepId);
+    if (!keep) return null;
+    const members = (await this.repository.findByIds([keepId, ...mergeIds])).filter(
+      (m) => !isDeleted(m),
+    );
+
+    let content = keep.content;
+    if (strategy === "keep_newest") {
+      content = members.reduce((a, b) =>
+        a.updatedAt >= b.updatedAt ? a : b,
+      ).content;
+    } else if (strategy === "combine_content") {
+      const seen = new Set<string>();
+      const parts: string[] = [];
+      for (const m of members) {
+        const c = m.content.trim();
+        if (c && !seen.has(c)) {
+          seen.add(c);
+          parts.push(c);
+        }
+      }
+      content = parts.join("\n\n");
+    }
+
+    const merged =
+      content !== keep.content
+        ? await this.update(keepId, { content })
+        : keep;
+
+    // Soft-delete the merged-away duplicates.
+    this.repository.markDeletedBulk(mergeIds.filter((id) => id !== keepId));
+    return merged;
+  }
+
+  /** Auto-merge every near-duplicate cluster at a safe threshold (keep_newest). */
+  async cleanupDuplicates(
+    threshold = 0.92,
+  ): Promise<{ clusters: number; deleted: number }> {
+    const clusters = this.findDuplicates(threshold);
+    let deleted = 0;
+    for (const c of clusters) {
+      await this.mergeDuplicates(c.keepId, c.duplicateIds, "keep_newest");
+      deleted += c.duplicateIds.length;
+    }
+    return { clusters: clusters.length, deleted };
   }
 
   /**

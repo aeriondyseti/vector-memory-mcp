@@ -141,6 +141,40 @@ export function isProtected(memory: Memory): boolean {
   return Boolean(memory.pinned) || memory.importance === "critical";
 }
 
+const sigmoid01 = (x: number): number => 1 / (1 + Math.exp(-x));
+
+/**
+ * Derive a 0.0–1.0 quality score (Feature 15) from a memory's signals:
+ * usefulness feedback, access frequency relative to age, recency decay, and
+ * bonuses for its formal type (Feature 21) and importance. Pure and
+ * deterministic given `now`, so it can be recomputed on demand.
+ */
+export function computeQualityScore(memory: Memory, now: Date = new Date()): number {
+  const created = memory.createdAt.getTime();
+  const ageDays = Math.max(1, (now.getTime() - created) / (24 * 60 * 60 * 1000));
+
+  // Usefulness feedback (votes), squashed to [0,1].
+  const usefulnessSignal = sigmoid01(memory.usefulness / 3);
+
+  // Access frequency normalized by age (accesses per day).
+  const accessesPerDay = memory.accessCount / ageDays;
+  const frequencySignal = sigmoid01(accessesPerDay - 1);
+
+  // Recency: decays with time since last access.
+  const lastAccessed = (memory.lastAccessed ?? memory.createdAt).getTime();
+  const daysSinceAccess = Math.max(0, (now.getTime() - lastAccessed) / (24 * 60 * 60 * 1000));
+  const recencySignal = Math.pow(0.98, daysSinceAccess);
+
+  const typeBonus = MEMORY_TYPE_BONUS[(memory.metadata.type as string) ?? ""] ?? 0;
+  const importanceBonus = memory.importance
+    ? (IMPORTANCE_RANK[memory.importance] / 3) * 0.2
+    : 0.05;
+
+  const base =
+    0.4 * usefulnessSignal + 0.25 * frequencySignal + 0.15 * recencySignal;
+  return Math.max(0, Math.min(1, base + typeBonus * 0.5 + importanceBonus));
+}
+
 export function isDeleted(memory: Memory): boolean {
   return memory.supersededBy === DELETED_TOMBSTONE;
 }
