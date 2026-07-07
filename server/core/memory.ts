@@ -13,7 +13,61 @@ export interface Memory {
   lastAccessed: Date | null;
   /** Canonical project path this memory belongs to (null = untagged/legacy). */
   project: string | null;
+  /**
+   * Extended attributes (schema v2). Optional at construction — the repository
+   * defaults them on write and `rowToMemory` always populates them on read, so
+   * a value fetched from the store has these fully resolved.
+   */
+  /** Pinned memories are protected from deletion/cleanup unless forced. */
+  pinned?: boolean;
+  /** Archived memories are excluded from search by default. */
+  archived?: boolean;
+  /** Confidence level: uncertain | likely | confirmed | verified (null = unset). */
+  confidence?: MemoryConfidence | null;
+  /** Importance level: low | normal | high | critical (null = unset). */
+  importance?: MemoryImportance | null;
+  /** Auto-expiry timestamp; null = never expires. */
+  expiresAt?: Date | null;
+  /** Derived quality score (0.0–1.0); null = not yet scored. */
+  qualityScore?: number | null;
+  /** Episode grouping id for episodic memory chains (null = ungrouped). */
+  episodeId?: string | null;
+  /** Ordering within an episode (null = unordered). */
+  sequenceNumber?: number | null;
+  /** Explicit temporal predecessor within an episode (null = none). */
+  precedingMemoryId?: string | null;
 }
+
+export const MEMORY_CONFIDENCE_LEVELS = [
+  "uncertain",
+  "likely",
+  "confirmed",
+  "verified",
+] as const;
+export type MemoryConfidence = (typeof MEMORY_CONFIDENCE_LEVELS)[number];
+
+export const MEMORY_IMPORTANCE_LEVELS = [
+  "low",
+  "normal",
+  "high",
+  "critical",
+] as const;
+export type MemoryImportance = (typeof MEMORY_IMPORTANCE_LEVELS)[number];
+
+/**
+ * Domain-agnostic memory type taxonomy (Feature 21). `metadata.type` is
+ * validated against this set on write; the bonus feeds quality scoring.
+ */
+export const MEMORY_TYPE_BONUS: Record<string, number> = {
+  decision: 0.3,
+  error: 0.25,
+  learning: 0.25,
+  discovery: 0.2,
+  pattern: 0.2,
+  task: 0.15,
+  context: 0.1,
+  observation: 0.0,
+};
 
 export function isDeleted(memory: Memory): boolean {
   return memory.supersededBy === DELETED_TOMBSTONE;
@@ -31,6 +85,15 @@ export function memoryToDict(memory: Memory): Record<string, unknown> {
     accessCount: memory.accessCount,
     lastAccessed: memory.lastAccessed?.toISOString() ?? null,
     project: memory.project,
+    pinned: memory.pinned ?? false,
+    archived: memory.archived ?? false,
+    confidence: memory.confidence ?? null,
+    importance: memory.importance ?? null,
+    expiresAt: memory.expiresAt?.toISOString() ?? null,
+    qualityScore: memory.qualityScore ?? null,
+    episodeId: memory.episodeId ?? null,
+    sequenceNumber: memory.sequenceNumber ?? null,
+    precedingMemoryId: memory.precedingMemoryId ?? null,
   };
 }
 

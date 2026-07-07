@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { Database } from "bun:sqlite";
@@ -8,6 +8,7 @@ import { MemoryRepository } from "../server/core/memory.repository";
 import { EmbeddingsService } from "../server/core/embeddings.service";
 import { MemoryService } from "../server/core/memory.service";
 import { DELETED_TOMBSTONE } from "../server/core/memory";
+import { removeDir } from "./utils/test-helpers";
 
 describe("MemoryService", () => {
   let db: Database;
@@ -27,7 +28,8 @@ describe("MemoryService", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true });
+    db.close();
+    removeDir(tmpDir);
   });
 
   describe("createDatabase", () => {
@@ -220,7 +222,8 @@ describe("MemoryRepository", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true });
+    db.close();
+    removeDir(tmpDir);
   });
 
   describe("findHybrid", () => {

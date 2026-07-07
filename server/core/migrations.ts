@@ -66,7 +66,16 @@ export function runMigrations(db: Database): void {
       usefulness    REAL NOT NULL DEFAULT 0.0,
       access_count  INTEGER NOT NULL DEFAULT 0,
       last_accessed INTEGER,
-      project       TEXT
+      project       TEXT,
+      pinned        INTEGER NOT NULL DEFAULT 0,
+      archived      INTEGER NOT NULL DEFAULT 0,
+      confidence    TEXT,
+      importance    TEXT,
+      expires_at    INTEGER,
+      quality_score REAL,
+      episode_id    TEXT,
+      sequence_number INTEGER,
+      preceding_memory_id TEXT
     )
   `);
 
@@ -138,10 +147,12 @@ export function runMigrations(db: Database): void {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_conversation_created_at ON conversation_history(created_at)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_expires_at ON memories(expires_at)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_episode_id ON memories(episode_id)`);
 }
 
 /** Current schema version. Bump when adding a versioned migration below. */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 function getUserVersion(db: Database): number {
   const row = db.prepare("PRAGMA user_version").get() as
@@ -150,29 +161,37 @@ function getUserVersion(db: Database): number {
   return row?.user_version ?? 0;
 }
 
+/** Add a column to `memories` only if it does not already exist. */
+function addColumnIfMissing(db: Database, column: string, ddl: string): void {
+  const columns = db
+    .prepare("PRAGMA table_info(memories)")
+    .all() as Array<{ name: string }>;
+  if (!columns.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE memories ADD COLUMN ${ddl}`);
+  }
+}
+
 /**
  * Non-idempotent migrations (e.g. ALTER TABLE) gated by PRAGMA user_version.
  *
  * Concurrency-safe for multiple processes opening the same database: the
  * version is re-checked inside BEGIN IMMEDIATE, so the loser of a startup
  * race blocks on busy_timeout, then sees the bumped version and no-ops.
+ *
+ * Each step is applied in order and the version is bumped incrementally so a
+ * database at any prior version catches up to SCHEMA_VERSION.
  */
 function runVersionedMigrations(db: Database): void {
   if (getUserVersion(db) >= SCHEMA_VERSION) return;
 
   db.exec("BEGIN IMMEDIATE");
   try {
-    const version = getUserVersion(db);
+    let version = getUserVersion(db);
 
     if (version < 1) {
       // v1: project column on memories (fresh databases get it via CREATE
       // TABLE above; pre-existing databases need the ALTER).
-      const columns = db
-        .prepare("PRAGMA table_info(memories)")
-        .all() as Array<{ name: string }>;
-      if (!columns.some((c) => c.name === "project")) {
-        db.exec("ALTER TABLE memories ADD COLUMN project TEXT");
-      }
+      addColumnIfMissing(db, "project", "project TEXT");
 
       // Backfill from metadata where a project was recorded (waypoints).
       // Values are stored raw — they may be legacy display names rather than
@@ -184,7 +203,30 @@ function runVersionedMigrations(db: Database): void {
           AND json_extract(metadata, '$.project') IS NOT NULL
       `);
 
-      db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+      db.exec("PRAGMA user_version = 1");
+      version = 1;
+    }
+
+    if (version < 2) {
+      // v2: extended memory attribute columns (pinning, archiving, confidence/
+      // importance, TTL, quality score, episodic chains). All nullable or
+      // defaulted so existing rows remain valid; feature behavior layers on top.
+      addColumnIfMissing(db, "pinned", "pinned INTEGER NOT NULL DEFAULT 0");
+      addColumnIfMissing(db, "archived", "archived INTEGER NOT NULL DEFAULT 0");
+      addColumnIfMissing(db, "confidence", "confidence TEXT");
+      addColumnIfMissing(db, "importance", "importance TEXT");
+      addColumnIfMissing(db, "expires_at", "expires_at INTEGER");
+      addColumnIfMissing(db, "quality_score", "quality_score REAL");
+      addColumnIfMissing(db, "episode_id", "episode_id TEXT");
+      addColumnIfMissing(db, "sequence_number", "sequence_number INTEGER");
+      addColumnIfMissing(
+        db,
+        "preceding_memory_id",
+        "preceding_memory_id TEXT",
+      );
+
+      db.exec("PRAGMA user_version = 2");
+      version = 2;
     }
 
     db.exec("COMMIT");

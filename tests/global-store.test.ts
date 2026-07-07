@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createHash } from "crypto";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -12,7 +12,7 @@ import { MemoryService } from "../server/core/memory.service";
 import { normalizeProject, projectDisplayName } from "../server/core/project";
 import { globalLockPath } from "../server/transports/http/server";
 import type { Memory } from "../server/core/memory";
-import { createMockEmbeddings, fakeEmbedding, EMBEDDING_DIM } from "./utils/test-helpers";
+import { createMockEmbeddings, fakeEmbedding, EMBEDDING_DIM, removeDir } from "./utils/test-helpers";
 
 function makeMemory(id: string, content: string, project: string | null): Memory {
   return {
@@ -53,7 +53,7 @@ describe("versioned migration (project column)", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeDir(tmpDir);
   });
 
   test("adds project column to a pre-existing database and backfills from metadata", () => {
@@ -117,7 +117,7 @@ describe("repairConversationProjects", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeDir(tmpDir);
   });
 
   test("re-derives legacy project values from the session file cwd", async () => {
@@ -155,6 +155,7 @@ describe("repairConversationProjects", () => {
       .prepare("SELECT project FROM conversation_index_state WHERE session_id = 'sess-1'")
       .get() as { project: string };
     expect(state.project).toBe("/home/user/my-dashed-repo");
+    db.close();
   });
 
   test("best-effort slash prefix when the session file is gone", async () => {
@@ -171,6 +172,7 @@ describe("repairConversationProjects", () => {
       .prepare("SELECT project FROM conversation_history WHERE id = 'c1'")
       .get() as { project: string };
     expect(row.project).toBe("/home/user/repo");
+    db.close();
   });
 });
 
@@ -187,7 +189,7 @@ describe("pre-filtered project search", () => {
 
   afterEach(() => {
     db.close();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeDir(tmpDir);
   });
 
   test("small project returns its matches even inside a large shared db", async () => {
@@ -234,7 +236,7 @@ describe("MemoryService project behavior", () => {
 
   afterEach(() => {
     db.close();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeDir(tmpDir);
   });
 
   test("store stamps the configured project; per-item override is normalized", async () => {

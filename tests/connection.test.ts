@@ -1,8 +1,9 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { connectToDatabase, relocateLegacyLanceDir } from "../server/core/connection";
+import { removeDir } from "./utils/test-helpers";
 
 describe("relocateLegacyLanceDir", () => {
   let tmpDir: string;
@@ -14,7 +15,7 @@ describe("relocateLegacyLanceDir", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true });
+    removeDir(tmpDir);
   });
 
   const makeLanceDir = (path: string) => {

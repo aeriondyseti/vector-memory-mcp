@@ -50,6 +50,18 @@ export class MemoryRepository {
           ? new Date(row.last_accessed as number)
           : null,
       project: (row.project as string) ?? null,
+      pinned: Boolean(row.pinned),
+      archived: Boolean(row.archived),
+      confidence: (row.confidence as Memory["confidence"]) ?? null,
+      importance: (row.importance as Memory["importance"]) ?? null,
+      expiresAt:
+        row.expires_at != null ? new Date(row.expires_at as number) : null,
+      qualityScore:
+        row.quality_score != null ? (row.quality_score as number) : null,
+      episodeId: (row.episode_id as string) ?? null,
+      sequenceNumber:
+        row.sequence_number != null ? (row.sequence_number as number) : null,
+      precedingMemoryId: (row.preceding_memory_id as string) ?? null,
     };
   }
 
@@ -67,25 +79,49 @@ export class MemoryRepository {
   // Public API
   // ---------------------------------------------------------------------------
 
+  /** Column names for the memories table, in insert order. */
+  private static readonly MEMORY_COLUMNS =
+    "id, content, metadata, created_at, updated_at, superseded_by, usefulness, " +
+    "access_count, last_accessed, project, pinned, archived, confidence, " +
+    "importance, expires_at, quality_score, episode_id, sequence_number, " +
+    "preceding_memory_id";
+
+  private static readonly MEMORY_PLACEHOLDERS =
+    MemoryRepository.MEMORY_COLUMNS.split(",").map(() => "?").join(", ");
+
+  /** Bound values for the memories table, matching MEMORY_COLUMNS order. */
+  private static memoryValues(memory: Memory): Array<string | number | null> {
+    return [
+      memory.id,
+      memory.content,
+      JSON.stringify(memory.metadata),
+      memory.createdAt.getTime(),
+      memory.updatedAt.getTime(),
+      memory.supersededBy,
+      memory.usefulness,
+      memory.accessCount,
+      memory.lastAccessed?.getTime() ?? null,
+      memory.project,
+      memory.pinned ? 1 : 0,
+      memory.archived ? 1 : 0,
+      memory.confidence ?? null,
+      memory.importance ?? null,
+      memory.expiresAt?.getTime() ?? null,
+      memory.qualityScore ?? null,
+      memory.episodeId ?? null,
+      memory.sequenceNumber ?? null,
+      memory.precedingMemoryId ?? null,
+    ];
+  }
+
   async insert(memory: Memory): Promise<void> {
     const tx = this.db.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO memories (id, content, metadata, created_at, updated_at, superseded_by, usefulness, access_count, last_accessed, project)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO memories (${MemoryRepository.MEMORY_COLUMNS})
+           VALUES (${MemoryRepository.MEMORY_PLACEHOLDERS})`,
         )
-        .run(
-          memory.id,
-          memory.content,
-          JSON.stringify(memory.metadata),
-          memory.createdAt.getTime(),
-          memory.updatedAt.getTime(),
-          memory.supersededBy,
-          memory.usefulness,
-          memory.accessCount,
-          memory.lastAccessed?.getTime() ?? null,
-          memory.project,
-        );
+        .run(...MemoryRepository.memoryValues(memory));
 
       this.db
         .prepare("INSERT INTO memories_vec (id, vector) VALUES (?, ?)")
@@ -104,21 +140,10 @@ export class MemoryRepository {
       // Main table supports INSERT OR REPLACE
       this.db
         .prepare(
-          `INSERT OR REPLACE INTO memories (id, content, metadata, created_at, updated_at, superseded_by, usefulness, access_count, last_accessed, project)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT OR REPLACE INTO memories (${MemoryRepository.MEMORY_COLUMNS})
+           VALUES (${MemoryRepository.MEMORY_PLACEHOLDERS})`,
         )
-        .run(
-          memory.id,
-          memory.content,
-          JSON.stringify(memory.metadata),
-          memory.createdAt.getTime(),
-          memory.updatedAt.getTime(),
-          memory.supersededBy,
-          memory.usefulness,
-          memory.accessCount,
-          memory.lastAccessed?.getTime() ?? null,
-          memory.project,
-        );
+        .run(...MemoryRepository.memoryValues(memory));
 
       this.db.prepare("DELETE FROM memories_vec WHERE id = ?").run(memory.id);
       this.db

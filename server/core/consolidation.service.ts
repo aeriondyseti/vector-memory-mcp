@@ -257,7 +257,7 @@ export class ConsolidationService {
       if (!options.dryRun && options.archive && report.errors.length === 0) {
         const dir = dirname(sourceDb);
         try {
-          renameSync(dir, `${dir}.migrated`);
+          renameDirReleasing(dir, `${dir}.migrated`);
         } catch (e) {
           report.errors.push(
             `archive failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -803,6 +803,34 @@ export class ConsolidationService {
       }
     });
     tx();
+  }
+}
+
+/**
+ * Rename a directory, tolerating Windows' delayed file-handle release.
+ *
+ * bun:sqlite does not finalize prepared-statement handles on `Database.close()`
+ * — they linger until GC. On Windows those handles keep the source db file
+ * locked, so renaming the enclosing `.vector-memory/` directory throws
+ * EBUSY/EPERM even though every connection was already closed. Forcing a GC
+ * pass releases them; retry with backoff as a fallback if release is delayed.
+ * A no-op cost on POSIX, where the first rename succeeds immediately.
+ */
+function renameDirReleasing(from: string, to: string, maxAttempts = 10): void {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if ((code !== "EBUSY" && code !== "EPERM") || attempt === maxAttempts) {
+        throw e;
+      }
+      if (typeof Bun !== "undefined" && typeof Bun.gc === "function") {
+        Bun.gc(true);
+      }
+      Bun.sleepSync(50 * attempt);
+    }
   }
 }
 

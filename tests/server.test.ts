@@ -1,9 +1,10 @@
 import { describe, expect, test, beforeEach, afterEach, mock } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { Database } from "bun:sqlite";
 import { tools } from "../server/transports/mcp/tools";
+import { removeDir } from "./utils/test-helpers";
 import {
   handleToolCall,
   handleStoreMemories,
@@ -41,7 +42,8 @@ describe("mcp", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true });
+    db.close();
+    removeDir(tmpDir);
   });
 
   describe("tools", () => {
