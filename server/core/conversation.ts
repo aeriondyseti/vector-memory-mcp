@@ -77,6 +77,8 @@ export interface SearchResult {
   usefulness?: number;
   accessCount?: number;
   lastAccessed?: Date | null;
+  pinned?: boolean;
+  importance?: import("./memory").MemoryImportance | null;
   // History-specific fields
   sessionId?: string;
   role?: string;
@@ -133,4 +135,18 @@ export interface SearchOptions {
   after?: Date;
   /** Filter both memories and history created before this date. Merged into historyFilters; explicit historyFilters.before takes precedence. */
   before?: Date;
+  /** Include archived memories in results (default false). */
+  includeArchived?: boolean;
+  /** Include expired (TTL-passed) memories in results (default false). */
+  includeExpired?: boolean;
+  /** Minimum confidence level to include (memories below this rank are dropped). */
+  minConfidence?: import("./memory").MemoryConfidence;
+  /** Minimum importance level to include. */
+  minImportance?: import("./memory").MemoryImportance;
+  /** Restrict to memories whose metadata.type equals this value. */
+  type?: string;
+  /** Restrict to memories carrying these tags (metadata.tags). */
+  tags?: string[];
+  /** Tag match mode: "any" (default) or "all". */
+  tagMatch?: "any" | "all";
 }

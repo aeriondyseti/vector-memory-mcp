@@ -200,7 +200,7 @@ describeE2E("E2E: Stdio Transport", () => {
     const deleteText = await callToolStdio(proc, 5, "delete_memories", {
       ids: [memoryId],
     });
-    expect(deleteText).toContain("deleted successfully");
+    expect(deleteText).toContain("Deleted 1 memories");
 
     // 6. Search should NOT find deleted memory
     const searchAfterDelete = await callToolStdio(proc, 6, "search_memories", {
@@ -310,7 +310,7 @@ describeE2E("E2E: HTTP Transport", () => {
     const deleteText = await callToolHttp(baseUrl, sessionId, 5, "delete_memories", {
       ids: [memoryId],
     });
-    expect(deleteText).toContain("deleted successfully");
+    expect(deleteText).toContain("Deleted 1 memories");
 
     // 6. Search should NOT find deleted memory
     const searchAfterDelete = await callToolHttp(baseUrl, sessionId, 6, "search_memories", {

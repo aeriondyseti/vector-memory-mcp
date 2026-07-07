@@ -1,7 +1,19 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { MemoryService } from "../../core/memory.service";
 import type { ConversationHistoryService } from "../../core/conversation.service";
-import type { SearchIntent } from "../../core/memory";
+import type {
+  SearchIntent,
+  MemoryAttributes,
+  MemoryConfidence,
+  MemoryImportance,
+} from "../../core/memory";
+import {
+  coerceConfidence,
+  coerceImportance,
+  MEMORY_CONFIDENCE_LEVELS,
+  MEMORY_IMPORTANCE_LEVELS,
+} from "../../core/memory";
+import { MaintenanceService } from "../../core/maintenance.service";
 import type { HistoryFilters, SearchResult } from "../../core/conversation";
 import { resolveDateFilters } from "../../core/time-expr";
 import { DEBUG } from "../../config/index";
@@ -86,6 +98,62 @@ function asObject(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function asStringLevel<T extends string>(
+  value: unknown,
+  valid: readonly T[],
+): T | undefined {
+  return typeof value === "string" && (valid as readonly string[]).includes(value)
+    ? (value as T)
+    : undefined;
+}
+
+/**
+ * Parse the schema-v2 memory attributes from a tool argument object, validating
+ * enum values. Throws on an invalid confidence/importance so bad input surfaces
+ * at the tool boundary. `expires_at` accepts an ISO date or null; `ttl_seconds`
+ * is a convenience that computes expires_at from now.
+ */
+function parseAttributes(obj: Record<string, unknown>): MemoryAttributes {
+  const a: MemoryAttributes = {};
+  if (typeof obj.pinned === "boolean") a.pinned = obj.pinned;
+  if (typeof obj.archived === "boolean") a.archived = obj.archived;
+
+  const conf = coerceConfidence(obj.confidence);
+  if (conf !== undefined) a.confidence = conf;
+  const imp = coerceImportance(obj.importance);
+  if (imp !== undefined) a.importance = imp;
+
+  if (obj.expires_at !== undefined) {
+    a.expiresAt = obj.expires_at === null
+      ? null
+      : parseDate(obj.expires_at, "expires_at") ?? null;
+  } else if (typeof obj.ttl_seconds === "number" && Number.isFinite(obj.ttl_seconds)) {
+    a.expiresAt = new Date(Date.now() + obj.ttl_seconds * 1000);
+  }
+
+  if (obj.episode_id !== undefined) {
+    a.episodeId = typeof obj.episode_id === "string" ? obj.episode_id : null;
+  }
+  if (typeof obj.sequence_number === "number" && Number.isFinite(obj.sequence_number)) {
+    a.sequenceNumber = Math.floor(obj.sequence_number);
+  }
+  if (obj.preceding_memory_id !== undefined) {
+    a.precedingMemoryId =
+      typeof obj.preceding_memory_id === "string" ? obj.preceding_memory_id : null;
+  }
+  return a;
+}
+
+/** Build a MaintenanceService bound to the service's live db connection. */
+function maintenanceFor(service: MemoryService): MaintenanceService {
+  const repo = service.getRepository();
+  const db = repo.getDb();
+  const dbPath =
+    (db.prepare("PRAGMA database_list").all() as Array<{ name: string; file: string }>)
+      .find((r) => r.name === "main")?.file ?? "";
+  return new MaintenanceService(db, dbPath, repo);
+}
+
 export async function handleStoreMemories(
   args: Record<string, unknown> | undefined,
   service: MemoryService
@@ -103,14 +171,19 @@ export async function handleStoreMemories(
   }
 
   const ids: string[] = [];
-  for (const item of memories) {
-    const memory = await service.store(
-      item.content,
-      item.metadata ?? {},
-      item.embedding_text,
-      typeof item.project === "string" ? item.project : undefined
-    );
-    ids.push(memory.id);
+  try {
+    for (const item of memories) {
+      const memory = await service.store(
+        item.content,
+        item.metadata ?? {},
+        item.embedding_text,
+        typeof item.project === "string" ? item.project : undefined,
+        parseAttributes(item as Record<string, unknown>)
+      );
+      ids.push(memory.id);
+    }
+  } catch (e) {
+    return errorResult(errorText(e));
   }
 
   return {
@@ -130,29 +203,72 @@ export async function handleDeleteMemories(
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
-  let ids: string[];
+  // Selectors: ids, tags, and/or a creation-date range (after/before/time_expr).
+  let ids: string[] | undefined;
+  if (args?.ids !== undefined) {
+    try {
+      ids = asArray(args.ids, "ids");
+    } catch (e) {
+      return errorResult(errorText(e));
+    }
+  }
+
+  let tags: string[] | undefined;
+  if (args?.tags !== undefined) {
+    try {
+      tags = asArray(args.tags, "tags");
+    } catch (e) {
+      return errorResult(errorText(e));
+    }
+  }
+
+  let dateFilters: { after?: Date; before?: Date };
   try {
-    ids = asArray(args?.ids, "ids");
+    dateFilters = resolveDateFilters({
+      after: args?.after,
+      before: args?.before,
+      time_expr: args?.time_expr,
+    });
   } catch (e) {
     return errorResult(errorText(e));
   }
-  const results: string[] = [];
 
-  for (const id of ids) {
-    const success = await service.delete(id);
-    results.push(
-      success ? `Memory ${id} deleted successfully` : `Memory ${id} not found`
-    );
+  const tagMatch = args?.tag_match === "all" ? "all" : "any";
+  const dryRun = asBool(args?.dry_run, false);
+  const force = asBool(args?.force, false);
+
+  let result;
+  try {
+    result = await service.deleteMemories({
+      ids,
+      tags,
+      tagMatch,
+      after: dateFilters.after,
+      before: dateFilters.before,
+      dryRun,
+      force,
+    });
+  } catch (e) {
+    return errorResult(errorText(e));
   }
 
-  return {
-    content: [
-      {
-        type: "text",
-        text: results.join("\n"),
-      },
-    ],
-  };
+  const lines: string[] = [];
+  lines.push(
+    dryRun
+      ? `Dry run: ${result.deletedIds.length} memories would be deleted (${result.matched} matched).`
+      : `Deleted ${result.deletedIds.length} memories (${result.matched} matched).`,
+  );
+  if (result.skippedProtected.length > 0) {
+    lines.push(
+      `Skipped ${result.skippedProtected.length} protected (pinned/critical) memories — pass force: true to include them.`,
+    );
+  }
+  if (result.deletedIds.length > 0) {
+    lines.push("IDs:");
+    lines.push(...result.deletedIds.map((id) => `- ${id}`));
+  }
+
+  return { content: [{ type: "text", text: lines.join("\n") }] };
 }
 
 
@@ -180,11 +296,18 @@ export async function handleUpdateMemories(
       continue;
     }
 
-    const memory = await service.update(update.id, {
-      content: update.content,
-      embeddingText: update.embedding_text,
-      metadata: update.metadata,
-    });
+    let memory;
+    try {
+      memory = await service.update(update.id, {
+        content: update.content,
+        embeddingText: update.embedding_text,
+        metadata: update.metadata,
+        attributes: parseAttributes(update as Record<string, unknown>),
+      });
+    } catch (e) {
+      results.push(`Memory ${update.id}: ${errorText(e)}`);
+      continue;
+    }
 
     if (memory) {
       results.push(`Memory ${update.id} updated successfully`);
@@ -237,6 +360,15 @@ export async function handleSearchMemories(
     return errorResult(errorText(e));
   }
 
+  let tags: string[] | undefined;
+  if (args?.tags !== undefined) {
+    try {
+      tags = asArray(args.tags, "tags");
+    } catch (e) {
+      return errorResult(errorText(e));
+    }
+  }
+
   const results = await service.search(query, intent, {
     limit,
     scope: asOptionalString(args?.scope),
@@ -247,6 +379,13 @@ export async function handleSearchMemories(
     offset,
     after: dateFilters.after,
     before: dateFilters.before,
+    includeArchived: asBool(args?.include_archived, false),
+    includeExpired: asBool(args?.include_expired, false),
+    minConfidence: asStringLevel<MemoryConfidence>(args?.min_confidence, MEMORY_CONFIDENCE_LEVELS),
+    minImportance: asStringLevel<MemoryImportance>(args?.min_importance, MEMORY_IMPORTANCE_LEVELS),
+    type: asOptionalString(args?.type),
+    tags,
+    tagMatch: args?.tag_match === "all" ? "all" : "any",
   });
 
   if (results.length === 0) {
@@ -256,10 +395,34 @@ export async function handleSearchMemories(
   }
 
   const formatted = results.map((r) => formatSearchResult(r, includeDeleted));
+  const maxChars = asInt(args?.max_response_chars, 0, 0, 1_000_000);
+  const text = joinWithinBudget(formatted, "\n\n---\n\n", maxChars);
 
   return {
-    content: [{ type: "text", text: formatted.join("\n\n---\n\n") }],
+    content: [{ type: "text", text }],
   };
+}
+
+/**
+ * Join formatted blocks with a separator, stopping at whole-block boundaries
+ * once the character budget would be exceeded (Feature 7). A budget of 0 means
+ * unlimited. Appends a truncation notice with the omitted count.
+ */
+function joinWithinBudget(blocks: string[], sep: string, maxChars: number): string {
+  if (maxChars <= 0 || blocks.length === 0) return blocks.join(sep);
+  const kept: string[] = [];
+  let used = 0;
+  for (const block of blocks) {
+    const addition = kept.length === 0 ? block.length : sep.length + block.length;
+    if (used + addition > maxChars && kept.length > 0) break;
+    kept.push(block);
+    used += addition;
+  }
+  const omitted = blocks.length - kept.length;
+  const text = kept.join(sep);
+  return omitted > 0
+    ? `${text}${sep}[truncated: ${omitted} more result${omitted === 1 ? "" : "s"} omitted to fit max_response_chars]`
+    : text;
 }
 
 function formatMemoryDetail(
@@ -274,6 +437,14 @@ function formatMemoryDetail(
   if (memory.metadata && Object.keys(memory.metadata).length > 0) {
     result += `\nMetadata: ${JSON.stringify(memory.metadata)}`;
   }
+  const flags: string[] = [];
+  if (memory.pinned) flags.push("pinned");
+  if (memory.archived) flags.push("archived");
+  if (memory.importance) flags.push(`importance:${memory.importance}`);
+  if (memory.confidence) flags.push(`confidence:${memory.confidence}`);
+  if (memory.expiresAt) flags.push(`expires:${memory.expiresAt.toISOString()}`);
+  if (memory.episodeId) flags.push(`episode:${memory.episodeId}`);
+  if (flags.length > 0) result += `\nAttributes: ${flags.join(", ")}`;
   result += `\nCreated: ${memory.createdAt.toISOString()}`;
   result += `\nUpdated: ${memory.updatedAt.toISOString()}`;
   if (memory.supersededBy) {
@@ -284,6 +455,8 @@ function formatMemoryDetail(
 
 function formatSearchResult(r: SearchResult, includeDeleted: boolean): string {
   let result = `[${r.source}] ID: ${r.id}\nConfidence: ${r.confidence.toFixed(2)}`;
+  if (r.pinned) result += ` | 📌 pinned`;
+  if (r.importance && r.importance !== "normal") result += ` | importance: ${r.importance}`;
   if (r.project) {
     result += `\nProject: ${r.project}`;
   }
@@ -529,6 +702,181 @@ export async function handleReindexSession(
   };
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i++;
+  }
+  return `${value.toFixed(2)} ${units[i]}`;
+}
+
+function textResult(text: string): CallToolResult {
+  return { content: [{ type: "text", text }] };
+}
+
+export async function handleMemoryHealth(
+  _args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const h = maintenanceFor(service).health();
+  const lines = [
+    "Memory Health",
+    `- Total records: ${h.total} (live: ${h.live}, deleted: ${h.deleted})`,
+    `- Archived: ${h.archived} | Pinned: ${h.pinned} | Expired: ${h.expired}`,
+    `- Avg usefulness: ${h.avgUsefulness.toFixed(3)} | Total accesses: ${h.totalAccessCount}`,
+    `- Conversation chunks: ${h.conversationChunks}`,
+    `- Schema version: ${h.schemaVersion} | Journal: ${h.journalMode} | Backend: ${h.backend}`,
+    `- Database: ${h.dbPath}`,
+  ];
+  return textResult(lines.join("\n"));
+}
+
+export async function handleStorageStats(
+  _args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const s = maintenanceFor(service).storageStats();
+  const lines = [
+    "Storage Stats",
+    `- File size: ${formatBytes(s.fileSizeBytes)} (WAL: ${formatBytes(s.walSizeBytes)})`,
+    `- Pages: ${s.pageCount} × ${s.pageSize} B | Free pages: ${s.freelistPages} (${(s.fragmentation * 100).toFixed(1)}% fragmentation)`,
+    `- Rows — memories: ${s.memoryRows}, conversation_history: ${s.conversationRows}`,
+    `- Database: ${s.dbPath}`,
+  ];
+  return textResult(lines.join("\n"));
+}
+
+export async function handleOptimizeDatabase(
+  _args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const r = maintenanceFor(service).optimize();
+  return textResult(
+    `Database optimized (VACUUM + ANALYZE).\n- Pages: ${r.pagesBefore} → ${r.pagesAfter}\n- Reclaimed: ${formatBytes(r.freedBytes)}`,
+  );
+}
+
+export async function handleCleanupOrphans(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const repair = asBool(args?.repair, false);
+  const r = maintenanceFor(service).cleanupOrphans(repair);
+  const lines = [
+    repair ? "Orphan cleanup (repair)" : "Orphan cleanup (report only)",
+    `- Memories missing vectors: ${r.memoriesWithoutVector.length}${r.memoriesWithoutVector.length ? " (run backfill / re-embed)" : ""}`,
+    `- Dangling vectors (no memory): ${r.vectorsWithoutMemory.length}`,
+    `- Memories missing FTS entries: ${r.memoriesWithoutFts.length}`,
+    `- Dangling FTS entries (no memory): ${r.ftsWithoutMemory.length}`,
+  ];
+  if (repair) {
+    lines.push(
+      `- Removed dangling vectors: ${r.removedDanglingVectors}, FTS entries: ${r.removedDanglingFts}`,
+    );
+  } else if (
+    r.vectorsWithoutMemory.length > 0 ||
+    r.ftsWithoutMemory.length > 0
+  ) {
+    lines.push("Pass repair: true to remove dangling sidecar entries.");
+  }
+  return textResult(lines.join("\n"));
+}
+
+export async function handleMaintenanceHistory(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const limit = asInt(args?.limit, 50, 1, 1000);
+  const entries = maintenanceFor(service).getHistory(limit);
+  if (entries.length === 0) {
+    return textResult("No maintenance history recorded yet.");
+  }
+  const lines = entries.map(
+    (e) => `${e.timestamp} — ${e.action}: ${JSON.stringify(e.details)}`,
+  );
+  return textResult(`Maintenance history (most recent first):\n${lines.join("\n")}`);
+}
+
+export async function handleFindStaleMemories(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const staleDays = asInt(args?.stale_days, 90, 1, 100000);
+  const excludePinned = asBool(args?.exclude_pinned, true);
+  const limit = asInt(args?.limit, 100, 1, 1000);
+  let excludeImportance: MemoryImportance[] | undefined;
+  if (args?.exclude_importance !== undefined) {
+    try {
+      excludeImportance = asArray<MemoryImportance>(args.exclude_importance, "exclude_importance");
+    } catch (e) {
+      return errorResult(errorText(e));
+    }
+  }
+
+  const stale = await service.findStale({
+    staleDays,
+    excludePinned,
+    excludeImportance,
+    limit,
+  });
+  if (stale.length === 0) {
+    return textResult(`No memories stale beyond ${staleDays} days.`);
+  }
+  const now = Date.now();
+  const lines = stale.map((m) => {
+    const last = m.lastAccessed ?? m.createdAt;
+    const days = Math.floor((now - last.getTime()) / (24 * 60 * 60 * 1000));
+    return `- ${m.id} | last accessed ${days}d ago | usefulness ${m.usefulness} | ${m.content.slice(0, 80)}`;
+  });
+  return textResult(`Stale memories (>${staleDays}d):\n${lines.join("\n")}`);
+}
+
+export async function handleSearchByTags(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  let tags: string[];
+  try {
+    tags = asArray(args?.tags, "tags");
+  } catch (e) {
+    return errorResult(errorText(e));
+  }
+  if (tags.length === 0) return errorResult("tags must be a non-empty array");
+
+  const tagMatch = args?.tag_match === "all" ? "all" : "any";
+  const limit = asInt(args?.limit, 20, 1, 1000);
+  const offset = asInt(args?.offset, 0, 0, 10000);
+
+  const memories = await service.searchByTags(tags, tagMatch, limit, offset);
+  if (memories.length === 0) {
+    return textResult(`No memories found with tags [${tags.join(", ")}] (match: ${tagMatch}).`);
+  }
+  const blocks = memories.map((m) => formatMemoryDetail(m.id, m));
+  return textResult(blocks.join("\n\n---\n\n"));
+}
+
+export async function handleGetSessionContext(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const scope = args?.scope === "all" ? "all" : "project";
+  const maxChars = asInt(args?.max_chars, 4000, 100, 100000);
+  const project = asOptionalString(args?.project);
+
+  const ctx = await service.getSessionContext({ project, scope, maxChars });
+  if (ctx.memories.length === 0) {
+    return textResult(
+      "No pinned or critical memories for this project. Pin important memories (update_memories with pinned: true) or mark them importance: \"critical\" to build a session-context menu.",
+    );
+  }
+  const header = `Session context — ${ctx.memories.length} always-relevant memor${ctx.memories.length === 1 ? "y" : "ies"}${ctx.truncated ? " (truncated to fit budget)" : ""}:`;
+  return textResult(`${header}\n${ctx.text}`);
+}
+
 export async function handleToolCall(
   name: string,
   args: Record<string, unknown> | undefined,
@@ -557,6 +905,22 @@ export async function handleToolCall(
       return handleListIndexedSessions(args, service);
     case "reindex_session":
       return handleReindexSession(args, service);
+    case "memory_health":
+      return handleMemoryHealth(args, service);
+    case "get_storage_stats":
+      return handleStorageStats(args, service);
+    case "optimize_database":
+      return handleOptimizeDatabase(args, service);
+    case "cleanup_orphans":
+      return handleCleanupOrphans(args, service);
+    case "get_maintenance_history":
+      return handleMaintenanceHistory(args, service);
+    case "find_stale_memories":
+      return handleFindStaleMemories(args, service);
+    case "search_by_tags":
+      return handleSearchByTags(args, service);
+    case "get_session_context":
+      return handleGetSessionContext(args, service);
     default:
       return errorResult(`Unknown tool: ${name}`);
   }

@@ -198,6 +198,121 @@ export class MemoryRepository {
   }
 
   /**
+   * Fetch memories matching optional filters, WITHOUT loading embeddings
+   * (callers here — deletion planning, stale detection, tag search — don't
+   * need vectors). Ordered by `created_at` descending.
+   */
+  queryMemories(opts?: {
+    after?: Date;
+    before?: Date;
+    project?: string;
+    includeDeleted?: boolean;
+    includeArchived?: boolean;
+    lastAccessedBefore?: Date;
+    limit?: number;
+    offset?: number;
+  }): Memory[] {
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+
+    if (!opts?.includeDeleted) {
+      conditions.push("superseded_by IS NOT ?");
+      params.push(DELETED_TOMBSTONE);
+    }
+    if (!opts?.includeArchived) conditions.push("archived = 0");
+    if (opts?.after) {
+      conditions.push("created_at > ?");
+      params.push(opts.after.getTime());
+    }
+    if (opts?.before) {
+      conditions.push("created_at < ?");
+      params.push(opts.before.getTime());
+    }
+    if (opts?.project) {
+      conditions.push("project = ?");
+      params.push(opts.project);
+    }
+    if (opts?.lastAccessedBefore) {
+      // Treat never-accessed rows by created_at for staleness.
+      conditions.push("COALESCE(last_accessed, created_at) < ?");
+      params.push(opts.lastAccessedBefore.getTime());
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const limit = opts?.limit != null ? ` LIMIT ${Math.max(0, Math.floor(opts.limit))}` : "";
+    const offset = opts?.offset != null ? ` OFFSET ${Math.max(0, Math.floor(opts.offset))}` : "";
+
+    const rows = this.db
+      .prepare(`SELECT * FROM memories ${where} ORDER BY created_at DESC${limit}${offset}`)
+      .all(...params) as Array<Record<string, unknown>>;
+
+    return rows.map((row) => this.rowToMemory(row));
+  }
+
+  /** Mark multiple memories deleted in one transaction. Returns count changed. */
+  markDeletedBulk(ids: string[]): number {
+    if (ids.length === 0) return 0;
+    const now = Date.now();
+    let changed = 0;
+    const stmt = this.db.prepare(
+      "UPDATE memories SET superseded_by = ?, updated_at = ? WHERE id = ? AND superseded_by IS NOT ?",
+    );
+    const tx = this.db.transaction(() => {
+      for (const id of ids) {
+        changed += stmt.run(DELETED_TOMBSTONE, now, id, DELETED_TOMBSTONE).changes;
+      }
+    });
+    tx();
+    return changed;
+  }
+
+  /** Aggregate health counters over the memories table. */
+  healthStats(now: number = Date.now()): {
+    total: number;
+    live: number;
+    deleted: number;
+    archived: number;
+    pinned: number;
+    expired: number;
+    avgUsefulness: number;
+    totalAccessCount: number;
+  } {
+    const row = this.db
+      .prepare(
+        `SELECT
+           COUNT(*) AS total,
+           SUM(CASE WHEN superseded_by IS ? THEN 1 ELSE 0 END) AS deleted,
+           SUM(CASE WHEN archived = 1 THEN 1 ELSE 0 END) AS archived,
+           SUM(CASE WHEN pinned = 1 THEN 1 ELSE 0 END) AS pinned,
+           SUM(CASE WHEN expires_at IS NOT NULL AND expires_at <= ? THEN 1 ELSE 0 END) AS expired,
+           AVG(usefulness) AS avg_usefulness,
+           SUM(access_count) AS total_access
+         FROM memories`,
+      )
+      .get(DELETED_TOMBSTONE, now) as {
+      total: number;
+      deleted: number | null;
+      archived: number | null;
+      pinned: number | null;
+      expired: number | null;
+      avg_usefulness: number | null;
+      total_access: number | null;
+    };
+
+    const deleted = row.deleted ?? 0;
+    return {
+      total: row.total,
+      live: row.total - deleted,
+      deleted,
+      archived: row.archived ?? 0,
+      pinned: row.pinned ?? 0,
+      expired: row.expired ?? 0,
+      avgUsefulness: row.avg_usefulness ?? 0,
+      totalAccessCount: row.total_access ?? 0,
+    };
+  }
+
+  /**
    * Increment access_count and update last_accessed for multiple memories in batch.
    * Uses batched IN clauses to stay within SQLite parameter limits.
    */
@@ -228,13 +343,21 @@ export class MemoryRepository {
    * false-empty results for small projects in a large shared database.
    *
    * Date filters remain post-RRF on the final row fetch, so date-filtered
-   * queries may return fewer than `limit` results.
+   * queries may return fewer than `limit` results. Archived and expired (TTL)
+   * memories are excluded by the same post-RRF WHERE unless opted in.
    */
   async findHybrid(
     embedding: number[],
     query: string,
     limit: number,
-    filters?: { after?: Date; before?: Date; project?: string },
+    filters?: {
+      after?: Date;
+      before?: Date;
+      project?: string;
+      includeArchived?: boolean;
+      includeExpired?: boolean;
+      now?: number;
+    },
   ): Promise<HybridRow[]> {
     const candidateLimit = limit * 5;
     const project = filters?.project;
@@ -296,6 +419,13 @@ export class MemoryRepository {
     if (filters?.before) {
       conditions.push("created_at < ?");
       params.push(filters.before.getTime());
+    }
+    if (!filters?.includeArchived) {
+      conditions.push("archived = 0");
+    }
+    if (!filters?.includeExpired) {
+      conditions.push("(expires_at IS NULL OR expires_at > ?)");
+      params.push(filters?.now ?? Date.now());
     }
 
     const rows = this.db

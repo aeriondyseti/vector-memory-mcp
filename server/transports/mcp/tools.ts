@@ -53,6 +53,48 @@ For long content (>1000 chars), provide embedding_text with a searchable summary
                 "Project to tag this memory with (canonical absolute path). " +
                 "Defaults to the current project — only pass this to file a memory under a different project.",
             },
+            pinned: {
+              type: "boolean",
+              description:
+                "Pin this memory: protected from deletion/cleanup unless force is used, and surfaced in get_session_context.",
+            },
+            archived: {
+              type: "boolean",
+              description: "Archive this memory: excluded from search unless include_archived is set.",
+            },
+            confidence: {
+              type: "string",
+              enum: ["uncertain", "likely", "confirmed", "verified"],
+              description: "Confidence level in this memory's accuracy.",
+            },
+            importance: {
+              type: "string",
+              enum: ["low", "normal", "high", "critical"],
+              description:
+                "Importance level. 'critical' implies pin-protection against deletion.",
+            },
+            expires_at: {
+              type: "string",
+              description:
+                "ISO date after which this memory auto-expires (excluded from search). Omit for no expiry.",
+            },
+            ttl_seconds: {
+              type: "integer",
+              description:
+                "Convenience alternative to expires_at: seconds from now until expiry.",
+            },
+            episode_id: {
+              type: "string",
+              description: "Group this memory into a named episode (episodic chains).",
+            },
+            sequence_number: {
+              type: "integer",
+              description: "Ordering position within the episode.",
+            },
+            preceding_memory_id: {
+              type: "string",
+              description: "ID of the memory that temporally precedes this one in the episode.",
+            },
           },
           required: ["content"],
         },
@@ -65,20 +107,43 @@ For long content (>1000 chars), provide embedding_text with a searchable summary
 export const deleteMemoriesTool: Tool = {
   name: "delete_memories",
   description:
-    "Remove memories that are no longer needed—outdated info, superseded decisions, or incorrect content. " +
-    "Deleted memories can be recovered via search_memories with include_deleted: true.",
+    "Remove memories by ID, tag, and/or creation-date range. Deleted memories can be recovered via " +
+    "search_memories with include_deleted: true.\n\n" +
+    "Provide at least one selector (ids, tags, after/before/time_expr). Pinned and 'critical'-importance " +
+    "memories are protected unless force: true. Use dry_run: true to preview what would be deleted.",
   inputSchema: {
     type: "object",
     properties: {
       ids: {
         type: "array",
         description: "IDs of memories to delete.",
-        items: {
-          type: "string",
-        },
+        items: { type: "string" },
+      },
+      tags: {
+        type: "array",
+        description: "Delete memories carrying these tags (metadata.tags).",
+        items: { type: "string" },
+      },
+      tag_match: {
+        type: "string",
+        enum: ["any", "all"],
+        description: "Whether a memory must match any (default) or all of the given tags.",
+      },
+      after: { type: "string", description: "Delete memories created after this ISO date." },
+      before: { type: "string", description: "Delete memories created before this ISO date." },
+      time_expr: {
+        type: "string",
+        description: "Relative time filter (e.g. 'past 30 days'), resolved to 'after'.",
+      },
+      dry_run: {
+        type: "boolean",
+        description: "Preview matches without deleting (returns count + IDs). Default false.",
+      },
+      force: {
+        type: "boolean",
+        description: "Include pinned/critical memories in the deletion. Default false.",
       },
     },
-    required: ["ids"],
   },
 };
 
@@ -117,6 +182,32 @@ Use to correct content, refine embedding text, or replace metadata without chang
               type: "object",
               description: "New metadata (replaces existing entirely).",
               additionalProperties: true,
+            },
+            pinned: { type: "boolean", description: "Pin/unpin this memory." },
+            archived: { type: "boolean", description: "Archive/unarchive this memory." },
+            confidence: {
+              type: "string",
+              enum: ["uncertain", "likely", "confirmed", "verified"],
+              description: "Set the confidence level.",
+            },
+            importance: {
+              type: "string",
+              enum: ["low", "normal", "high", "critical"],
+              description: "Set the importance level.",
+            },
+            expires_at: {
+              type: "string",
+              description: "Set an ISO expiry date, or null to clear it.",
+            },
+            ttl_seconds: {
+              type: "integer",
+              description: "Set expiry to this many seconds from now.",
+            },
+            episode_id: { type: "string", description: "Set/clear the episode grouping." },
+            sequence_number: { type: "integer", description: "Set the episode sequence position." },
+            preceding_memory_id: {
+              type: "string",
+              description: "Set/clear the temporal predecessor.",
             },
           },
           required: ["id"],
@@ -231,6 +322,43 @@ SCOPE: Memories are stored globally across all projects. By default, search cove
         type: "string",
         description:
           "Natural relative time filter, resolved to 'after' date. Examples: 'past 7 days', 'last 2 weeks', 'past 3 hours'. Ignored if explicit 'after' is provided.",
+      },
+      include_archived: {
+        type: "boolean",
+        description: "Include archived memories in results (default: false).",
+      },
+      include_expired: {
+        type: "boolean",
+        description: "Include expired (TTL-passed) memories in results (default: false).",
+      },
+      min_confidence: {
+        type: "string",
+        enum: ["uncertain", "likely", "confirmed", "verified"],
+        description: "Only return memories at or above this confidence level.",
+      },
+      min_importance: {
+        type: "string",
+        enum: ["low", "normal", "high", "critical"],
+        description: "Only return memories at or above this importance level.",
+      },
+      type: {
+        type: "string",
+        description: "Only return memories whose metadata.type equals this value.",
+      },
+      tags: {
+        type: "array",
+        items: { type: "string" },
+        description: "Only return memories carrying these tags (metadata.tags).",
+      },
+      tag_match: {
+        type: "string",
+        enum: ["any", "all"],
+        description: "Whether results must match any (default) or all of the given tags.",
+      },
+      max_response_chars: {
+        type: "integer",
+        description:
+          "Cap the response size, truncating at whole-memory boundaries with an omitted-count notice. 0 = unlimited (default).",
       },
     },
     required: ["query", "intent", "reason_for_search"],
@@ -408,6 +536,120 @@ export const reindexSessionTool: Tool = {
   },
 };
 
+export const memoryHealthTool: Tool = {
+  name: "memory_health",
+  description:
+    "Report memory store health: total/live/deleted counts, archived/pinned/expired counts, average usefulness, conversation chunks, schema version, and database path.",
+  inputSchema: { type: "object", properties: {} },
+};
+
+export const getStorageStatsTool: Tool = {
+  name: "get_storage_stats",
+  description:
+    "Report on-disk storage: database and WAL file sizes, page count/size, freelist (fragmentation estimate), and per-table row counts.",
+  inputSchema: { type: "object", properties: {} },
+};
+
+export const optimizeDatabaseTool: Tool = {
+  name: "optimize_database",
+  description:
+    "Reclaim space and refresh query-planner stats by running SQLite VACUUM + ANALYZE. Recommended after large bulk deletes. Records to the maintenance history.",
+  inputSchema: { type: "object", properties: {} },
+};
+
+export const cleanupOrphansTool: Tool = {
+  name: "cleanup_orphans",
+  description:
+    "Detect inconsistencies between the memories table and its vector/FTS sidecars. Report-only by default; pass repair: true to remove dangling sidecar entries (never deletes memories).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      repair: {
+        type: "boolean",
+        description: "Remove dangling vector/FTS entries that have no matching memory. Default false.",
+      },
+    },
+  },
+};
+
+export const getMaintenanceHistoryTool: Tool = {
+  name: "get_maintenance_history",
+  description: "List recorded maintenance actions (optimize/cleanup) with timestamps and details, most recent first.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      limit: { type: "integer", description: "Maximum entries to return (default: 50)." },
+    },
+  },
+};
+
+export const findStaleMemoriesTool: Tool = {
+  name: "find_stale_memories",
+  description:
+    "Find memories not accessed within a threshold, to review for archiving or deletion. Excludes pinned memories by default.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      stale_days: { type: "integer", description: "Days since last access to consider stale (default: 90)." },
+      exclude_pinned: { type: "boolean", description: "Exclude pinned memories (default: true)." },
+      exclude_importance: {
+        type: "array",
+        items: { type: "string", enum: ["low", "normal", "high", "critical"] },
+        description: "Importance levels to exclude from results (e.g. ['high','critical']).",
+      },
+      limit: { type: "integer", description: "Maximum results (default: 100)." },
+    },
+  },
+};
+
+export const searchByTagsTool: Tool = {
+  name: "search_by_tags",
+  description:
+    "Retrieve memories by tag without a semantic query, ordered by recency. Use search_memories for relevance-ranked retrieval.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      tags: {
+        type: "array",
+        items: { type: "string" },
+        description: "Tags to match against metadata.tags.",
+      },
+      tag_match: {
+        type: "string",
+        enum: ["any", "all"],
+        description: "Match any (default) or all of the given tags.",
+      },
+      limit: { type: "integer", description: "Maximum results (default: 20)." },
+      offset: { type: "integer", description: "Results to skip for pagination (default: 0)." },
+    },
+    required: ["tags"],
+  },
+};
+
+export const getSessionContextTool: Tool = {
+  name: "get_session_context",
+  description:
+    "Return the always-relevant memories (pinned, or importance 'critical') for the current project as a compact, character-budgeted summary suitable for injecting at session start. Complements query-time search: important context loads without an explicit query.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      project: {
+        type: "string",
+        description: "Project to build context for (canonical path). Defaults to the current project.",
+      },
+      scope: {
+        type: "string",
+        enum: ["project", "all"],
+        description: "'project' (default) for the current/given project only, or 'all' across projects.",
+      },
+      max_chars: {
+        type: "integer",
+        description: "Character budget for the summary (default: 4000). Truncates at whole-memory boundaries.",
+      },
+    },
+  },
+};
+
 export const tools: Tool[] = [
   storeMemoriesTool,
   updateMemoriesTool,
@@ -420,4 +662,12 @@ export const tools: Tool[] = [
   indexConversationsTool,
   listIndexedSessionsTool,
   reindexSessionTool,
+  memoryHealthTool,
+  getStorageStatsTool,
+  optimizeDatabaseTool,
+  cleanupOrphansTool,
+  getMaintenanceHistoryTool,
+  findStaleMemoriesTool,
+  searchByTagsTool,
+  getSessionContextTool,
 ];

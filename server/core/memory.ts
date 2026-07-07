@@ -69,6 +69,78 @@ export const MEMORY_TYPE_BONUS: Record<string, number> = {
   observation: 0.0,
 };
 
+/** Rank map for importance level comparisons (higher = more important). */
+export const IMPORTANCE_RANK: Record<MemoryImportance, number> = {
+  low: 0,
+  normal: 1,
+  high: 2,
+  critical: 3,
+};
+
+/** Rank map for confidence level comparisons (higher = more confident). */
+export const CONFIDENCE_RANK: Record<MemoryConfidence, number> = {
+  uncertain: 0,
+  likely: 1,
+  confirmed: 2,
+  verified: 3,
+};
+
+/**
+ * Settable extended attributes for a memory. Every field is optional; an
+ * omitted field leaves the existing value unchanged on update, or the column
+ * default on store. `null` explicitly clears a nullable attribute.
+ */
+export interface MemoryAttributes {
+  pinned?: boolean;
+  archived?: boolean;
+  confidence?: MemoryConfidence | null;
+  importance?: MemoryImportance | null;
+  expiresAt?: Date | null;
+  episodeId?: string | null;
+  sequenceNumber?: number | null;
+  precedingMemoryId?: string | null;
+}
+
+/**
+ * Validate and coerce a caller-supplied confidence level. Throws on an
+ * unrecognized non-null value so bad input surfaces at the tool boundary.
+ */
+export function coerceConfidence(value: unknown): MemoryConfidence | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value === "string" && (MEMORY_CONFIDENCE_LEVELS as readonly string[]).includes(value)) {
+    return value as MemoryConfidence;
+  }
+  throw new Error(
+    `confidence must be one of: ${MEMORY_CONFIDENCE_LEVELS.join(", ")}`,
+  );
+}
+
+/** Validate and coerce a caller-supplied importance level. */
+export function coerceImportance(value: unknown): MemoryImportance | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value === "string" && (MEMORY_IMPORTANCE_LEVELS as readonly string[]).includes(value)) {
+    return value as MemoryImportance;
+  }
+  throw new Error(
+    `importance must be one of: ${MEMORY_IMPORTANCE_LEVELS.join(", ")}`,
+  );
+}
+
+/** True when a memory is expired as of `now` (has a TTL that has passed). */
+export function isExpired(memory: Memory, now: Date = new Date()): boolean {
+  return memory.expiresAt != null && memory.expiresAt.getTime() <= now.getTime();
+}
+
+/**
+ * True when a memory is protected from deletion/cleanup: pinned, or of
+ * `critical` importance (which implies pin-protection per roadmap Feature 9).
+ */
+export function isProtected(memory: Memory): boolean {
+  return Boolean(memory.pinned) || memory.importance === "critical";
+}
+
 export function isDeleted(memory: Memory): boolean {
   return memory.supersededBy === DELETED_TOMBSTONE;
 }

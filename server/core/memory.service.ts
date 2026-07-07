@@ -1,7 +1,20 @@
 import { randomUUID, createHash } from "crypto";
 import { basename } from "path";
-import type { Memory, SearchIntent, IntentProfile, HybridRow } from "./memory";
-import { isDeleted, computeConfidence } from "./memory";
+import type {
+  Memory,
+  SearchIntent,
+  IntentProfile,
+  HybridRow,
+  MemoryAttributes,
+  MemoryImportance,
+} from "./memory";
+import {
+  isDeleted,
+  isProtected,
+  computeConfidence,
+  CONFIDENCE_RANK,
+  IMPORTANCE_RANK,
+} from "./memory";
 import type { SearchResult, SearchOptions, HistoryFilters } from "./conversation";
 import type { MemoryRepository } from "./memory.repository";
 import type { EmbeddingsService } from "./embeddings.service";
@@ -19,6 +32,47 @@ const INTENT_PROFILES: Record<SearchIntent, IntentProfile> = {
 };
 
 const sigmoid = (x: number): number => 1 / (1 + Math.exp(-x));
+
+/** Extract a memory's tag list from metadata.tags (tolerant of bad shapes). */
+export function memoryTags(metadata: Record<string, unknown>): string[] {
+  const raw = metadata.tags;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((t): t is string => typeof t === "string");
+}
+
+/**
+ * Post-retrieval attribute filters that can't be expressed cheaply in SQL
+ * (level rank comparisons, metadata.type, tag containment). Returns true when
+ * the memory passes every active filter.
+ */
+function matchesAttributeFilters(
+  m: Memory,
+  options?: SearchOptions,
+): boolean {
+  if (!options) return true;
+
+  if (options.minConfidence) {
+    const rank = m.confidence ? CONFIDENCE_RANK[m.confidence] : -1;
+    if (rank < CONFIDENCE_RANK[options.minConfidence]) return false;
+  }
+  if (options.minImportance) {
+    const rank = m.importance ? IMPORTANCE_RANK[m.importance] : -1;
+    if (rank < IMPORTANCE_RANK[options.minImportance]) return false;
+  }
+  if (options.type) {
+    if ((m.metadata.type as string | undefined) !== options.type) return false;
+  }
+  if (options.tags && options.tags.length > 0) {
+    const tags = new Set(memoryTags(m.metadata));
+    const match = options.tagMatch ?? "any";
+    const has =
+      match === "all"
+        ? options.tags.every((t) => tags.has(t))
+        : options.tags.some((t) => tags.has(t));
+    if (!has) return false;
+  }
+  return true;
+}
 
 // Modest same-project ranking boost for scope:"all" searches — same-repo
 // memories win ties without hiding cross-project results.
@@ -57,7 +111,8 @@ export class MemoryService {
     content: string,
     metadata: Record<string, unknown> = {},
     embeddingText?: string,
-    project?: string
+    project?: string,
+    attributes?: MemoryAttributes
   ): Promise<Memory> {
     const id = randomUUID();
     const now = new Date();
@@ -76,6 +131,14 @@ export class MemoryService {
       accessCount: 0,
       lastAccessed: now, // Initialize to createdAt for fair discovery
       project: project !== undefined ? normalizeProject(project) : this.project,
+      pinned: attributes?.pinned ?? false,
+      archived: attributes?.archived ?? false,
+      confidence: attributes?.confidence ?? null,
+      importance: attributes?.importance ?? null,
+      expiresAt: attributes?.expiresAt ?? null,
+      episodeId: attributes?.episodeId ?? null,
+      sequenceNumber: attributes?.sequenceNumber ?? null,
+      precedingMemoryId: attributes?.precedingMemoryId ?? null,
     };
 
     await this.repository.insert(memory);
@@ -118,6 +181,7 @@ export class MemoryService {
       content?: string;
       embeddingText?: string;
       metadata?: Record<string, unknown>;
+      attributes?: MemoryAttributes;
     }
   ): Promise<Memory | null> {
     const existing = await this.repository.findById(id);
@@ -135,12 +199,29 @@ export class MemoryService {
       newEmbedding = await this.embeddings.embed(textToEmbed);
     }
 
+    // Merge attributes: an omitted (undefined) field keeps the existing value;
+    // an explicit null clears a nullable attribute.
+    const attrs = updates.attributes ?? {};
+    const pick = <T>(next: T | undefined, prev: T): T =>
+      next !== undefined ? next : prev;
+
     const updatedMemory: Memory = {
       ...existing,
       content: newContent,
       embedding: newEmbedding,
       metadata: newMetadata,
       updatedAt: new Date(),
+      pinned: pick(attrs.pinned, existing.pinned ?? false),
+      archived: pick(attrs.archived, existing.archived ?? false),
+      confidence: pick(attrs.confidence, existing.confidence ?? null),
+      importance: pick(attrs.importance, existing.importance ?? null),
+      expiresAt: pick(attrs.expiresAt, existing.expiresAt ?? null),
+      episodeId: pick(attrs.episodeId, existing.episodeId ?? null),
+      sequenceNumber: pick(attrs.sequenceNumber, existing.sequenceNumber ?? null),
+      precedingMemoryId: pick(
+        attrs.precedingMemoryId,
+        existing.precedingMemoryId ?? null,
+      ),
     };
 
     await this.repository.upsert(updatedMemory);
@@ -224,14 +305,14 @@ export class MemoryService {
           : normalizeProject(scope);
 
     const hasDateFilters = options?.after || options?.before;
-    const memoryFilters =
-      hasDateFilters || projectFilter !== undefined
-        ? {
-            after: options?.after,
-            before: options?.before,
-            project: projectFilter,
-          }
-        : undefined;
+    const memoryFilters = {
+      after: options?.after,
+      before: options?.before,
+      project: projectFilter,
+      includeArchived: options?.includeArchived ?? false,
+      includeExpired: options?.includeExpired ?? false,
+      now: now.getTime(),
+    };
 
     // Merge top-level date filters into history filters so after/before
     // apply uniformly. Explicit history_after/history_before take precedence,
@@ -261,6 +342,7 @@ export class MemoryService {
             .then((candidates) =>
               candidates
                 .filter((m) => includeDeleted || !isDeleted(m))
+                .filter((m) => matchesAttributeFilters(m, options))
                 .map((candidate) => ({
                   id: candidate.id,
                   content: candidate.content,
@@ -277,6 +359,8 @@ export class MemoryService {
                   usefulness: candidate.usefulness,
                   accessCount: candidate.accessCount,
                   lastAccessed: candidate.lastAccessed,
+                  pinned: candidate.pinned ?? false,
+                  importance: candidate.importance ?? null,
                 }))
             )
         : Promise.resolve([] as SearchResult[]);
@@ -328,6 +412,191 @@ export class MemoryService {
   async trackAccess(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
     this.repository.bulkUpdateAccess(ids, new Date());
+  }
+
+  /**
+   * Flexible deletion (Feature 2): select memories by explicit ids, tag match,
+   * and/or creation-date range, then soft-delete them. Pinned and critical
+   * memories are protected unless `force` is set. `dryRun` previews the plan
+   * without writing. Requires at least one selector to avoid mass deletion.
+   */
+  async deleteMemories(criteria: {
+    ids?: string[];
+    tags?: string[];
+    tagMatch?: "any" | "all";
+    before?: Date;
+    after?: Date;
+    dryRun?: boolean;
+    force?: boolean;
+  }): Promise<{
+    matched: number;
+    deletedIds: string[];
+    skippedProtected: string[];
+    dryRun: boolean;
+  }> {
+    const hasSelector =
+      (criteria.ids && criteria.ids.length > 0) ||
+      (criteria.tags && criteria.tags.length > 0) ||
+      criteria.before !== undefined ||
+      criteria.after !== undefined;
+    if (!hasSelector) {
+      throw new Error(
+        "delete requires at least one selector: ids, tags, before, or after",
+      );
+    }
+
+    // Resolve the candidate set.
+    let candidates: Memory[];
+    if (criteria.ids && criteria.ids.length > 0) {
+      candidates = (await this.repository.findByIds(criteria.ids)).filter(
+        (m) => !isDeleted(m),
+      );
+      if (criteria.after)
+        candidates = candidates.filter((m) => m.createdAt > criteria.after!);
+      if (criteria.before)
+        candidates = candidates.filter((m) => m.createdAt < criteria.before!);
+    } else {
+      candidates = this.repository.queryMemories({
+        after: criteria.after,
+        before: criteria.before,
+        includeArchived: true, // deletion applies to archived too
+      });
+    }
+
+    // Tag filter.
+    if (criteria.tags && criteria.tags.length > 0) {
+      const match = criteria.tagMatch ?? "any";
+      const wanted = criteria.tags;
+      candidates = candidates.filter((m) => {
+        const tags = new Set(memoryTags(m.metadata));
+        return match === "all"
+          ? wanted.every((t) => tags.has(t))
+          : wanted.some((t) => tags.has(t));
+      });
+    }
+
+    // Protection.
+    const skippedProtected: string[] = [];
+    const toDelete: string[] = [];
+    for (const m of candidates) {
+      if (!criteria.force && isProtected(m)) {
+        skippedProtected.push(m.id);
+      } else {
+        toDelete.push(m.id);
+      }
+    }
+
+    if (criteria.dryRun) {
+      return {
+        matched: candidates.length,
+        deletedIds: toDelete,
+        skippedProtected,
+        dryRun: true,
+      };
+    }
+
+    this.repository.markDeletedBulk(toDelete);
+    return {
+      matched: candidates.length,
+      deletedIds: toDelete,
+      skippedProtected,
+      dryRun: false,
+    };
+  }
+
+  /**
+   * Stale item detection (Feature 13): memories not accessed within
+   * `staleDays`, excluding pinned and (optionally) high-importance memories.
+   */
+  async findStale(opts?: {
+    staleDays?: number;
+    excludePinned?: boolean;
+    excludeImportance?: MemoryImportance[];
+    limit?: number;
+  }): Promise<Memory[]> {
+    const days = opts?.staleDays ?? 90;
+    const threshold = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    let rows = this.repository.queryMemories({
+      lastAccessedBefore: threshold,
+      limit: opts?.limit ?? 100,
+    });
+    if (opts?.excludePinned ?? true) rows = rows.filter((m) => !m.pinned);
+    const excl = opts?.excludeImportance;
+    if (excl && excl.length > 0) {
+      rows = rows.filter((m) => !m.importance || !excl.includes(m.importance));
+    }
+    return rows;
+  }
+
+  /**
+   * Tag-based retrieval (Feature 12): memories carrying the given tags,
+   * ordered by recency, without a semantic query.
+   */
+  async searchByTags(
+    tags: string[],
+    tagMatch: "any" | "all" = "any",
+    limit = 20,
+    offset = 0,
+  ): Promise<Memory[]> {
+    if (tags.length === 0) return [];
+    const all = this.repository.queryMemories({});
+    const matched = all.filter((m) => {
+      const memTags = new Set(memoryTags(m.metadata));
+      return tagMatch === "all"
+        ? tags.every((t) => memTags.has(t))
+        : tags.some((t) => memTags.has(t));
+    });
+    return matched.slice(offset, offset + limit);
+  }
+
+  /**
+   * Session-context menu (Feature 28): the always-relevant memories (pinned or
+   * critical) for a project, ordered by importance then recency, capped to a
+   * character budget so it can be injected at session start without bloat.
+   */
+  async getSessionContext(opts?: {
+    project?: string;
+    scope?: "project" | "all";
+    maxChars?: number;
+  }): Promise<{ memories: Memory[]; text: string; truncated: boolean }> {
+    const maxChars = opts?.maxChars ?? 4000;
+    const project =
+      opts?.scope === "all"
+        ? undefined
+        : opts?.project
+          ? normalizeProject(opts.project)
+          : (this.project ?? undefined);
+
+    const rows = this.repository
+      .queryMemories({ project })
+      .filter((m) => isProtected(m));
+
+    rows.sort((a, b) => {
+      const ra = a.importance ? IMPORTANCE_RANK[a.importance] : 1;
+      const rb = b.importance ? IMPORTANCE_RANK[b.importance] : 1;
+      if (rb !== ra) return rb - ra;
+      const la = (a.lastAccessed ?? a.createdAt).getTime();
+      const lb = (b.lastAccessed ?? b.createdAt).getTime();
+      return lb - la;
+    });
+
+    const included: Memory[] = [];
+    const parts: string[] = [];
+    let used = 0;
+    let truncated = false;
+    for (const m of rows) {
+      const label = m.importance === "critical" ? "critical" : "pinned";
+      const block = `- [${label}] ${m.content}`;
+      if (used + block.length + 1 > maxChars && included.length > 0) {
+        truncated = true;
+        break;
+      }
+      included.push(m);
+      parts.push(block);
+      used += block.length + 1;
+    }
+
+    return { memories: included, text: parts.join("\n"), truncated };
   }
 
   private static readonly UUID_ZERO =
