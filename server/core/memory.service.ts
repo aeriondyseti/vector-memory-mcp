@@ -250,7 +250,8 @@ export class MemoryService {
   private computeMemoryScore(
     candidate: HybridRow,
     profile: IntentProfile,
-    now: Date
+    now: Date,
+    mode: "semantic" | "exact" | "hybrid" = "semantic"
   ): number {
     const relevance = candidate.rrfScore;
     const lastAccessed = candidate.lastAccessed ?? candidate.createdAt;
@@ -263,10 +264,18 @@ export class MemoryService {
       (candidate.usefulness + Math.log(candidate.accessCount + 1)) / 5
     );
     const { weights, jitter } = profile;
-    const score =
+    let score =
       weights.relevance * relevance +
       weights.recency * recency +
       weights.utility * utility;
+
+    // Hybrid mode blends the intent-based score with stored usefulness so
+    // proven-useful memories rank higher than pure semantic similarity would.
+    if (mode === "hybrid") {
+      const QUALITY_BOOST = 0.4;
+      score = score * (1 - QUALITY_BOOST) + utility * QUALITY_BOOST;
+    }
+
     return score * (1 + (Math.random() * 2 - 1) * jitter);
   }
 
@@ -305,6 +314,7 @@ export class MemoryService {
           : normalizeProject(scope);
 
     const hasDateFilters = options?.after || options?.before;
+    const mode = options?.mode ?? "semantic";
     const memoryFilters = {
       after: options?.after,
       before: options?.before,
@@ -312,6 +322,7 @@ export class MemoryService {
       includeArchived: options?.includeArchived ?? false,
       includeExpired: options?.includeExpired ?? false,
       now: now.getTime(),
+      mode,
     };
 
     // Merge top-level date filters into history filters so after/before
@@ -351,7 +362,7 @@ export class MemoryService {
                   updatedAt: candidate.updatedAt,
                   source: "memory" as const,
                   score:
-                    this.computeMemoryScore(candidate, profile, now) *
+                    this.computeMemoryScore(candidate, profile, now, mode) *
                     boost(candidate.project),
                   confidence: computeConfidence(candidate.signals),
                   project: candidate.project,
@@ -502,6 +513,25 @@ export class MemoryService {
       skippedProtected,
       dryRun: false,
     };
+  }
+
+  /**
+   * Archive or unarchive memories (Feature 8). Archived memories are excluded
+   * from search unless include_archived is set. Returns the count changed.
+   */
+  async setArchived(ids: string[], archived: boolean): Promise<number> {
+    if (ids.length === 0) return 0;
+    return this.repository.setArchivedBulk(ids, archived);
+  }
+
+  /**
+   * Expire memories on demand (Feature 10): soft-delete every live memory whose
+   * TTL has passed. Returns the ids that were tombstoned.
+   */
+  async expireMemories(now: Date = new Date()): Promise<string[]> {
+    const ids = this.repository.findExpiredIds(now.getTime());
+    if (ids.length > 0) this.repository.markDeletedBulk(ids);
+    return ids;
   }
 
   /**

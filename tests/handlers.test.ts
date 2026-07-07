@@ -71,6 +71,7 @@ describe("handleSearchMemories", () => {
       includeArchived: false,
       includeExpired: false,
       tagMatch: "any",
+      mode: "semantic",
     });
   });
 
@@ -105,6 +106,7 @@ describe("handleSearchMemories", () => {
       includeArchived: false,
       includeExpired: false,
       tagMatch: "any",
+      mode: "semantic",
     });
   });
 

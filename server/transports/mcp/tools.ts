@@ -360,6 +360,12 @@ SCOPE: Memories are stored globally across all projects. By default, search cove
         description:
           "Cap the response size, truncating at whole-memory boundaries with an omitted-count notice. 0 = unlimited (default).",
       },
+      mode: {
+        type: "string",
+        enum: ["semantic", "exact", "hybrid"],
+        description:
+          "Ranking mode: 'semantic' (default, vector + keyword), 'exact' (keyword/FTS only), or 'hybrid' (semantic blended with proven usefulness).",
+      },
     },
     required: ["query", "intent", "reason_for_search"],
   },
@@ -650,6 +656,38 @@ export const getSessionContextTool: Tool = {
   },
 };
 
+export const archiveMemoryTool: Tool = {
+  name: "archive_memory",
+  description:
+    "Archive memories: excluded from search by default (unlike deletion, archived memories remain first-class and are restored with unarchive_memory). Use for memories that are no longer active but worth keeping.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      ids: { type: "array", items: { type: "string" }, description: "Memory IDs to archive." },
+    },
+    required: ["ids"],
+  },
+};
+
+export const unarchiveMemoryTool: Tool = {
+  name: "unarchive_memory",
+  description: "Restore archived memories so they appear in search again.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      ids: { type: "array", items: { type: "string" }, description: "Memory IDs to unarchive." },
+    },
+    required: ["ids"],
+  },
+};
+
+export const expireMemoriesTool: Tool = {
+  name: "expire_memories",
+  description:
+    "Tombstone (soft-delete) every memory whose TTL (expires_at) has passed. Expired memories are already hidden from search; this reclaims them on demand.",
+  inputSchema: { type: "object", properties: {} },
+};
+
 export const tools: Tool[] = [
   storeMemoriesTool,
   updateMemoriesTool,
@@ -670,4 +708,7 @@ export const tools: Tool[] = [
   findStaleMemoriesTool,
   searchByTagsTool,
   getSessionContextTool,
+  archiveMemoryTool,
+  unarchiveMemoryTool,
+  expireMemoriesTool,
 ];

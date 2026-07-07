@@ -266,6 +266,35 @@ export class MemoryRepository {
     return changed;
   }
 
+  /** Set the archived flag on multiple memories in one transaction. */
+  setArchivedBulk(ids: string[], archived: boolean): number {
+    if (ids.length === 0) return 0;
+    const now = Date.now();
+    let changed = 0;
+    const stmt = this.db.prepare(
+      "UPDATE memories SET archived = ?, updated_at = ? WHERE id = ? AND superseded_by IS NOT ?",
+    );
+    const tx = this.db.transaction(() => {
+      for (const id of ids) {
+        changed += stmt.run(archived ? 1 : 0, now, id, DELETED_TOMBSTONE).changes;
+      }
+    });
+    tx();
+    return changed;
+  }
+
+  /** IDs of live (non-deleted) memories whose TTL has passed as of `now`. */
+  findExpiredIds(now: number = Date.now()): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id FROM memories
+         WHERE expires_at IS NOT NULL AND expires_at <= ?
+           AND superseded_by IS NOT ?`,
+      )
+      .all(now, DELETED_TOMBSTONE) as Array<{ id: string }>;
+    return rows.map((r) => r.id);
+  }
+
   /** Aggregate health counters over the memories table. */
   healthStats(now: number = Date.now()): {
     total: number;
@@ -357,26 +386,31 @@ export class MemoryRepository {
       includeArchived?: boolean;
       includeExpired?: boolean;
       now?: number;
+      /** "semantic" (default) / "hybrid" use vector+FTS; "exact" uses FTS only. */
+      mode?: "semantic" | "exact" | "hybrid";
     },
   ): Promise<HybridRow[]> {
     const candidateLimit = limit * 5;
     const project = filters?.project;
 
     // Vector KNN search (brute-force cosine similarity in JS), pre-filtered
-    // by project when scoped
-    const vectorResults = knnSearch(
-      this.db,
-      "memories_vec",
-      embedding,
-      candidateLimit,
-      project !== undefined
-        ? {
-            sql: `SELECT v.id, v.vector FROM memories_vec v
+    // by project when scoped. Skipped entirely in "exact" mode (FTS-only).
+    const vectorResults =
+      filters?.mode === "exact"
+        ? []
+        : knnSearch(
+            this.db,
+            "memories_vec",
+            embedding,
+            candidateLimit,
+            project !== undefined
+              ? {
+                  sql: `SELECT v.id, v.vector FROM memories_vec v
                   JOIN memories m ON v.id = m.id WHERE m.project = ?`,
-            params: [project],
-          }
-        : undefined,
-    );
+                  params: [project],
+                }
+              : undefined,
+          );
 
     // Full-text search, pre-filtered by project when scoped
     const ftsQuery = sanitizeFtsQuery(query);

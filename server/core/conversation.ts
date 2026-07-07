@@ -149,4 +149,9 @@ export interface SearchOptions {
   tags?: string[];
   /** Tag match mode: "any" (default) or "all". */
   tagMatch?: "any" | "all";
+  /**
+   * Ranking mode: "semantic" (default, vector+FTS), "exact" (FTS keyword only),
+   * or "hybrid" (semantic blended with stored usefulness).
+   */
+  mode?: "semantic" | "exact" | "hybrid";
 }

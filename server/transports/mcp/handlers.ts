@@ -386,6 +386,8 @@ export async function handleSearchMemories(
     type: asOptionalString(args?.type),
     tags,
     tagMatch: args?.tag_match === "all" ? "all" : "any",
+    mode:
+      args?.mode === "exact" || args?.mode === "hybrid" ? args.mode : "semantic",
   });
 
   if (results.length === 0) {
@@ -877,6 +879,34 @@ export async function handleGetSessionContext(
   return textResult(`${header}\n${ctx.text}`);
 }
 
+export async function handleArchiveMemory(
+  args: Record<string, unknown> | undefined,
+  service: MemoryService,
+  archived: boolean
+): Promise<CallToolResult> {
+  let ids: string[];
+  try {
+    ids = asArray(args?.ids, "ids");
+  } catch (e) {
+    return errorResult(errorText(e));
+  }
+  const changed = await service.setArchived(ids, archived);
+  return textResult(
+    `${archived ? "Archived" : "Unarchived"} ${changed} of ${ids.length} memories.`,
+  );
+}
+
+export async function handleExpireMemories(
+  _args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const ids = await service.expireMemories();
+  if (ids.length === 0) return textResult("No expired memories to tombstone.");
+  return textResult(
+    `Tombstoned ${ids.length} expired memories:\n${ids.map((id) => `- ${id}`).join("\n")}`,
+  );
+}
+
 export async function handleToolCall(
   name: string,
   args: Record<string, unknown> | undefined,
@@ -921,6 +951,12 @@ export async function handleToolCall(
       return handleSearchByTags(args, service);
     case "get_session_context":
       return handleGetSessionContext(args, service);
+    case "archive_memory":
+      return handleArchiveMemory(args, service, true);
+    case "unarchive_memory":
+      return handleArchiveMemory(args, service, false);
+    case "expire_memories":
+      return handleExpireMemories(args, service);
     default:
       return errorResult(`Unknown tool: ${name}`);
   }
