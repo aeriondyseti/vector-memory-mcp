@@ -17,6 +17,10 @@ import { MaintenanceService } from "../../core/maintenance.service";
 import { BackupService } from "../../core/backup.service";
 import { DocumentIngestionService } from "../../core/document-ingestion.service";
 import { HandoffService } from "../../core/handoff.service";
+import { GraphRepository } from "../../core/graph.repository";
+import { GraphService } from "../../core/graph.service";
+import type { Entity, GraphEdge } from "../../core/graph";
+import { REFERENCE_EDGE_TYPES } from "../../core/graph";
 import type { HistoryFilters, SearchResult } from "../../core/conversation";
 import { resolveDateFilters } from "../../core/time-expr";
 import { DEBUG } from "../../config/index";
@@ -1319,11 +1323,231 @@ export async function handleIngestDocument(
   return textResult(lines.join("\n"));
 }
 
+// ── Knowledge graph (Feature 19) ──────────────────────────────────────
+
+function graphFor(service: MemoryService): GraphService {
+  const repo = new GraphRepository(service.getRepository().getDb());
+  return new GraphService(repo, service.getEmbeddings());
+}
+
+function formatEntity(e: Entity): string {
+  const props = Object.keys(e.properties).length > 0 ? ` ${JSON.stringify(e.properties)}` : "";
+  return `[${e.type}] ${e.name} (${e.id})${props}`;
+}
+
+function formatEdge(e: GraphEdge): string {
+  return `${e.sourceId} —${e.edgeType}→ ${e.targetId}${e.context ? ` (${e.context})` : ""} [${e.category}/${e.provenance}]`;
+}
+
+export async function handleGraphTool(
+  name: string,
+  args: Record<string, unknown> | undefined,
+  service: MemoryService
+): Promise<CallToolResult> {
+  const graph = graphFor(service);
+  try {
+    switch (name) {
+      case "create_entity_type": {
+        const t = graph.registerEntityType({
+          name: requireString(args, "name"),
+          description: requireString(args, "description"),
+          defaultProperties: asObject(args?.default_properties),
+          importanceBonus:
+            typeof args?.importance_bonus === "number" ? args.importance_bonus : 0,
+        });
+        return textResult(`Entity type "${t.name}" registered.`);
+      }
+      case "update_entity_type": {
+        const t = graph.updateEntityType(requireString(args, "name"), {
+          description: asOptionalString(args?.description),
+          defaultProperties: args?.default_properties !== undefined ? asObject(args.default_properties) : undefined,
+          importanceBonus: typeof args?.importance_bonus === "number" ? args.importance_bonus : undefined,
+        });
+        return textResult(t ? `Entity type "${t.name}" updated.` : "Entity type not found.");
+      }
+      case "delete_entity_type":
+        graph.deleteEntityType(requireString(args, "name"), asBool(args?.force, false));
+        return textResult(`Entity type "${requireString(args, "name")}" deleted.`);
+      case "list_entity_types": {
+        const types = graph.listEntityTypes();
+        if (types.length === 0) return textResult("No entity types registered.");
+        return textResult(
+          types
+            .map((t) => `- ${t.name}${t.system ? " (system)" : ""}: ${t.description} — ${t.entityCount} entities`)
+            .join("\n"),
+        );
+      }
+      case "create_edge_type": {
+        const t = graph.registerEdgeType({
+          name: requireString(args, "name"),
+          description: requireString(args, "description"),
+          category: requireString(args, "category"),
+          validSourceTypes: args?.valid_source_types !== undefined ? asArray<string>(args.valid_source_types, "valid_source_types") : null,
+          validTargetTypes: args?.valid_target_types !== undefined ? asArray<string>(args.valid_target_types, "valid_target_types") : null,
+        });
+        return textResult(`Edge type "${t.name}" registered in category "${t.category}".`);
+      }
+      case "update_edge_type": {
+        const t = graph.updateEdgeType(requireString(args, "name"), {
+          description: asOptionalString(args?.description),
+          validSourceTypes: args?.valid_source_types !== undefined ? asArray<string>(args.valid_source_types, "valid_source_types") : undefined,
+          validTargetTypes: args?.valid_target_types !== undefined ? asArray<string>(args.valid_target_types, "valid_target_types") : undefined,
+        });
+        return textResult(t ? `Edge type "${t.name}" updated.` : "Edge type not found.");
+      }
+      case "delete_edge_type":
+        graph.deleteEdgeType(requireString(args, "name"), asBool(args?.force, false));
+        return textResult(`Edge type "${requireString(args, "name")}" deleted.`);
+      case "list_edge_types": {
+        const types = graph.listEdgeTypes(asOptionalString(args?.category));
+        if (types.length === 0) return textResult("No edge types registered.");
+        return textResult(
+          types
+            .map((t) => `- ${t.name} [${t.category}]${t.system ? " (system)" : ""}: ${t.description} — ${t.edgeCount} edges`)
+            .join("\n"),
+        );
+      }
+      case "store_entity": {
+        const e = await graph.storeEntity(
+          requireString(args, "type"),
+          requireString(args, "name"),
+          asObject(args?.properties),
+        );
+        return textResult(`Entity stored: ${formatEntity(e)}`);
+      }
+      case "get_entity": {
+        const e = graph.getEntity(requireString(args, "id"), asOptionalString(args?.type));
+        return textResult(e ? formatEntity(e) : "Entity not found.");
+      }
+      case "update_entity": {
+        const e = await graph.updateEntity(requireString(args, "id"), asObject(args?.properties));
+        return textResult(e ? `Entity updated: ${formatEntity(e)}` : "Entity not found.");
+      }
+      case "delete_entity":
+        graph.deleteEntity(requireString(args, "id"));
+        return textResult("Entity and its edges deleted.");
+      case "list_entities": {
+        const entities = graph.listEntities(
+          asOptionalString(args?.type),
+          asInt(args?.limit, 50, 1, 1000),
+          asInt(args?.offset, 0, 0, 100000),
+        );
+        if (entities.length === 0) return textResult("No entities found.");
+        return textResult(entities.map(formatEntity).join("\n"));
+      }
+      case "search_entities": {
+        const entities = await graph.searchEntities(
+          requireString(args, "query"),
+          asOptionalString(args?.type),
+          asInt(args?.limit, 10, 1, 100),
+        );
+        if (entities.length === 0) return textResult("No matching entities.");
+        return textResult(
+          entities.map((e) => `${formatEntity(e)} (sim ${e.similarity.toFixed(3)})`).join("\n"),
+        );
+      }
+      case "link_entities": {
+        const edge = await graph.linkEntities(
+          requireString(args, "source_id"),
+          requireString(args, "target_id"),
+          requireString(args, "type"),
+          asOptionalString(args?.context),
+        );
+        return textResult(`Linked: ${formatEdge(edge)}`);
+      }
+      case "unlink_entities":
+        graph.unlinkEntities(requireString(args, "edge_id"));
+        return textResult("Edge removed.");
+      case "entity_graph": {
+        const g = graph.entityGraph(
+          requireString(args, "entity_id"),
+          asInt(args?.depth, 1, 1, 5),
+          asOptionalString(args?.type_filter),
+        );
+        return textResult(
+          `Neighborhood (${g.nodes.length} nodes, ${g.edges.length} edges):\n` +
+            `Nodes:\n${g.nodes.map(formatEntity).join("\n")}\n` +
+            `Edges:\n${g.edges.map(formatEdge).join("\n")}`,
+        );
+      }
+      case "search_entity_edges": {
+        const edges = await graph.searchEntityEdges(
+          requireString(args, "query"),
+          asOptionalString(args?.type),
+        );
+        if (edges.length === 0) return textResult("No matching edges.");
+        return textResult(edges.map(formatEdge).join("\n"));
+      }
+      case "lineage_link": {
+        const edge = await graph.lineageLink(
+          requireString(args, "from_id"),
+          requireString(args, "to_id"),
+          requireString(args, "type"),
+          asOptionalString(args?.context),
+        );
+        return textResult(`Lineage edge created: ${formatEdge(edge)}`);
+      }
+      case "lineage_trace": {
+        const direction =
+          args?.direction === "forward" || args?.direction === "backward"
+            ? args.direction
+            : "both";
+        const trace = graph.lineageTrace(
+          requireString(args, "memory_id"),
+          direction,
+          asInt(args?.depth, 3, 1, 10),
+        );
+        if (trace.edges.length === 0) return textResult("No lineage edges found.");
+        return textResult(`Lineage (${direction}):\n${trace.edges.map(formatEdge).join("\n")}`);
+      }
+      case "lineage_confirm":
+        graph.lineageConfirm(requireString(args, "edge_id"));
+        return textResult("Lineage edge confirmed.");
+      case "lineage_reject":
+        graph.lineageReject(requireString(args, "edge_id"));
+        return textResult("Lineage edge rejected (deleted).");
+      case "lineage_stats": {
+        const s = graph.lineageStats();
+        return textResult(
+          `Lineage: ${s.total} edges\nBy type: ${JSON.stringify(s.byType)}\nBy provenance: ${JSON.stringify(s.byProvenance)}`,
+        );
+      }
+      case "link_memory_to_entity": {
+        const edge = await graph.linkMemoryToEntity(
+          requireString(args, "memory_id"),
+          requireString(args, "entity_id"),
+          asStringLevel(args?.ref_type, REFERENCE_EDGE_TYPES),
+        );
+        return textResult(`Memory linked to entity: ${formatEdge(edge)}`);
+      }
+      case "get_entity_memories": {
+        const ids = graph.getEntityMemories(requireString(args, "entity_id"));
+        if (ids.length === 0) return textResult("No memories reference this entity.");
+        return textResult(`Memories referencing this entity:\n${ids.map((id) => `- ${id}`).join("\n")}`);
+      }
+      default:
+        return errorResult(`Unknown graph tool: ${name}`);
+    }
+  } catch (e) {
+    return errorResult(errorText(e));
+  }
+}
+
+const GRAPH_TOOL_NAMES = new Set([
+  "create_entity_type", "update_entity_type", "delete_entity_type", "list_entity_types",
+  "create_edge_type", "update_edge_type", "delete_edge_type", "list_edge_types",
+  "store_entity", "get_entity", "update_entity", "delete_entity", "list_entities", "search_entities",
+  "link_entities", "unlink_entities", "entity_graph", "search_entity_edges",
+  "lineage_link", "lineage_trace", "lineage_confirm", "lineage_reject", "lineage_stats",
+  "link_memory_to_entity", "get_entity_memories",
+]);
+
 export async function handleToolCall(
   name: string,
   args: Record<string, unknown> | undefined,
   service: MemoryService
 ): Promise<CallToolResult> {
+  if (GRAPH_TOOL_NAMES.has(name)) return handleGraphTool(name, args, service);
   switch (name) {
     case "store_memories":
       return handleStoreMemories(args, service);

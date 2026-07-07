@@ -4,6 +4,7 @@ import { dirname, join } from "path";
 import type { EmbeddingsService } from "./embeddings.service";
 import { normalizeProject } from "./project";
 import { serializeVector } from "./sqlite-utils";
+import { ensureGraphSchema } from "./graph.repository";
 
 /**
  * Pre-migration step: remove vec0 virtual table entries from sqlite_master
@@ -149,6 +150,9 @@ export function runMigrations(db: Database): void {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_expires_at ON memories(expires_at)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_episode_id ON memories(episode_id)`);
+
+  // -- Knowledge graph subsystem (entity_types, edge_types, entities, graph_edges) --
+  ensureGraphSchema(db);
 }
 
 /** Current schema version. Bump when adding a versioned migration below. */

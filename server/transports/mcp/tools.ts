@@ -977,6 +977,111 @@ export const ingestDocumentTool: Tool = {
   },
 };
 
+// ── Knowledge Graph tools (Feature 19) ────────────────────────────────
+
+const strArray = { type: "array" as const, items: { type: "string" as const } };
+
+function graphTool(
+  name: string,
+  description: string,
+  properties: Record<string, unknown>,
+  required?: string[],
+): Tool {
+  return {
+    name,
+    description,
+    inputSchema: { type: "object", properties, ...(required ? { required } : {}) },
+  } as Tool;
+}
+
+export const graphTools: Tool[] = [
+  graphTool(
+    "create_entity_type",
+    "Register an entity type before storing entities of it (hard enforcement — undefined types are rejected). Types are self-documenting domain model that persists across sessions.",
+    {
+      name: { type: "string", description: "Type name, e.g. 'Character'." },
+      description: { type: "string", description: "What this type represents." },
+      default_properties: { type: "object", additionalProperties: true, description: "Suggested property schema." },
+      importance_bonus: { type: "number", description: "Importance bonus for entities of this type." },
+    },
+    ["name", "description"],
+  ),
+  graphTool("update_entity_type", "Amend an entity type definition.", {
+    name: { type: "string" }, description: { type: "string" },
+    default_properties: { type: "object", additionalProperties: true }, importance_bonus: { type: "number" },
+  }, ["name"]),
+  graphTool("delete_entity_type", "Remove an entity type. Fails if entities of this type exist unless force:true (which also deletes them).", {
+    name: { type: "string" }, force: { type: "boolean" },
+  }, ["name"]),
+  graphTool("list_entity_types", "List all registered entity types with descriptions and entity counts.", {}),
+  graphTool(
+    "create_edge_type",
+    "Register an edge (relationship) type before linking. valid_source_types/valid_target_types enforce domain integrity (e.g. RESIDES_IN only from Character/Faction to Location).",
+    {
+      name: { type: "string" }, description: { type: "string" },
+      category: { type: "string", description: "Edge category, e.g. 'domain', 'lineage', 'dependency'." },
+      valid_source_types: { ...strArray, description: "Allowed source entity types (omit for any)." },
+      valid_target_types: { ...strArray, description: "Allowed target entity types (omit for any)." },
+    },
+    ["name", "description", "category"],
+  ),
+  graphTool("update_edge_type", "Amend an edge type definition.", {
+    name: { type: "string" }, description: { type: "string" },
+    valid_source_types: strArray, valid_target_types: strArray,
+  }, ["name"]),
+  graphTool("delete_edge_type", "Remove an edge type. Fails if edges of this type exist unless force:true.", {
+    name: { type: "string" }, force: { type: "boolean" },
+  }, ["name"]),
+  graphTool("list_edge_types", "List registered edge types (optionally by category) with constraints and edge counts.", {
+    category: { type: "string" },
+  }),
+  graphTool("store_entity", "Create or update (by name+type) an entity. The entity type must be registered first.", {
+    type: { type: "string" }, name: { type: "string" }, properties: { type: "object", additionalProperties: true },
+  }, ["type", "name"]),
+  graphTool("get_entity", "Retrieve an entity by id (or name, with optional type).", {
+    id: { type: "string", description: "Entity id or name." }, type: { type: "string" },
+  }, ["id"]),
+  graphTool("update_entity", "Patch an entity's properties in place.", {
+    id: { type: "string" }, properties: { type: "object", additionalProperties: true },
+  }, ["id"]),
+  graphTool("delete_entity", "Delete an entity and all its edges.", { id: { type: "string" } }, ["id"]),
+  graphTool("list_entities", "Browse entities, optionally filtered by type.", {
+    type: { type: "string" }, limit: { type: "integer" }, offset: { type: "integer" },
+  }),
+  graphTool("search_entities", "Semantic search over entity name + properties.", {
+    query: { type: "string" }, type: { type: "string" }, limit: { type: "integer" },
+  }, ["query"]),
+  graphTool("link_entities", "Create a domain edge between two entities. The edge type must be registered and satisfy any source/target type constraints.", {
+    source_id: { type: "string" }, target_id: { type: "string" }, type: { type: "string" },
+    context: { type: "string", description: "Optional relationship context." },
+  }, ["source_id", "target_id", "type"]),
+  graphTool("unlink_entities", "Remove a graph edge by id.", { edge_id: { type: "string" } }, ["edge_id"]),
+  graphTool("entity_graph", "BFS neighborhood traversal from an entity, returning connected entities and edges.", {
+    entity_id: { type: "string" }, depth: { type: "integer", description: "Traversal depth (default 1)." },
+    type_filter: { type: "string", description: "Only include neighbors of this entity type." },
+  }, ["entity_id"]),
+  graphTool("search_entity_edges", "Semantic search over edge context.", {
+    query: { type: "string" }, type: { type: "string" },
+  }, ["query"]),
+  graphTool("lineage_link", "Create an explicit causal edge between two memories (memory-graph lineage). Type must be a registered edge type in category 'lineage' (e.g. caused, informed_by, resolved_by, superseded_by, triggered).", {
+    from_id: { type: "string", description: "Source memory id." }, to_id: { type: "string", description: "Target memory id." },
+    type: { type: "string" }, context: { type: "string" },
+  }, ["from_id", "to_id", "type"]),
+  graphTool("lineage_trace", "Traverse the causal graph from a memory.", {
+    memory_id: { type: "string" },
+    direction: { type: "string", enum: ["forward", "backward", "both"], description: "Default both." },
+    depth: { type: "integer", description: "Default 3." },
+  }, ["memory_id"]),
+  graphTool("lineage_confirm", "Promote an inferred lineage edge to confirmed.", { edge_id: { type: "string" } }, ["edge_id"]),
+  graphTool("lineage_reject", "Delete an inferred/incorrect lineage edge.", { edge_id: { type: "string" } }, ["edge_id"]),
+  graphTool("lineage_stats", "Summary of lineage edges by type and provenance.", {}),
+  graphTool("link_memory_to_entity", "Link a memory to an entity it's about (reference bridge). ref_type: mentions (default), describes, supports, relates_to.", {
+    memory_id: { type: "string" }, entity_id: { type: "string" },
+    ref_type: { type: "string", enum: ["mentions", "describes", "supports", "relates_to"] },
+  }, ["memory_id", "entity_id"]),
+  graphTool("get_entity_memories", "Get the ids of memories that reference an entity.", { entity_id: { type: "string" } }, ["entity_id"]),
+];
+
 export const tools: Tool[] = [
   storeMemoriesTool,
   updateMemoriesTool,
@@ -1022,4 +1127,5 @@ export const tools: Tool[] = [
   backupRestoreTool,
   backupPurgeTool,
   ingestDocumentTool,
+  ...graphTools,
 ];
