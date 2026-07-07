@@ -568,7 +568,7 @@ describe("startHttpServer", () => {
 
   test("starts server on configured port and stops cleanly", async () => {
     const config = createTestConfig(join(tmpDir, "test.db"));
-    config.httpPort = 49152 + Math.floor(Math.random() * 1000);
+    config.httpPort = 20000 + Math.floor(Math.random() * 20000);
 
     const { stop, port } = await startHttpServer(memoryService, config);
     expect(port).toBe(config.httpPort);
@@ -582,7 +582,7 @@ describe("startHttpServer", () => {
 
   test("finds alternative port when preferred is in use", async () => {
     const config = createTestConfig(join(tmpDir, "test.db"));
-    config.httpPort = 49152 + Math.floor(Math.random() * 1000);
+    config.httpPort = 20000 + Math.floor(Math.random() * 20000);
 
     // Start first server — may or may not get the requested port
     const server1 = await startHttpServer(memoryService, config);
