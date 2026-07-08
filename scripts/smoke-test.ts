@@ -27,6 +27,8 @@ import {
 } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { globalLockPath } from "../server/transports/http/server";
+import { normalizeProject } from "../server/core/project";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -222,7 +224,9 @@ async function main(): Promise<void> {
   const tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-smoke-"));
   const dbPath = join(tmpDir, "smoke-test.db");
   const sessionsPath = join(tmpDir, "sessions");
-  const lockfilePath = join(tmpDir, ".vector-memory", "server.lock");
+  // Since 2.5 (global store) the server writes a per-project lock under the
+  // global data dir, keyed by the canonical project (the server's cwd = tmpDir).
+  const lockfilePath = globalLockPath(normalizeProject(tmpDir));
 
   console.log(`\n🔬 vector-memory-mcp 2.0 Smoke Test`);
   console.log(`   Temp dir: ${tmpDir}\n`);
@@ -245,6 +249,7 @@ async function main(): Promise<void> {
       [
         "bun", "run", SERVER_PATH,
         "--db-file", dbPath,
+        "--plugin", // enables the HTTP transport (which writes the lockfile)
         "--port", String(smokePort),
         "--enable-history",
         "--history-path", sessionsPath,
@@ -369,8 +374,10 @@ async function main(): Promise<void> {
     });
     assertContains(setWpResult, "Waypoint", "set_waypoint returns confirmation");
 
-    // Get waypoint via MCP
-    const getWpResult = await mcpCall(baseUrl, sessionId, "get_waypoint", {});
+    // Get waypoint via MCP (waypoints are project-scoped since 2.5)
+    const getWpResult = await mcpCall(baseUrl, sessionId, "get_waypoint", {
+      project: "smoke-test",
+    });
     assertContains(
       getWpResult,
       "sqlite-vec migration",
@@ -383,7 +390,7 @@ async function main(): Promise<void> {
     );
 
     // Get waypoint via HTTP
-    const wpHttpRes = await httpGet(baseUrl, "/waypoint");
+    const wpHttpRes = await httpGet(baseUrl, "/waypoint?project=smoke-test");
     const wpHttpBody = await wpHttpRes.json() as any;
     assert(wpHttpRes.status === 200, "GET /waypoint returns 200");
     assert(
