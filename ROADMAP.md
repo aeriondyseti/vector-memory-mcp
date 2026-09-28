@@ -1,12 +1,23 @@
 # Roadmap
 
-Current version: **3.0.0** (in development)
+Current version: **3.0.0**
 
 > **3.0.0 status:** The entire planned feature set below (Phases 1–4, including the
 > Knowledge Graph subsystem) is **implemented**. 3.0.0 is a **major** release because
 > the global memory store (single `~/.vector-memory/memories.db` with per-project
 > tagging) is a breaking change to the storage model. The MCP surface grew from 11 to
 > **69 tools**. See the "Completed" section for the per-feature breakdown.
+
+## Next — 3.1.0: Codex Plugin & Multi-Client Shared Store
+
+Let Codex and Claude Code (and several sessions of each) share one memory store at the
+same time, and ship a Codex plugin at parity with the Claude Code plugin. Spec:
+[docs/plans/2026-09-27-codex-plugin-multi-client.md](docs/plans/2026-09-27-codex-plugin-multi-client.md).
+
+- **M1: Safe multi-process store**: IMMEDIATE write transactions with busy retry, atomic counter/field updates (fixes lost updates), sidecar JSON moved into the db, `VACUUM INTO` backups, a server registry for hook discovery, multi-process test harness
+- **M2: Client-aware server**: `client` column + filter, `--client` flag, Codex rollout parser, leased conversation indexing
+- **M3: Codex plugin**: `.codex-plugin/plugin.json` alongside the Claude manifest in `plugin/`, Codex marketplace file, Codex hooks + MCP config, client-neutral skills
+- **M4: Verify and document**: cross-client verification matrix on Windows/Linux, install docs
 
 ## Tech Debt
 
