@@ -1,58 +1,28 @@
 #!/usr/bin/env bun
 /**
- * Sync version into plugin manifest files and stamp the npm dist-tag
- * into .mcp.json based on the current git branch.
+ * Sync the package version into the plugin manifests and refresh the
+ * vendored hook-kit. Runs as npm's `version` lifecycle hook, so everything
+ * it writes is staged into the release commit that `npm version` creates.
  *
  * Usage:
  *   bun scripts/sync-version.ts              # reads version from package.json
- *   bun scripts/sync-version.ts 2.2.3-dev.4  # uses explicit version
+ *   bun scripts/sync-version.ts 3.0.0        # uses explicit version
  *
- * Branch → dist-tag mapping:
- *   main     → @latest
- *   rc/*     → @rc
- *   dev      → @dev
- *   *        → @dev  (feature branches default to dev)
+ * plugin/.mcp.json is not stamped: it always runs `@latest`.
  */
 
 import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { execSync } from "child_process";
 import { vendorHookKit } from "./vendor-hook-kit";
 
 const ROOT = join(import.meta.dir, "..");
 const PKG_PATH = join(ROOT, "package.json");
 const PLUGIN_PATH = join(ROOT, ".claude-plugin", "plugin.json");
 const MARKETPLACE_PATH = join(ROOT, ".claude-plugin", "marketplace.json");
-const MCP_PATH = join(ROOT, "plugin", ".mcp.json");
-const PKG_NAME = "@aeriondyseti/vector-memory-mcp";
 
 const explicit = process.argv[2];
 const pkg = JSON.parse(readFileSync(PKG_PATH, "utf-8"));
 const version: string = explicit ?? pkg.version;
-
-// ── Detect branch and resolve dist-tag ──────────────────────────────
-
-function getCurrentRef(): string {
-  // In GitHub Actions, git may be in detached HEAD state (e.g. tag checkouts).
-  // Use GITHUB_REF_NAME which is always set correctly.
-  if (process.env.GITHUB_REF_NAME) return process.env.GITHUB_REF_NAME;
-  try {
-    return execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf-8" }).trim();
-  } catch {
-    return "unknown";
-  }
-}
-
-function resolveDistTag(ref: string): string {
-  // Tag pushes (v2.4.0, etc.) resolve to @latest
-  if (/^v\d/.test(ref)) return "latest";
-  if (ref === "main") return "latest";
-  if (ref.startsWith("rc/")) return "rc";
-  return "dev";
-}
-
-const branch = getCurrentRef();
-const distTag = resolveDistTag(branch);
 
 // ── Stamp plugin.json ───────────────────────────────────────────────
 
@@ -69,30 +39,18 @@ for (const p of marketplace.plugins) {
 }
 writeFileSync(MARKETPLACE_PATH, JSON.stringify(marketplace, null, 2) + "\n");
 
-// ── Stamp .mcp.json — use dist-tag, not pinned version ─────────────
-
-const mcp = JSON.parse(readFileSync(MCP_PATH, "utf-8"));
-for (const server of Object.values(mcp.mcpServers) as any[]) {
-  server.args = server.args.map((arg: string) =>
-    arg.startsWith(`${PKG_NAME}@`) ? `${PKG_NAME}@${distTag}` : arg
-  );
-}
-writeFileSync(MCP_PATH, JSON.stringify(mcp, null, 2) + "\n");
-
-console.error(`Synced version ${version} (${branch} → @${distTag}) → plugin.json, marketplace.json, .mcp.json`);
+console.error(`Synced version ${version} → plugin.json, marketplace.json`);
 
 // ── Refresh vendored hook-kit to the latest in-range (1.x) release ───
 //
-// Runs only for local publish prep. In CI the committed bundle + lockfile
+// Runs only for local release prep. In CI the committed bundle + lockfile
 // are authoritative (a tag is immutable) and the freshness guard verifies
 // them — auto-updating there would drift the tree out from under the tag.
 const inCI = process.env.CI === "true" || !!process.env.GITHUB_ACTIONS;
 if (!inCI) {
   try {
     const shipped = await vendorHookKit({ update: true });
-    console.error(
-      `Refreshed vendored hook-kit → ${shipped.join(", ")} (stage bun.lock + plugin/hooks/scripts/vendor/ with the release commit)`
-    );
+    console.error(`Refreshed vendored hook-kit → ${shipped.join(", ")}`);
   } catch (e) {
     console.error(`[sync-version] hook-kit refresh skipped: ${(e as Error).message}`);
   }

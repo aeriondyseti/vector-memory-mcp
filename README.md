@@ -175,7 +175,7 @@ CLI flags:
 
 ## Release Channels
 
-**Plugin users:** The plugin tracks the repo's default branch. To switch channels, reinstall from a specific branch or tag.
+**Plugin users:** The plugin runs the `@latest` npm release.
 
 **npm users:** The stable release is what you get by default:
 
@@ -183,20 +183,16 @@ CLI flags:
 bun install -g @aeriondyseti/vector-memory-mcp
 ```
 
-Pre-release channels are available for testing upcoming changes. **These are unstable and may break without notice — use at your own risk.**
+Pre-releases are published to `@next` for testing upcoming changes. **They are unstable and may break without notice — use at your own risk.**
 
 | Channel | npm | Description |
 |---------|-----|-------------|
 | `@latest` | *(default)* | Stable releases |
-| `@rc` | `@aeriondyseti/vector-memory-mcp@rc` | Release candidates — final testing before stable |
-| `@dev` | `@aeriondyseti/vector-memory-mcp@dev` | Development builds — latest features, least stable |
+| `@next` | `@aeriondyseti/vector-memory-mcp@next` | Pre-releases (e.g. `3.0.0-beta.1`) |
 
 ```bash
-# Install the dev channel
-bun install -g @aeriondyseti/vector-memory-mcp@dev
-
-# Pin to a specific pre-release version
-bun install -g @aeriondyseti/vector-memory-mcp@2.1.0-dev.1
+# Install the pre-release channel
+bun install -g @aeriondyseti/vector-memory-mcp@next
 
 # Go back to stable
 bun install -g @aeriondyseti/vector-memory-mcp@latest
