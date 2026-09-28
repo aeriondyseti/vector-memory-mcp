@@ -68,6 +68,10 @@ describe("handleSearchMemories", () => {
       offset: 0,
       after: undefined,
       before: undefined,
+      includeArchived: false,
+      includeExpired: false,
+      tagMatch: "any",
+      mode: "semantic",
     });
   });
 
@@ -99,6 +103,10 @@ describe("handleSearchMemories", () => {
       offset: 0,
       after: undefined,
       before: undefined,
+      includeArchived: false,
+      includeExpired: false,
+      tagMatch: "any",
+      mode: "semantic",
     });
   });
 

@@ -37,6 +37,11 @@ bun run warmup        # download ML models
 | `server/core/embeddings.service.ts` | Local embeddings via ONNX Runtime + @huggingface/tokenizers |
 | `server/core/migration.service.ts` | Cross-format database migration |
 | `server/core/consolidation.service.ts` | Repo-local → global db consolidation (`consolidate` CLI) |
+| `server/core/maintenance.service.ts` | Health/storage stats, VACUUM/ANALYZE, orphan cleanup, maintenance history |
+| `server/core/backup.service.ts` | SHA-256-verified DB snapshots (backup/restore/verify/purge) |
+| `server/core/handoff.service.ts` | History-preserving session handoffs (sidecar store) |
+| `server/core/document-ingestion.service.ts` | Chunk + ingest Markdown/text/JSON files into memories |
+| `server/core/graph.ts` / `graph.repository.ts` / `graph.service.ts` | Knowledge graph subsystem (entity/edge type registry, entities, edges, lineage, memory→entity refs) |
 | `server/core/project.ts` | Canonical project identity (`normalizeProject`) |
 | `server/core/parsers/` | Session log parsers (Claude Code JSONL) |
 | `server/core/memory.ts` | Memory type definitions |
@@ -149,10 +154,6 @@ This repo ships two independent artifacts from one codebase:
 - `bun run test:quick` / `bun test` skip embedding-dependent tests (faster iteration)
 - `bun run test:coverage` for coverage reports
 - Run a specific file: `bun test tests/memory.test.ts`
-
-## Memory Usage
-
-Be proactive about saving memories. Any time something potentially useful for future sessions happens — decisions, debugging insights, architectural rationale, gotchas, user preferences, workarounds, or anything that took effort to figure out — store a memory immediately. Err on the side of saving too many; memories get pruned over time, so over-saving is far better than forgetting.
 
 ## Important Conventions
 

@@ -1,11 +1,11 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { Database } from "bun:sqlite";
 import { connectToDatabase } from "../server/core/connection";
 import { MemoryRepository } from "../server/core/memory.repository";
-import { fakeEmbedding } from "./utils/test-helpers";
+import { fakeEmbedding, removeDir } from "./utils/test-helpers";
 import type { Memory } from "../server/core/memory";
 
 describe("MemoryRepository - Hybrid Search", () => {
@@ -21,7 +21,8 @@ describe("MemoryRepository - Hybrid Search", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true });
+    db.close();
+    removeDir(tmpDir);
   });
 
   const createTestMemory = (id: string, content: string, embedding: number[]): Memory => ({

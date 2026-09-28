@@ -1,7 +1,21 @@
 import { randomUUID, createHash } from "crypto";
 import { basename } from "path";
-import type { Memory, SearchIntent, IntentProfile, HybridRow } from "./memory";
-import { isDeleted, computeConfidence } from "./memory";
+import type {
+  Memory,
+  SearchIntent,
+  IntentProfile,
+  HybridRow,
+  MemoryAttributes,
+  MemoryImportance,
+} from "./memory";
+import {
+  isDeleted,
+  isProtected,
+  computeConfidence,
+  computeQualityScore,
+  CONFIDENCE_RANK,
+  IMPORTANCE_RANK,
+} from "./memory";
 import type { SearchResult, SearchOptions, HistoryFilters } from "./conversation";
 import type { MemoryRepository } from "./memory.repository";
 import type { EmbeddingsService } from "./embeddings.service";
@@ -19,6 +33,47 @@ const INTENT_PROFILES: Record<SearchIntent, IntentProfile> = {
 };
 
 const sigmoid = (x: number): number => 1 / (1 + Math.exp(-x));
+
+/** Extract a memory's tag list from metadata.tags (tolerant of bad shapes). */
+export function memoryTags(metadata: Record<string, unknown>): string[] {
+  const raw = metadata.tags;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((t): t is string => typeof t === "string");
+}
+
+/**
+ * Post-retrieval attribute filters that can't be expressed cheaply in SQL
+ * (level rank comparisons, metadata.type, tag containment). Returns true when
+ * the memory passes every active filter.
+ */
+function matchesAttributeFilters(
+  m: Memory,
+  options?: SearchOptions,
+): boolean {
+  if (!options) return true;
+
+  if (options.minConfidence) {
+    const rank = m.confidence ? CONFIDENCE_RANK[m.confidence] : -1;
+    if (rank < CONFIDENCE_RANK[options.minConfidence]) return false;
+  }
+  if (options.minImportance) {
+    const rank = m.importance ? IMPORTANCE_RANK[m.importance] : -1;
+    if (rank < IMPORTANCE_RANK[options.minImportance]) return false;
+  }
+  if (options.type) {
+    if ((m.metadata.type as string | undefined) !== options.type) return false;
+  }
+  if (options.tags && options.tags.length > 0) {
+    const tags = new Set(memoryTags(m.metadata));
+    const match = options.tagMatch ?? "any";
+    const has =
+      match === "all"
+        ? options.tags.every((t) => tags.has(t))
+        : options.tags.some((t) => tags.has(t));
+    if (!has) return false;
+  }
+  return true;
+}
 
 // Modest same-project ranking boost for scope:"all" searches — same-repo
 // memories win ties without hiding cross-project results.
@@ -57,7 +112,8 @@ export class MemoryService {
     content: string,
     metadata: Record<string, unknown> = {},
     embeddingText?: string,
-    project?: string
+    project?: string,
+    attributes?: MemoryAttributes
   ): Promise<Memory> {
     const id = randomUUID();
     const now = new Date();
@@ -76,7 +132,16 @@ export class MemoryService {
       accessCount: 0,
       lastAccessed: now, // Initialize to createdAt for fair discovery
       project: project !== undefined ? normalizeProject(project) : this.project,
+      pinned: attributes?.pinned ?? false,
+      archived: attributes?.archived ?? false,
+      confidence: attributes?.confidence ?? null,
+      importance: attributes?.importance ?? null,
+      expiresAt: attributes?.expiresAt ?? null,
+      episodeId: attributes?.episodeId ?? null,
+      sequenceNumber: attributes?.sequenceNumber ?? null,
+      precedingMemoryId: attributes?.precedingMemoryId ?? null,
     };
+    memory.qualityScore = computeQualityScore(memory, now);
 
     await this.repository.insert(memory);
     return memory;
@@ -118,6 +183,7 @@ export class MemoryService {
       content?: string;
       embeddingText?: string;
       metadata?: Record<string, unknown>;
+      attributes?: MemoryAttributes;
     }
   ): Promise<Memory | null> {
     const existing = await this.repository.findById(id);
@@ -135,12 +201,29 @@ export class MemoryService {
       newEmbedding = await this.embeddings.embed(textToEmbed);
     }
 
+    // Merge attributes: an omitted (undefined) field keeps the existing value;
+    // an explicit null clears a nullable attribute.
+    const attrs = updates.attributes ?? {};
+    const pick = <T>(next: T | undefined, prev: T): T =>
+      next !== undefined ? next : prev;
+
     const updatedMemory: Memory = {
       ...existing,
       content: newContent,
       embedding: newEmbedding,
       metadata: newMetadata,
       updatedAt: new Date(),
+      pinned: pick(attrs.pinned, existing.pinned ?? false),
+      archived: pick(attrs.archived, existing.archived ?? false),
+      confidence: pick(attrs.confidence, existing.confidence ?? null),
+      importance: pick(attrs.importance, existing.importance ?? null),
+      expiresAt: pick(attrs.expiresAt, existing.expiresAt ?? null),
+      episodeId: pick(attrs.episodeId, existing.episodeId ?? null),
+      sequenceNumber: pick(attrs.sequenceNumber, existing.sequenceNumber ?? null),
+      precedingMemoryId: pick(
+        attrs.precedingMemoryId,
+        existing.precedingMemoryId ?? null,
+      ),
     };
 
     await this.repository.upsert(updatedMemory);
@@ -154,13 +237,15 @@ export class MemoryService {
     }
 
     // Vote also tracks access (explicit utilization signal)
+    const now = new Date();
     const updatedMemory: Memory = {
       ...existing,
       usefulness: existing.usefulness + value,
       accessCount: existing.accessCount + 1,
-      lastAccessed: new Date(),
-      updatedAt: new Date(),
+      lastAccessed: now,
+      updatedAt: now,
     };
+    updatedMemory.qualityScore = computeQualityScore(updatedMemory, now);
 
     await this.repository.upsert(updatedMemory);
     return updatedMemory;
@@ -169,7 +254,8 @@ export class MemoryService {
   private computeMemoryScore(
     candidate: HybridRow,
     profile: IntentProfile,
-    now: Date
+    now: Date,
+    mode: "semantic" | "exact" | "hybrid" = "semantic"
   ): number {
     const relevance = candidate.rrfScore;
     const lastAccessed = candidate.lastAccessed ?? candidate.createdAt;
@@ -182,10 +268,18 @@ export class MemoryService {
       (candidate.usefulness + Math.log(candidate.accessCount + 1)) / 5
     );
     const { weights, jitter } = profile;
-    const score =
+    let score =
       weights.relevance * relevance +
       weights.recency * recency +
       weights.utility * utility;
+
+    // Hybrid mode blends the intent-based score with stored usefulness so
+    // proven-useful memories rank higher than pure semantic similarity would.
+    if (mode === "hybrid") {
+      const QUALITY_BOOST = 0.4;
+      score = score * (1 - QUALITY_BOOST) + utility * QUALITY_BOOST;
+    }
+
     return score * (1 + (Math.random() * 2 - 1) * jitter);
   }
 
@@ -224,14 +318,16 @@ export class MemoryService {
           : normalizeProject(scope);
 
     const hasDateFilters = options?.after || options?.before;
-    const memoryFilters =
-      hasDateFilters || projectFilter !== undefined
-        ? {
-            after: options?.after,
-            before: options?.before,
-            project: projectFilter,
-          }
-        : undefined;
+    const mode = options?.mode ?? "semantic";
+    const memoryFilters = {
+      after: options?.after,
+      before: options?.before,
+      project: projectFilter,
+      includeArchived: options?.includeArchived ?? false,
+      includeExpired: options?.includeExpired ?? false,
+      now: now.getTime(),
+      mode,
+    };
 
     // Merge top-level date filters into history filters so after/before
     // apply uniformly. Explicit history_after/history_before take precedence,
@@ -261,6 +357,7 @@ export class MemoryService {
             .then((candidates) =>
               candidates
                 .filter((m) => includeDeleted || !isDeleted(m))
+                .filter((m) => matchesAttributeFilters(m, options))
                 .map((candidate) => ({
                   id: candidate.id,
                   content: candidate.content,
@@ -269,7 +366,7 @@ export class MemoryService {
                   updatedAt: candidate.updatedAt,
                   source: "memory" as const,
                   score:
-                    this.computeMemoryScore(candidate, profile, now) *
+                    this.computeMemoryScore(candidate, profile, now, mode) *
                     boost(candidate.project),
                   confidence: computeConfidence(candidate.signals),
                   project: candidate.project,
@@ -277,6 +374,8 @@ export class MemoryService {
                   usefulness: candidate.usefulness,
                   accessCount: candidate.accessCount,
                   lastAccessed: candidate.lastAccessed,
+                  pinned: candidate.pinned ?? false,
+                  importance: candidate.importance ?? null,
                 }))
             )
         : Promise.resolve([] as SearchResult[]);
@@ -328,6 +427,482 @@ export class MemoryService {
   async trackAccess(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
     this.repository.bulkUpdateAccess(ids, new Date());
+  }
+
+  /**
+   * Flexible deletion (Feature 2): select memories by explicit ids, tag match,
+   * and/or creation-date range, then soft-delete them. Pinned and critical
+   * memories are protected unless `force` is set. `dryRun` previews the plan
+   * without writing. Requires at least one selector to avoid mass deletion.
+   */
+  async deleteMemories(criteria: {
+    ids?: string[];
+    tags?: string[];
+    tagMatch?: "any" | "all";
+    before?: Date;
+    after?: Date;
+    dryRun?: boolean;
+    force?: boolean;
+  }): Promise<{
+    matched: number;
+    deletedIds: string[];
+    skippedProtected: string[];
+    dryRun: boolean;
+  }> {
+    const hasSelector =
+      (criteria.ids && criteria.ids.length > 0) ||
+      (criteria.tags && criteria.tags.length > 0) ||
+      criteria.before !== undefined ||
+      criteria.after !== undefined;
+    if (!hasSelector) {
+      throw new Error(
+        "delete requires at least one selector: ids, tags, before, or after",
+      );
+    }
+
+    // Resolve the candidate set.
+    let candidates: Memory[];
+    if (criteria.ids && criteria.ids.length > 0) {
+      candidates = (await this.repository.findByIds(criteria.ids)).filter(
+        (m) => !isDeleted(m),
+      );
+      if (criteria.after)
+        candidates = candidates.filter((m) => m.createdAt > criteria.after!);
+      if (criteria.before)
+        candidates = candidates.filter((m) => m.createdAt < criteria.before!);
+    } else {
+      candidates = this.repository.queryMemories({
+        after: criteria.after,
+        before: criteria.before,
+        includeArchived: true, // deletion applies to archived too
+      });
+    }
+
+    // Tag filter.
+    if (criteria.tags && criteria.tags.length > 0) {
+      const match = criteria.tagMatch ?? "any";
+      const wanted = criteria.tags;
+      candidates = candidates.filter((m) => {
+        const tags = new Set(memoryTags(m.metadata));
+        return match === "all"
+          ? wanted.every((t) => tags.has(t))
+          : wanted.some((t) => tags.has(t));
+      });
+    }
+
+    // Protection.
+    const skippedProtected: string[] = [];
+    const toDelete: string[] = [];
+    for (const m of candidates) {
+      if (!criteria.force && isProtected(m)) {
+        skippedProtected.push(m.id);
+      } else {
+        toDelete.push(m.id);
+      }
+    }
+
+    if (criteria.dryRun) {
+      return {
+        matched: candidates.length,
+        deletedIds: toDelete,
+        skippedProtected,
+        dryRun: true,
+      };
+    }
+
+    this.repository.markDeletedBulk(toDelete);
+    return {
+      matched: candidates.length,
+      deletedIds: toDelete,
+      skippedProtected,
+      dryRun: false,
+    };
+  }
+
+  /**
+   * Recompute quality_score for every live memory (Feature 15). Returns the
+   * number of memories rescored and the resulting score distribution.
+   */
+  async scoreMemories(now: Date = new Date()): Promise<{
+    scored: number;
+    averageScore: number;
+  }> {
+    const memories = this.repository.queryMemories({ includeArchived: true });
+    const entries = memories.map((m) => ({
+      id: m.id,
+      score: computeQualityScore(m, now),
+    }));
+    this.repository.setQualityScoreBulk(entries);
+    const avg =
+      entries.length > 0
+        ? entries.reduce((s, e) => s + e.score, 0) / entries.length
+        : 0;
+    return { scored: entries.length, averageScore: avg };
+  }
+
+  /**
+   * Archive or unarchive memories (Feature 8). Archived memories are excluded
+   * from search unless include_archived is set. Returns the count changed.
+   */
+  async setArchived(ids: string[], archived: boolean): Promise<number> {
+    if (ids.length === 0) return 0;
+    return this.repository.setArchivedBulk(ids, archived);
+  }
+
+  /**
+   * Expire memories on demand (Feature 10): soft-delete every live memory whose
+   * TTL has passed. Returns the ids that were tombstoned.
+   */
+  async expireMemories(now: Date = new Date()): Promise<string[]> {
+    const ids = this.repository.findExpiredIds(now.getTime());
+    if (ids.length > 0) this.repository.markDeletedBulk(ids);
+    return ids;
+  }
+
+  /**
+   * Stale item detection (Feature 13): memories not accessed within
+   * `staleDays`, excluding pinned and (optionally) high-importance memories.
+   */
+  async findStale(opts?: {
+    staleDays?: number;
+    excludePinned?: boolean;
+    excludeImportance?: MemoryImportance[];
+    limit?: number;
+  }): Promise<Memory[]> {
+    const days = opts?.staleDays ?? 90;
+    const threshold = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    let rows = this.repository.queryMemories({
+      lastAccessedBefore: threshold,
+      limit: opts?.limit ?? 100,
+    });
+    if (opts?.excludePinned ?? true) rows = rows.filter((m) => !m.pinned);
+    const excl = opts?.excludeImportance;
+    if (excl && excl.length > 0) {
+      rows = rows.filter((m) => !m.importance || !excl.includes(m.importance));
+    }
+    return rows;
+  }
+
+  /**
+   * Tag-based retrieval (Feature 12): memories carrying the given tags,
+   * ordered by recency, without a semantic query.
+   */
+  async searchByTags(
+    tags: string[],
+    tagMatch: "any" | "all" = "any",
+    limit = 20,
+    offset = 0,
+  ): Promise<Memory[]> {
+    if (tags.length === 0) return [];
+    const all = this.repository.queryMemories({});
+    const matched = all.filter((m) => {
+      const memTags = new Set(memoryTags(m.metadata));
+      return tagMatch === "all"
+        ? tags.every((t) => memTags.has(t))
+        : tags.some((t) => memTags.has(t));
+    });
+    return matched.slice(offset, offset + limit);
+  }
+
+  // ── Episodic chains (Feature 23) ────────────────────────────────────
+
+  /** All memories in an episode, ordered by sequence then creation. */
+  getEpisode(episodeId: string): Memory[] {
+    return this.repository.findByEpisode(episodeId);
+  }
+
+  /** Browse episodes by recency. */
+  listEpisodes(limit = 20, offset = 0): Array<{
+    episodeId: string;
+    count: number;
+    lastCreatedAt: Date;
+  }> {
+    return this.repository.listEpisodes(limit, offset);
+  }
+
+  // ── Proactive context (Feature 24) ──────────────────────────────────
+
+  /**
+   * Surface memories relevant to the current conversation context without an
+   * explicit query. Returns results whose confidence meets `threshold`.
+   * When `autoIngest` is set, the context itself is stored as an observation.
+   */
+  async proactiveContext(
+    context: string,
+    maxResults = 5,
+    threshold = 0.65,
+    autoIngest = false,
+  ): Promise<SearchResult[]> {
+    const results = await this.search(context, "associative", {
+      limit: maxResults * 3,
+      includeHistory: false,
+    });
+    const filtered = results
+      .filter((r) => r.confidence >= threshold)
+      .slice(0, maxResults);
+    if (autoIngest) {
+      await this.store(context, { type: "observation", auto_ingested: true });
+    }
+    return filtered;
+  }
+
+  // ── Tag management (Feature 16) ─────────────────────────────────────
+
+  listTags(
+    sortBy: "count" | "name" = "count",
+    limit = 100,
+    offset = 0,
+  ): Array<{ tag: string; count: number }> {
+    const entries = [...this.repository.tagCounts().entries()].map(
+      ([tag, count]) => ({ tag, count }),
+    );
+    entries.sort((a, b) =>
+      sortBy === "name" ? a.tag.localeCompare(b.tag) : b.count - a.count,
+    );
+    return entries.slice(offset, offset + limit);
+  }
+
+  /** Rewrite one tag to another across all memories; returns count changed. */
+  async renameTag(oldTag: string, newTag: string): Promise<number> {
+    return this.rewriteTags((tags) => {
+      if (!tags.includes(oldTag)) return null;
+      const next = tags.filter((t) => t !== oldTag);
+      if (!next.includes(newTag)) next.push(newTag);
+      return next;
+    });
+  }
+
+  /** Merge several source tags into one target tag; returns count changed. */
+  async mergeTags(sources: string[], target: string): Promise<number> {
+    const srcSet = new Set(sources);
+    return this.rewriteTags((tags) => {
+      if (!tags.some((t) => srcSet.has(t))) return null;
+      const next = tags.filter((t) => !srcSet.has(t));
+      if (!next.includes(target)) next.push(target);
+      return next;
+    });
+  }
+
+  /** Remove a tag from all memories; returns count changed. */
+  async deleteTag(tag: string): Promise<number> {
+    return this.rewriteTags((tags) =>
+      tags.includes(tag) ? tags.filter((t) => t !== tag) : null,
+    );
+  }
+
+  /**
+   * Apply a tag transform to every live memory carrying tags. The transform
+   * returns the new tag list, or null to skip. Only metadata is rewritten
+   * (vectors/content untouched).
+   */
+  private async rewriteTags(
+    transform: (tags: string[]) => string[] | null,
+  ): Promise<number> {
+    const memories = this.repository.queryMemories({ includeArchived: true });
+    const updates: Array<{ id: string; metadata: Record<string, unknown> }> = [];
+    for (const m of memories) {
+      const tags = memoryTags(m.metadata);
+      if (tags.length === 0) continue;
+      const next = transform(tags);
+      if (next === null) continue;
+      updates.push({ id: m.id, metadata: { ...m.metadata, tags: next } });
+    }
+    return this.repository.setMetadataBulk(updates);
+  }
+
+  // ── Memory consolidation (Feature 18) ──────────────────────────────
+
+  /**
+   * Periodic maintenance pass that prevents quality degradation (Feature 18):
+   *  - decay:   re-score all memories (recency-aware quality)
+   *  - cluster: find near-duplicate groups
+   *  - compress: merge each cluster (keep newest)
+   *  - forget:  archive unprotected memories below the quality threshold
+   *
+   * `action` selects the depth: "status" reports counts only; "recommend"
+   * returns what a run would do without changing anything; "run" performs it.
+   */
+  async consolidateMemories(
+    action: "run" | "status" | "recommend" = "recommend",
+    timeHorizon: "daily" | "weekly" | "monthly" = "weekly",
+  ): Promise<{
+    action: string;
+    timeHorizon: string;
+    total: number;
+    duplicateClusters: number;
+    forgetCandidates: number;
+    rescored?: number;
+    compressed?: number;
+    forgotten?: number;
+    averageQuality: number;
+  }> {
+    // Longer horizons prune more aggressively.
+    const forgetThreshold =
+      timeHorizon === "daily" ? 0.15 : timeHorizon === "monthly" ? 0.3 : 0.22;
+    const dupThreshold = 0.93;
+    const now = new Date();
+
+    const live = this.repository.queryMemories({ includeArchived: false });
+    const scored = live.map((m) => computeQualityScore(m, now));
+    const avgQuality =
+      scored.length > 0 ? scored.reduce((a, b) => a + b, 0) / scored.length : 0;
+    const forgetCandidates = live.filter(
+      (m, i) => scored[i] < forgetThreshold && !isProtected(m),
+    );
+    const clusters = this.repository.findDuplicateClusters(dupThreshold);
+
+    if (action === "status" || action === "recommend") {
+      return {
+        action,
+        timeHorizon,
+        total: live.length,
+        duplicateClusters: clusters.length,
+        forgetCandidates: forgetCandidates.length,
+        averageQuality: avgQuality,
+      };
+    }
+
+    // action === "run"
+    const { scored: rescored } = await this.scoreMemories(now);
+    let compressed = 0;
+    for (const c of clusters) {
+      await this.mergeDuplicates(c.keepId, c.duplicateIds, "keep_newest");
+      compressed += c.duplicateIds.length;
+    }
+    const forgotten = await this.setArchived(
+      forgetCandidates.map((m) => m.id),
+      true,
+    );
+
+    return {
+      action,
+      timeHorizon,
+      total: live.length,
+      duplicateClusters: clusters.length,
+      forgetCandidates: forgetCandidates.length,
+      rescored,
+      compressed,
+      forgotten,
+      averageQuality: avgQuality,
+    };
+  }
+
+  // ── Duplicate detection & merge (Feature 14) ────────────────────────
+
+  /** Find near-duplicate clusters at the given cosine threshold (0.5–1.0). */
+  findDuplicates(
+    threshold = 0.92,
+  ): Array<{ keepId: string; duplicateIds: string[] }> {
+    return this.repository.findDuplicateClusters(threshold);
+  }
+
+  /**
+   * Merge duplicate memories into `keepId`. Strategies:
+   *  - keep_content: keep the survivor's content as-is
+   *  - keep_newest:  adopt the newest member's content
+   *  - combine_content: concatenate all distinct contents (re-embedded)
+   * The merged-away memories are soft-deleted. Returns the survivor.
+   */
+  async mergeDuplicates(
+    keepId: string,
+    mergeIds: string[],
+    strategy: "keep_content" | "keep_newest" | "combine_content" = "keep_newest",
+  ): Promise<Memory | null> {
+    const keep = await this.repository.findById(keepId);
+    if (!keep) return null;
+    const members = (await this.repository.findByIds([keepId, ...mergeIds])).filter(
+      (m) => !isDeleted(m),
+    );
+
+    let content = keep.content;
+    if (strategy === "keep_newest") {
+      content = members.reduce((a, b) =>
+        a.updatedAt >= b.updatedAt ? a : b,
+      ).content;
+    } else if (strategy === "combine_content") {
+      const seen = new Set<string>();
+      const parts: string[] = [];
+      for (const m of members) {
+        const c = m.content.trim();
+        if (c && !seen.has(c)) {
+          seen.add(c);
+          parts.push(c);
+        }
+      }
+      content = parts.join("\n\n");
+    }
+
+    const merged =
+      content !== keep.content
+        ? await this.update(keepId, { content })
+        : keep;
+
+    // Soft-delete the merged-away duplicates.
+    this.repository.markDeletedBulk(mergeIds.filter((id) => id !== keepId));
+    return merged;
+  }
+
+  /** Auto-merge every near-duplicate cluster at a safe threshold (keep_newest). */
+  async cleanupDuplicates(
+    threshold = 0.92,
+  ): Promise<{ clusters: number; deleted: number }> {
+    const clusters = this.findDuplicates(threshold);
+    let deleted = 0;
+    for (const c of clusters) {
+      await this.mergeDuplicates(c.keepId, c.duplicateIds, "keep_newest");
+      deleted += c.duplicateIds.length;
+    }
+    return { clusters: clusters.length, deleted };
+  }
+
+  /**
+   * Session-context menu (Feature 28): the always-relevant memories (pinned or
+   * critical) for a project, ordered by importance then recency, capped to a
+   * character budget so it can be injected at session start without bloat.
+   */
+  async getSessionContext(opts?: {
+    project?: string;
+    scope?: "project" | "all";
+    maxChars?: number;
+  }): Promise<{ memories: Memory[]; text: string; truncated: boolean }> {
+    const maxChars = opts?.maxChars ?? 4000;
+    const project =
+      opts?.scope === "all"
+        ? undefined
+        : opts?.project
+          ? normalizeProject(opts.project)
+          : (this.project ?? undefined);
+
+    const rows = this.repository
+      .queryMemories({ project })
+      .filter((m) => isProtected(m));
+
+    rows.sort((a, b) => {
+      const ra = a.importance ? IMPORTANCE_RANK[a.importance] : 1;
+      const rb = b.importance ? IMPORTANCE_RANK[b.importance] : 1;
+      if (rb !== ra) return rb - ra;
+      const la = (a.lastAccessed ?? a.createdAt).getTime();
+      const lb = (b.lastAccessed ?? b.createdAt).getTime();
+      return lb - la;
+    });
+
+    const included: Memory[] = [];
+    const parts: string[] = [];
+    let used = 0;
+    let truncated = false;
+    for (const m of rows) {
+      const label = m.importance === "critical" ? "critical" : "pinned";
+      const block = `- [${label}] ${m.content}`;
+      if (used + block.length + 1 > maxChars && included.length > 0) {
+        truncated = true;
+        break;
+      }
+      included.push(m);
+      parts.push(block);
+      used += block.length + 1;
+    }
+
+    return { memories: included, text: parts.join("\n"), truncated };
   }
 
   private static readonly UUID_ZERO =

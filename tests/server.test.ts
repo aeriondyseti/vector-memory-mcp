@@ -1,9 +1,10 @@
 import { describe, expect, test, beforeEach, afterEach, mock } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { Database } from "bun:sqlite";
 import { tools } from "../server/transports/mcp/tools";
+import { removeDir } from "./utils/test-helpers";
 import {
   handleToolCall,
   handleStoreMemories,
@@ -41,13 +42,14 @@ describe("mcp", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true });
+    db.close();
+    removeDir(tmpDir);
   });
 
   describe("tools", () => {
-    test("exports 11 tools", () => {
+    test("exports the full tool set", () => {
       expect(tools).toBeArray();
-      expect(tools.length).toBe(11);
+      expect(tools.length).toBe(69);
     });
 
     test("has store_memories tool", () => {
@@ -59,7 +61,10 @@ describe("mcp", () => {
     test("has delete_memories tool", () => {
       const tool = tools.find((t) => t.name === "delete_memories");
       expect(tool).toBeDefined();
-      expect(tool!.inputSchema.required).toContain("ids");
+      const props = tool!.inputSchema.properties as Record<string, unknown>;
+      expect(props.ids).toBeDefined();
+      expect(props.tags).toBeDefined();
+      expect(props.dry_run).toBeDefined();
     });
 
     test("has update_memories tool", () => {
@@ -156,13 +161,16 @@ describe("mcp", () => {
 
       const response = await handleDeleteMemories({ ids: [mem.id] }, service);
 
-      expect(response.content[0].text).toBe(`Memory ${mem.id} deleted successfully`);
+      expect(response.content[0].text).toContain("Deleted 1 memories");
+      expect(response.content[0].text).toContain(mem.id);
+      const after = await service.get(mem.id);
+      expect(after!.supersededBy).toBe("DELETED");
     });
 
-    test("returns not found for non-existent ID", async () => {
+    test("reports zero matches for a non-existent ID", async () => {
       const response = await handleDeleteMemories({ ids: ["non-existent"] }, service);
 
-      expect(response.content[0].text).toBe("Memory non-existent not found");
+      expect(response.content[0].text).toContain("Deleted 0 memories");
     });
 
     test("deletes multiple memories", async () => {
@@ -171,8 +179,36 @@ describe("mcp", () => {
 
       const response = await handleDeleteMemories({ ids: [a.id, b.id] }, service);
 
-      expect(response.content[0].text).toContain(`Memory ${a.id} deleted successfully`);
-      expect(response.content[0].text).toContain(`Memory ${b.id} deleted successfully`);
+      expect(response.content[0].text).toContain("Deleted 2 memories");
+      expect(response.content[0].text).toContain(a.id);
+      expect(response.content[0].text).toContain(b.id);
+    });
+
+    test("dry_run previews without deleting", async () => {
+      const mem = await service.store("keep me");
+      const response = await handleDeleteMemories(
+        { ids: [mem.id], dry_run: true },
+        service,
+      );
+      expect(response.content[0].text).toContain("Dry run");
+      const after = await service.get(mem.id);
+      expect(after!.supersededBy).toBeNull();
+    });
+
+    test("protects pinned memories unless forced", async () => {
+      const mem = await service.store("pinned", {}, undefined, undefined, {
+        pinned: true,
+      });
+      const guarded = await handleDeleteMemories({ ids: [mem.id] }, service);
+      expect(guarded.content[0].text).toContain("Skipped 1 protected");
+      expect((await service.get(mem.id))!.supersededBy).toBeNull();
+
+      const forced = await handleDeleteMemories(
+        { ids: [mem.id], force: true },
+        service,
+      );
+      expect(forced.content[0].text).toContain("Deleted 1 memories");
+      expect((await service.get(mem.id))!.supersededBy).toBe("DELETED");
     });
   });
 
@@ -433,7 +469,7 @@ describe("mcp", () => {
         { ids: [mem.id] },
         service
       );
-      expect(response.content[0].text).toContain("deleted successfully");
+      expect(response.content[0].text).toContain("Deleted 1 memories");
     });
 
     test("routes to update_memories", async () => {

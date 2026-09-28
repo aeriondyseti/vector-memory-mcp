@@ -18,6 +18,7 @@ describe("types/memory", () => {
     usefulness: 0,
     accessCount: 0,
     lastAccessed: null,
+    project: null,
     ...overrides,
   });
 
@@ -59,6 +60,16 @@ describe("types/memory", () => {
         usefulness: 0,
         accessCount: 0,
         lastAccessed: null,
+        project: null,
+        pinned: false,
+        archived: false,
+        confidence: null,
+        importance: null,
+        expiresAt: null,
+        qualityScore: null,
+        episodeId: null,
+        sequenceNumber: null,
+        precedingMemoryId: null,
       });
     });
 

@@ -1,6 +1,12 @@
 # Roadmap
 
-Current version: **2.4.4**
+Current version: **3.0.0** (in development)
+
+> **3.0.0 status:** The entire planned feature set below (Phases 1–4, including the
+> Knowledge Graph subsystem) is **implemented**. 3.0.0 is a **major** release because
+> the global memory store (single `~/.vector-memory/memories.db` with per-project
+> tagging) is a breaking change to the storage model. The MCP surface grew from 11 to
+> **69 tools**. See the "Completed" section for the per-feature breakdown.
 
 ## Tech Debt
 
@@ -13,6 +19,40 @@ Current version: **2.4.4**
 - **Multi-project waypoint support**: `set_waypoint` and `get_waypoint` now use deterministic per-project IDs (SHA-256 of project name). Each project gets its own waypoint slot instead of sharing a single global slot (`UUID_ZERO`). The legacy no-project path still reads/writes `UUID_ZERO` for backwards compatibility. This feature is experimental and may be removed or redesigned.
 
 ## Completed
+
+### v3.0.0 — Full Roadmap Implementation + Global Store
+
+Breaking: single global SQLite store (`~/.vector-memory/memories.db`) with per-project
+tagging (supersedes the per-project federated search, Feature 29). Schema v2 adds
+`pinned, archived, confidence, importance, expires_at, quality_score, episode_id,
+sequence_number, preceding_memory_id` plus the knowledge-graph tables. Tool count 11 → 69.
+
+- **#1 Date/time filtering** — `after`/`before`/`time_expr` on `search_memories`
+- **#2 Flexible deletion** — `delete_memories` by ids/tags/date-range, `dry_run`, `force`, pinned/critical protection
+- **#3 Memory pinning** — settable via store/update, protects from deletion, shown in search
+- **#4 Pagination** — `offset` on `search_memories`
+- **#5 Health & storage stats** — `memory_health`, `get_storage_stats`
+- **#6 Maintenance** — `optimize_database`, `cleanup_orphans`, `get_maintenance_history` (sidecar audit log)
+- **#7 Response size controls** — `max_response_chars` with whole-memory truncation
+- **#8 Archiving** — `archive_memory` / `unarchive_memory` + `include_archived`
+- **#9 Confidence & importance levels** — attributes + `min_confidence` / `min_importance` filters
+- **#10 TTL** — `expires_at` / `ttl_seconds`, auto-exclusion, `expire_memories`
+- **#11 Search modes** — `mode`: semantic / exact / hybrid
+- **#12 Tag search** — `search_by_tags` + `tags`/`tag_match` filters
+- **#13 Stale detection** — `find_stale_memories`
+- **#14 Duplicate detection & merge** — `find_duplicates` / `merge_duplicates` / `cleanup_duplicates`
+- **#15 Quality scoring** — `quality_score` + `score_memories`; recomputed on vote; feeds hybrid ranking
+- **#16 Tag management** — `list_tags` / `rename_tag` / `merge_tags` / `delete_tag`
+- **#17 Document ingestion** — `ingest_document` (Markdown/text/JSON, sentence-boundary chunking)
+- **#18 Memory consolidation** — `consolidate_memories` (decay / cluster+merge / forget)
+- **#19 Knowledge graph** — entity/edge type registry, entities, domain edges, memory lineage, memory→entity reference bridge (25 tools)
+- **#20 Session handoff** — `prepare_handoff` / `resume_from_handoff` / `list_handoffs` / `get_startup_context`
+- **#21 Formal memory types** — type taxonomy + importance bonus feeding quality scoring; `type` search filter
+- **#23 Episodic chains** — `episode_id`/`sequence_number` + `get_episode` / `list_episodes`
+- **#24 Proactive context** — `proactive_context`
+- **#26 Backup & restore** — `backup_create` / `list` / `verify` / `restore` / `purge` (SHA-256 verified)
+- **#28 Session-context menu** — `get_session_context` (pinned/critical, char-budgeted)
+- Cross-platform hardening: Windows SQLite file-lock handling in tests and consolidation `--archive`
 
 ### v2.4.4 — Tech Debt Cleanup
 - Switched `moduleResolution` from `nodenext` to `bundler`; stripped `.js` from all 176 relative imports
@@ -70,6 +110,10 @@ Current version: **2.4.4**
 ---
 
 ## Planned
+
+> **All features in this section are implemented as of 3.0.0** — see the "Completed"
+> section above for the delivery summary. The design notes below are retained as
+> reference documentation for each feature's rationale and shape.
 
 Features below were selected from a comparative analysis of three reference implementations ([cccmemory](reference/cccmemory), [mcp-memory-service](reference/mcp-memory-service), [shodh-memory](reference/shodh-memory)), extended with additional design work.
 
@@ -515,35 +559,35 @@ SQLite's single-file format makes backup straightforward — a file copy or `.ba
 
 ## Summary Table
 
-| # | Feature | Phase | Schema Change |
-|---|---------|-------|---------------|
-| 27 | Conversation history indexing | **Done** | Yes — new `conversation_history` table |
-| 1 | Date/time filtering in search | 1 | No |
-| 2 | Flexible deletion (tags, time, dry_run) | 1 | No |
-| 3 | Memory pinning | 1 | Yes — `pinned` column |
-| 4 | ~~Result pagination (offset)~~ | **Done** | No |
-| 5 | Health & storage stats tools | 1 | No |
-| 6 | Database maintenance tools | 1 | No |
-| 7 | Response size controls | 1 | No |
-| 28 | Pinned memory menu (session context) | 1 | No (builds on #3) |
-| 29 | Federated cross-project search | 1 | No |
-| 30 | Embedding model evaluation | 1 | Possible (if dimensions change) |
-| 8 | Memory archiving | 2 | Yes — `archived` column |
-| 9 | Confidence & importance levels | 2 | Yes — two `Utf8` columns |
-| 10 | TTL (auto-expiry) | 2 | Yes — `expires_at` column |
-| 11 | Search modes (exact, hybrid) | 2 | No (FTS index only) |
-| 12 | Tag-based search & filtering | 2 | No |
-| 13 | Stale item detection | 2 | No |
-| 14 | Duplicate detection & merge | 3 | No |
-| 15 | Quality scoring system | 3 | Yes — `quality_score` column |
-| 16 | Tag management system | 3 | Optional sidecar table |
-| 17 | Document ingestion | 3 | No |
-| 18 | Memory consolidation | 3 | No (requires #15) |
-| 19 | Knowledge graph subsystem | 3 | Yes — `entity_types`, `edge_types`, `entities`, `graph_edges` |
-| 20 | Session handoff system | 3 | No (sidecar store) |
-| 21 | Formal memory type taxonomy | 3 | No |
-| 22 | ~~Source & credibility tracking~~ | — | Absorbed into Feature 19 |
-| 23 | Episodic memory chains | 4 | Yes — three nullable columns |
-| 24 | Proactive context tool | 4 | No |
-| 25 | ~~Decision lineage graph~~ | — | Absorbed into Feature 19 |
-| 26 | Backup & restore | 4 | No (sidecar storage) |
+| # | Feature | Status | Schema Change |
+|---|---------|--------|---------------|
+| 27 | Conversation history indexing | **Done** (v1.1) | Yes — `conversation_history` table |
+| 1 | Date/time filtering in search | **Done** (3.0) | No |
+| 2 | Flexible deletion (tags, time, dry_run) | **Done** (3.0) | No |
+| 3 | Memory pinning | **Done** (3.0) | Yes — `pinned` column |
+| 4 | Result pagination (offset) | **Done** | No |
+| 5 | Health & storage stats tools | **Done** (3.0) | No |
+| 6 | Database maintenance tools | **Done** (3.0) | No |
+| 7 | Response size controls | **Done** (3.0) | No |
+| 28 | Pinned memory menu (session context) | **Done** (3.0) | No (builds on #3) |
+| 29 | Federated cross-project search | **Superseded** by global store | No |
+| 30 | Embedding model evaluation | Ongoing investigation (benchmarks in `tests/benchmark/`) | Possible |
+| 8 | Memory archiving | **Done** (3.0) | Yes — `archived` column |
+| 9 | Confidence & importance levels | **Done** (3.0) | Yes — `confidence`, `importance` columns |
+| 10 | TTL (auto-expiry) | **Done** (3.0) | Yes — `expires_at` column |
+| 11 | Search modes (exact, hybrid) | **Done** (3.0) | No |
+| 12 | Tag-based search & filtering | **Done** (3.0) | No |
+| 13 | Stale item detection | **Done** (3.0) | No |
+| 14 | Duplicate detection & merge | **Done** (3.0) | No |
+| 15 | Quality scoring system | **Done** (3.0) | Yes — `quality_score` column |
+| 16 | Tag management system | **Done** (3.0) | No |
+| 17 | Document ingestion | **Done** (3.0) | No |
+| 18 | Memory consolidation | **Done** (3.0) | No (requires #15) |
+| 19 | Knowledge graph subsystem | **Done** (3.0) | Yes — `entity_types`, `edge_types`, `entities`, `graph_edges` |
+| 20 | Session handoff system | **Done** (3.0) | No (sidecar store) |
+| 21 | Formal memory type taxonomy | **Done** (3.0) | No |
+| 22 | ~~Source & credibility tracking~~ | Absorbed into #19 | — |
+| 23 | Episodic memory chains | **Done** (3.0) | Yes — three nullable columns |
+| 24 | Proactive context tool | **Done** (3.0) | No |
+| 25 | ~~Decision lineage graph~~ | Absorbed into #19 | — |
+| 26 | Backup & restore | **Done** (3.0) | No (sidecar storage) |

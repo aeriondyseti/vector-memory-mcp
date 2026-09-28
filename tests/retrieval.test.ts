@@ -1,9 +1,10 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { Database } from "bun:sqlite";
 import { connectToDatabase } from "../server/core/connection";
+import { removeDir } from "./utils/test-helpers";
 import { MemoryRepository } from "../server/core/memory.repository";
 import { EmbeddingsService } from "../server/core/embeddings.service";
 import { MemoryService } from "../server/core/memory.service";
@@ -24,7 +25,7 @@ describe("Retrieval - semantically relevant memories appear in results", () => {
 
   afterEach(() => {
     db.close();
-    rmSync(tmpDir, { recursive: true });
+    removeDir(tmpDir);
   });
 
   test("exact-topic memory is retrieved among unrelated content", async () => {

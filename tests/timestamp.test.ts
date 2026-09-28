@@ -9,7 +9,7 @@
  * will see the UTC offset as elapsed time instead of actual age.
  */
 import { describe, expect, test, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { Database } from "bun:sqlite";
@@ -18,7 +18,7 @@ import { MemoryRepository } from "../server/core/memory.repository";
 import { EmbeddingsService } from "../server/core/embeddings.service";
 import { MemoryService } from "../server/core/memory.service";
 import { createHttpApp } from "../server/transports/http/server";
-import { fakeEmbedding } from "./utils/test-helpers";
+import { fakeEmbedding, removeDir } from "./utils/test-helpers";
 import type { Memory } from "../server/core/memory";
 import type { Config } from "../server/config/index";
 
@@ -52,7 +52,7 @@ describe("Timestamp round-trip — LanceDB UTC preservation", () => {
 
   afterEach(() => {
     db.close();
-    rmSync(tmpDir, { recursive: true });
+    removeDir(tmpDir);
   });
 
   test("insert + findById: updatedAt round-trips as UTC", async () => {
@@ -161,7 +161,7 @@ describe("GET /waypoint — updatedAt UTC serialization", () => {
 
   afterAll(() => {
     db.close();
-    rmSync(httpTmpDir, { recursive: true });
+    removeDir(httpTmpDir);
   });
 
   test("updatedAt in response ends with Z (is UTC ISO 8601)", async () => {

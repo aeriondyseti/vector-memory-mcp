@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { Database } from "bun:sqlite";
@@ -7,6 +7,7 @@ import { connectToDatabase } from "../../server/core/connection";
 import { MemoryRepository } from "../../server/core/memory.repository";
 import { EmbeddingsService } from "../../server/core/embeddings.service";
 import { MemoryService } from "../../server/core/memory.service";
+import { removeDir } from "../utils/test-helpers";
 
 describe("MemoryService - Scoring with Intents", () => {
   let db: Database;
@@ -25,7 +26,8 @@ describe("MemoryService - Scoring with Intents", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true });
+    db.close();
+    removeDir(tmpDir);
   });
 
   test("search requires intent parameter", async () => {

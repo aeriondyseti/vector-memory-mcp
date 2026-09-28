@@ -9,9 +9,10 @@
 
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { spawn, type Subprocess } from "bun";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { removeDir } from "./utils/test-helpers";
 
 // Skip E2E tests in CI - they require spawning Node processes which is flaky
 const isCI = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true";
@@ -164,7 +165,7 @@ describeE2E("E2E: Stdio Transport", () => {
 
   afterAll(() => {
     proc.kill();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeDir(tmpDir);
   });
 
   test("full memory lifecycle: store → search → update → get → delete", async () => {
@@ -199,7 +200,7 @@ describeE2E("E2E: Stdio Transport", () => {
     const deleteText = await callToolStdio(proc, 5, "delete_memories", {
       ids: [memoryId],
     });
-    expect(deleteText).toContain("deleted successfully");
+    expect(deleteText).toContain("Deleted 1 memories");
 
     // 6. Search should NOT find deleted memory
     const searchAfterDelete = await callToolStdio(proc, 6, "search_memories", {
@@ -262,7 +263,7 @@ describeE2E("E2E: HTTP Transport", () => {
 
   afterAll(() => {
     proc.kill();
-    rmSync(tmpDir, { recursive: true, force: true });
+    removeDir(tmpDir);
   });
 
   test("health endpoint returns ok with correct config", async () => {
@@ -309,7 +310,7 @@ describeE2E("E2E: HTTP Transport", () => {
     const deleteText = await callToolHttp(baseUrl, sessionId, 5, "delete_memories", {
       ids: [memoryId],
     });
-    expect(deleteText).toContain("deleted successfully");
+    expect(deleteText).toContain("Deleted 1 memories");
 
     // 6. Search should NOT find deleted memory
     const searchAfterDelete = await callToolHttp(baseUrl, sessionId, 6, "search_memories", {
