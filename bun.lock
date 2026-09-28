@@ -13,14 +13,14 @@
         "onnxruntime-node": "^1.21.0",
       },
       "devDependencies": {
-        "@aeriondyseti/hook-kit": "^1.0.0",
+        "@aeriondyseti/hook-kit": "^1.1.0",
         "@types/bun": "latest",
         "typescript": "^5.0.0",
       },
     },
   },
   "packages": {
-    "@aeriondyseti/hook-kit": ["@aeriondyseti/hook-kit@1.0.0", "", { "dependencies": { "string-width": "^7.2.0" } }, "sha512-+axIrXZa/EeZ62KmaLb39IGfi6wLOHS8y9Ac8Tpg9u16EZT+hYK3tiHubr6YAZ6m5rRvKdfoIQ+GyZMCwHzNHA=="],
+    "@aeriondyseti/hook-kit": ["@aeriondyseti/hook-kit@1.1.0", "", { "dependencies": { "string-width": "^7.2.0" } }, "sha512-OmeDqcPtkAlG+KmZSvlW46v6KlRT/4d84M6zkrmBEKpNJ49pPFxVOV04HvOVsYfpTO79CnAYzCuaKjvDer+jYA=="],
 
     "@hono/node-server": ["@hono/node-server@2.1.1", "", { "peerDependencies": { "hono": "^4" } }, "sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg=="],
 
