@@ -1,6 +1,6 @@
 # Codex Plugin & Multi-Client Shared Store — Spec
 
-**Status:** Draft · **Date:** 2026-09-27 · **Target:** 3.1.0
+**Status:** Accepted · **Date:** 2026-09-27 · **Target:** 3.1.0
 **Builds on:** PR #15, merged (`plugin/` is the plugin root, with its own `package.json` + `bun.lock`)
 
 ## Goal
@@ -159,7 +159,7 @@ processes, from any client, can open the db.
   `claude-code`; existing memories stay `NULL` (unknown).
 - Writes stamp `client`, and results return it.
 - `search_memories` gains an optional `client` filter. The default is all clients: a
-  shared store is the point. There's no same-client boost; see Open question 5.
+  shared store is the point. There's no same-client boost (decision D1).
 - Hook HTTP calls send `client` too.
 
 ### A9. Multi-process test harness
@@ -263,7 +263,7 @@ plugin/
   Check that hook-kit's `parse()` accepts Codex payloads, which carry extra fields
   (`turn_id`, `model`, `last_assistant_message`) under the same event names. If it
   doesn't, add a Codex-tolerant mode in **hook-kit 1.2**.
-- **Trust:** document that Codex users must approve the plugin's hooks via `/hooks` once.
+- **Trust (decision D2):** document that Codex users must approve the plugin's hooks via `/hooks` once.
   Without approval, the MCP tools still work; only automatic context loading, indexing and
   the monitor are off.
 
@@ -335,14 +335,21 @@ Run each scenario on Windows and Linux (and macOS if available):
 - **The root `plugin.json` Agent Plugins v1 format:** rejected for now. Codex's loader drops
   hooks for that format (`core-plugins/src/loader.rs`), despite what the docs say.
 
+## Decisions
+
+Recorded 2026-09-27, by the owner:
+
+- **D1: No same-client boost.** Search treats all clients equally. `client` is stored, returned, and available as an optional filter, but it never affects ranking.
+- **D2: Codex ships with its hooks bundled, and users approve them once.** The Codex plugin bundles its hooks, and users approve them once via `/hooks`. The README install steps say so. Until they approve, the MCP tools work and only the automatic behavior is off (context loading, indexing, the monitor). No MCP-only variant.
+
 ## Open questions
+
+These are verification items, answered during implementation:
 
 1. Does Codex's legacy marketplace support resolve a string `"source": "./plugin"`? This is moot if we ship `.agents/plugins/marketplace.json`, but it decides whether Codex users can use the Claude marketplace file directly.
 2. Does Codex substitute `${PLUGIN_ROOT}` in hook commands itself, or rely on the shell? This decides the `commandWindows` form.
 3. Does Codex's Windows MCP environment whitelist include `USERPROFILE` / `LOCALAPPDATA`? This decides whether `env_vars` is needed.
 4. Is hook-kit compatible with Codex payloads, or does it need a 1.2 release?
-5. **Owner decision:** should search boost results from the same client? Proposed: no, treat all clients equally.
-6. **Owner decision:** is the hook-trust step (approving hooks via `/hooks` in Codex) acceptable UX, or should the Codex plugin default to MCP tools only, with hooks opt-in?
 
 ## References
 
