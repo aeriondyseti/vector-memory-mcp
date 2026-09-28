@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Plugin root is `plugin/`**: the marketplace entry's source is now `./plugin` and the manifest lives at `plugin/.claude-plugin/plugin.json`, so installs copy only the plugin, not the whole repo.
+- **hook-kit is a real dependency, no longer vendored**: hooks import `@aeriondyseti/hook-kit` from `plugin/package.json` + `plugin/bun.lock`, which Claude Code installs automatically into each cached plugin version. Removed the committed bundle, `scripts/vendor-hook-kit.ts`, the `vendor:hooks` scripts, and the CI drift guard.
+
 ## [3.0.0] - 2026-09-27
 
 Major release: completes the entire feature roadmap (Phases 1–4 + Knowledge Graph)

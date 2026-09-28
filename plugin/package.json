@@ -1,0 +1,8 @@
+{
+  "name": "vector-memory-plugin",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@aeriondyseti/hook-kit": "^1.1.0"
+  }
+}

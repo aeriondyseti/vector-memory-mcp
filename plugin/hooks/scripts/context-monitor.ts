@@ -29,7 +29,7 @@ import {
   statSync,
 } from "fs";
 import { getStatePath } from "./hooks-lib";
-import { Stop, PostToolUse, OutputBuilder, ICONS } from "./vendor/hook-kit";
+import { Stop, PostToolUse, OutputBuilder, ICONS } from "@aeriondyseti/hook-kit";
 
 // When invoked from PostToolUse, throttle to avoid running after every tool call.
 // Stop hooks always evaluate (definitive end-of-turn feedback).
