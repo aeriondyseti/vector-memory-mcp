@@ -157,7 +157,6 @@ test_*.db
 
 # Node.js
 node_modules/
-bun.lock
 package-lock.json
 # Claude Code (keep commands/ and skills/, ignore the rest)
 .claude/*
@@ -173,3 +172,4 @@ package-lock.json
 
 # Local reference material (cloned repos for study, not part of the project)
 reference/
+references/
