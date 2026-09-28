@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Release flow**: Publishing is tag-driven — `npm version <x> && git push --follow-tags`. `vX.Y.Z` publishes `@latest` (tag must be on `main`); `vX.Y.Z-<pre>` publishes `@next`. The `dev` and `rc/*` branches and the `@dev`/`@rc` dist-tags are retired; development is trunk-based on `main`.
+- **Plugin**: `plugin/.mcp.json` always runs `@latest`.
+- **Debug logging**: Auto-enabled for any pre-release version (`X.Y.Z-*`).
+
+### Fixed
+- **Release commit missing manifests**: `sync-version` ran as `postversion` (after `npm version` commits), so the synced plugin/marketplace versions never landed in the release commit. It now runs as the `version` hook and stages its output.
+
 ## [3.0.0] - 2026-07-07
 
 Major release: completes the entire feature roadmap (Phases 1–4 + Knowledge Graph)
