@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { describe, expect, test, beforeEach, afterEach, setSystemTime } from "bun:test";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -170,5 +170,22 @@ describe("BackupService", () => {
     const remaining = service.list();
     expect(remaining.length).toBe(1);
     expect(remaining[0].id).toBe(third.id);
+  });
+
+  test("purge() keeps the newest backup when several share a millisecond", () => {
+    setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    try {
+      const first = service.create("1");
+      const second = service.create("2");
+      const third = service.create("3");
+
+      expect(service.list().map((b) => b.id)).toEqual([third.id, second.id, first.id]);
+
+      const result = service.purge(1);
+      expect(result.deleted.sort()).toEqual([first.id, second.id].sort());
+      expect(existsSync(third.path)).toBe(true);
+    } finally {
+      setSystemTime();
+    }
   });
 });

@@ -112,7 +112,12 @@ export class BackupService {
   }
 
   list(): BackupInfo[] {
-    return [...this.readIndex()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    // Newest first. createdAt has only millisecond resolution, so break ties by
+    // index position (entries are appended in creation order).
+    return this.readIndex()
+      .map((entry, i) => ({ entry, i }))
+      .sort((a, b) => b.entry.createdAt.localeCompare(a.entry.createdAt) || b.i - a.i)
+      .map(({ entry }) => entry);
   }
 
   verify(id: string): VerifyResult {
