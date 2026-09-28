@@ -84,6 +84,8 @@ npm version <patch|minor|major|X.Y.Z> && git push --follow-tags
 npm version 3.0.0-beta.1 && git push --follow-tags
 ```
 
+`main` requires a PR + passing `test` check; admins bypass this, so the one-liner works for the repo owner. Otherwise run `npm version` on a `release/X.Y.Z` branch, merge its PR with a **merge commit** (not squash, so the tagged commit is on `main`), then `git push origin vX.Y.Z`. A stable tag fails fast if `CHANGELOG.md` has no `## [X.Y.Z]` section.
+
 `npm version` bumps `package.json`, runs `scripts/sync-version.ts` as the `version` lifecycle hook (stamps `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json`, refreshes vendored hook-kit, stages them), then commits and tags. The workflow checks the tag equals `package.json`'s version, requires stable tags to be on `main`, runs tests, publishes with provenance, and creates a GitHub Release (marked pre-release for `@next`).
 
 ### Version Source of Truth

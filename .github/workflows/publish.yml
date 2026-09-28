@@ -46,6 +46,19 @@ jobs:
             exit 1
           fi
 
+      - name: Extract release notes from CHANGELOG
+        if: steps.npm-tag.outputs.tag == 'latest'
+        env:
+          VERSION: ${{ steps.npm-tag.outputs.version }}
+        run: |
+          # Lines after "## [X.Y.Z]" up to the next "## [" heading
+          awk -v v="$VERSION" '/^## \[/ { if (f) exit; if (index($0, "## [" v "]") == 1) { f = 1; next } } f' \
+            CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::CHANGELOG.md has no '## [$VERSION]' section. Add one before tagging a stable release."
+            exit 1
+          fi
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -87,8 +100,6 @@ jobs:
             gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" \
               --prerelease --generate-notes --verify-tag
           else
-            # Section between this version's heading and the next one
-            awk "/^## \[$VERSION\]/,/^## \[/" CHANGELOG.md | sed '$d' | tail -n +2 > notes.md
             gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" \
               --notes-file notes.md --verify-tag
           fi
