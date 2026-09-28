@@ -5,16 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Changed
-- **Release flow**: Publishing is tag-driven — `npm version <x> && git push --follow-tags`. `vX.Y.Z` publishes `@latest` (tag must be on `main`); `vX.Y.Z-<pre>` publishes `@next`. The `dev` and `rc/*` branches and the `@dev`/`@rc` dist-tags are retired; development is trunk-based on `main`.
-- **Plugin**: `plugin/.mcp.json` always runs `@latest`.
-- **Debug logging**: Auto-enabled for any pre-release version (`X.Y.Z-*`).
-
-### Fixed
-- **Release commit missing manifests**: `sync-version` ran as `postversion` (after `npm version` commits), so the synced plugin/marketplace versions never landed in the release commit. It now runs as the `version` hook and stages its output.
-
 ## [3.0.0] - 2026-07-07
 
 Major release: completes the entire feature roadmap (Phases 1–4 + Knowledge Graph)
@@ -32,9 +22,13 @@ and adopts a single global memory store. MCP surface grew from 11 to **69 tools*
 
 ### Changed
 - **BREAKING — global memory store**: all data lives in a single `~/.vector-memory/memories.db` shared by every project, with a `project` column (canonical cwd path). `search_memories` defaults to `scope: "all"` (current project boosted). Repo-local dbs remain available via `--db-file` / `VECTOR_MEMORY_DB_PATH`; the `consolidate` CLI imports legacy repo-local dbs.
+- **Release flow**: Publishing is tag-driven — `npm version <x> && git push --follow-tags`. `vX.Y.Z` publishes `@latest` (tag must be on `main`); `vX.Y.Z-<pre>` publishes `@next`. The `dev` and `rc/*` branches and the `@dev`/`@rc` dist-tags are retired; development is trunk-based on `main`.
+- **Plugin**: `plugin/.mcp.json` always runs `@latest`; hooks use vendored `@aeriondyseti/hook-kit` 1.1.0.
+- **Debug logging**: Auto-enabled for any pre-release version (`X.Y.Z-*`).
 
 ### Fixed
 - **Cross-platform (Windows)**: SQLite file-lock release (GC + retry) before `rmSync`/rename in tests and in consolidation `--archive`; OS-agnostic path assertions. Full suite green on Windows.
+- **Release commit missing manifests**: `sync-version` ran as `postversion` (after `npm version` commits), so the synced plugin/marketplace versions never landed in the release commit. It now runs as the `version` hook and stages its output.
 
 ## [2.4.0] - 2026-03-27
 
