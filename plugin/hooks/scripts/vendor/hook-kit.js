@@ -1,28 +1,58 @@
 // @bun
-// node_modules/@aeriondyseti/hook-kit/dist/chunk-Z4IIAPGO.js
+// node_modules/@aeriondyseti/hook-kit/dist/chunk-4Q2GZ36G.js
 import { writeSync } from "fs";
 import { readFileSync } from "fs";
 var _CAPTURED_SENTINEL = /* @__PURE__ */ Symbol("hook-kit:captured");
 var _capture;
 function emitJson(payload, exitCode = 0) {
+  return emitRaw(payload, JSON.stringify(payload), exitCode);
+}
+function emitText(text, exitCode = 0) {
+  return emitRaw(text, text, exitCode);
+}
+function emitRaw(payload, serialized, exitCode) {
   if (_capture) {
     _capture.payload = payload;
     _capture.exitCode = exitCode;
     throw _CAPTURED_SENTINEL;
   }
-  writeSync(1, JSON.stringify(payload));
+  writeSync(1, serialized);
   process.exit(exitCode);
 }
 var HOOK_EVENT_NAMES = [
   "PreToolUse",
   "PostToolUse",
+  "PostToolUseFailure",
+  "PostToolBatch",
+  "Notification",
   "UserPromptSubmit",
+  "UserPromptExpansion",
   "SessionStart",
   "SessionEnd",
   "Stop",
+  "StopFailure",
+  "SubagentStart",
   "SubagentStop",
-  "Notification",
-  "PreCompact"
+  "PreCompact",
+  "PostCompact",
+  "PreModelSwitch",
+  "PostModelSwitch",
+  "PermissionRequest",
+  "PermissionDenied",
+  "Setup",
+  "TeammateIdle",
+  "TaskCreated",
+  "TaskCompleted",
+  "Elicitation",
+  "ElicitationResult",
+  "ConfigChange",
+  "WorktreeCreate",
+  "WorktreeRemove",
+  "InstructionsLoaded",
+  "CwdChanged",
+  "FileChanged",
+  "DirectoryAdded",
+  "MessageDisplay"
 ];
 var _testStdin;
 function readStdinSync() {
@@ -215,23 +245,211 @@ function stringWidth(string, options = {}) {
 function asString(body) {
   return typeof body === "string" ? body : body.render();
 }
+function hasHookSpecificFields(hs) {
+  return Object.keys(hs).length > 1;
+}
 function mixinCommon(out, opts) {
   if (opts.toUser !== undefined)
-    out.systemMessage = asString(opts.toUser);
+    out.systemMessage = `
+` + asString(opts.toUser);
   if (opts.continue !== undefined)
     out.continue = opts.continue;
   if (opts.stopReason !== undefined)
     out.stopReason = opts.stopReason;
   if (opts.suppressOutput !== undefined)
     out.suppressOutput = opts.suppressOutput;
+  if (opts.terminalSequence !== undefined)
+    out.terminalSequence = opts.terminalSequence;
   return out;
 }
+var ConfigChange = class {
+  static parse() {
+    return readHookInput("ConfigChange");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    if (opts.deny)
+      out.decision = "block";
+    if (opts.reason !== undefined)
+      out.reason = opts.reason;
+    return emitJson(out);
+  }
+};
+var CwdChanged = class {
+  static parse() {
+    return readHookInput("CwdChanged");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    if (opts.watchPaths !== undefined) {
+      out.hookSpecificOutput = { hookEventName: "CwdChanged", watchPaths: opts.watchPaths };
+    }
+    return emitJson(out);
+  }
+};
+var DirectoryAdded = class {
+  static parse() {
+    return readHookInput("DirectoryAdded");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    return emitJson(out);
+  }
+};
+var Elicitation = class {
+  static parse() {
+    return readHookInput("Elicitation");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    if (opts.reason !== undefined)
+      out.reason = opts.reason;
+    const hs = { hookEventName: "Elicitation" };
+    if (opts.action !== undefined)
+      hs.action = opts.action;
+    if (opts.content !== undefined)
+      hs.content = opts.content;
+    if (hasHookSpecificFields(hs))
+      out.hookSpecificOutput = hs;
+    return emitJson(out);
+  }
+};
+var ElicitationResult = class {
+  static parse() {
+    return readHookInput("ElicitationResult");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    if (opts.reason !== undefined)
+      out.reason = opts.reason;
+    const hs = { hookEventName: "ElicitationResult" };
+    if (opts.action !== undefined)
+      hs.action = opts.action;
+    if (opts.content !== undefined)
+      hs.content = opts.content;
+    if (hasHookSpecificFields(hs))
+      out.hookSpecificOutput = hs;
+    return emitJson(out);
+  }
+};
+var FileChanged = class {
+  static parse() {
+    return readHookInput("FileChanged");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    if (opts.watchPaths !== undefined) {
+      out.hookSpecificOutput = { hookEventName: "FileChanged", watchPaths: opts.watchPaths };
+    }
+    return emitJson(out);
+  }
+};
+var InstructionsLoaded = class {
+  static parse() {
+    return readHookInput("InstructionsLoaded");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    return emitJson(out);
+  }
+};
+var MessageDisplay = class {
+  static parse() {
+    return readHookInput("MessageDisplay");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    if (opts.displayContent !== undefined) {
+      out.hookSpecificOutput = { hookEventName: "MessageDisplay", displayContent: opts.displayContent };
+    }
+    return emitJson(out);
+  }
+};
 var Notification = class {
   static parse() {
     return readHookInput("Notification");
   }
   static emitOutput(opts = {}) {
     const out = mixinCommon({}, opts);
+    if (opts.toClaude !== undefined) {
+      out.hookSpecificOutput = { hookEventName: "Notification", additionalContext: asString(opts.toClaude) };
+    }
+    return emitJson(out);
+  }
+};
+var PermissionDenied = class {
+  static parse() {
+    return readHookInput("PermissionDenied");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    if (opts.retry !== undefined) {
+      out.hookSpecificOutput = { hookEventName: "PermissionDenied", retry: opts.retry };
+    }
+    return emitJson(out);
+  }
+};
+function toDecision(opts) {
+  if (opts.decision === "allow") {
+    const d = { behavior: "allow" };
+    if (opts.updatedInput !== undefined)
+      d.updatedInput = opts.updatedInput;
+    if (opts.updatedPermissions !== undefined)
+      d.updatedPermissions = opts.updatedPermissions;
+    return d;
+  }
+  if (opts.decision === "deny") {
+    const d = { behavior: "deny" };
+    if (opts.reason !== undefined)
+      d.message = opts.reason;
+    if (opts.interrupt !== undefined)
+      d.interrupt = opts.interrupt;
+    return d;
+  }
+  return;
+}
+var PermissionRequest = class {
+  static parse() {
+    return readHookInput("PermissionRequest");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    const decision = toDecision(opts);
+    if (decision)
+      out.hookSpecificOutput = { hookEventName: "PermissionRequest", decision };
+    return emitJson(out);
+  }
+};
+var PostCompact = class {
+  static parse() {
+    return readHookInput("PostCompact");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    return emitJson(out);
+  }
+};
+var PostModelSwitch = class {
+  static parse() {
+    return readHookInput("PostModelSwitch");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    if (opts.toClaude !== undefined) {
+      out.hookSpecificOutput = { hookEventName: "PostModelSwitch", additionalContext: asString(opts.toClaude) };
+    }
+    return emitJson(out);
+  }
+};
+var PostToolBatch = class {
+  static parse() {
+    return readHookInput("PostToolBatch");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    if (opts.toClaude !== undefined) {
+      out.hookSpecificOutput = { hookEventName: "PostToolBatch", additionalContext: asString(opts.toClaude) };
+    }
     return emitJson(out);
   }
 };
@@ -245,13 +463,26 @@ var PostToolUse = class {
       out.decision = "block";
     if (opts.reason !== undefined)
       out.reason = opts.reason;
-    if (opts.toClaude !== undefined || opts.updatedMCPToolOutput !== undefined) {
-      const hs = { hookEventName: "PostToolUse" };
-      if (opts.toClaude !== undefined)
-        hs.additionalContext = asString(opts.toClaude);
-      if (opts.updatedMCPToolOutput !== undefined)
-        hs.updatedMCPToolOutput = opts.updatedMCPToolOutput;
+    const hs = { hookEventName: "PostToolUse" };
+    if (opts.toClaude !== undefined)
+      hs.additionalContext = asString(opts.toClaude);
+    if (opts.updatedToolOutput !== undefined)
+      hs.updatedToolOutput = opts.updatedToolOutput;
+    if (opts.updatedMCPToolOutput !== undefined)
+      hs.updatedMCPToolOutput = opts.updatedMCPToolOutput;
+    if (hasHookSpecificFields(hs))
       out.hookSpecificOutput = hs;
+    return emitJson(out);
+  }
+};
+var PostToolUseFailure = class {
+  static parse() {
+    return readHookInput("PostToolUseFailure");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    if (opts.toClaude !== undefined) {
+      out.hookSpecificOutput = { hookEventName: "PostToolUseFailure", additionalContext: asString(opts.toClaude) };
     }
     return emitJson(out);
   }
@@ -269,25 +500,39 @@ var PreCompact = class {
     return emitJson(out);
   }
 };
+var PreModelSwitch = class {
+  static parse() {
+    return readHookInput("PreModelSwitch");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    const hs = { hookEventName: "PreModelSwitch" };
+    if (opts.decision !== undefined)
+      hs.permissionDecision = opts.decision;
+    if (opts.reason !== undefined)
+      hs.permissionDecisionReason = opts.reason;
+    if (hasHookSpecificFields(hs))
+      out.hookSpecificOutput = hs;
+    return emitJson(out);
+  }
+};
 var PreToolUse = class {
   static parse() {
     return readHookInput("PreToolUse");
   }
   static emitOutput(opts = {}) {
     const out = mixinCommon({}, opts);
-    const hasHS = opts.decision !== undefined || opts.reason !== undefined || opts.updatedInput !== undefined || opts.toClaude !== undefined;
-    if (hasHS) {
-      const hs = { hookEventName: "PreToolUse" };
-      if (opts.decision !== undefined)
-        hs.permissionDecision = opts.decision;
-      if (opts.reason !== undefined)
-        hs.permissionDecisionReason = opts.reason;
-      if (opts.updatedInput !== undefined)
-        hs.updatedInput = opts.updatedInput;
-      if (opts.toClaude !== undefined)
-        hs.additionalContext = asString(opts.toClaude);
+    const hs = { hookEventName: "PreToolUse" };
+    if (opts.decision !== undefined)
+      hs.permissionDecision = opts.decision;
+    if (opts.reason !== undefined)
+      hs.permissionDecisionReason = opts.reason;
+    if (opts.updatedInput !== undefined)
+      hs.updatedInput = opts.updatedInput;
+    if (opts.toClaude !== undefined)
+      hs.additionalContext = asString(opts.toClaude);
+    if (hasHookSpecificFields(hs))
       out.hookSpecificOutput = hs;
-    }
     return emitJson(out);
   }
 };
@@ -306,11 +551,30 @@ var SessionStart = class {
   }
   static emitOutput(opts = {}) {
     const out = mixinCommon({}, opts);
+    const hs = { hookEventName: "SessionStart" };
+    if (opts.toClaude !== undefined)
+      hs.additionalContext = asString(opts.toClaude);
+    if (opts.initialUserMessage !== undefined)
+      hs.initialUserMessage = opts.initialUserMessage;
+    if (opts.sessionTitle !== undefined)
+      hs.sessionTitle = opts.sessionTitle;
+    if (opts.watchPaths !== undefined)
+      hs.watchPaths = opts.watchPaths;
+    if (opts.reloadSkills !== undefined)
+      hs.reloadSkills = opts.reloadSkills;
+    if (hasHookSpecificFields(hs))
+      out.hookSpecificOutput = hs;
+    return emitJson(out);
+  }
+};
+var Setup = class {
+  static parse() {
+    return readHookInput("Setup");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
     if (opts.toClaude !== undefined) {
-      out.hookSpecificOutput = {
-        hookEventName: "SessionStart",
-        additionalContext: asString(opts.toClaude)
-      };
+      out.hookSpecificOutput = { hookEventName: "Setup", additionalContext: asString(opts.toClaude) };
     }
     return emitJson(out);
   }
@@ -325,6 +589,30 @@ var Stop = class {
       out.decision = "block";
     if (opts.reason !== undefined)
       out.reason = opts.reason;
+    if (opts.toClaude !== undefined) {
+      out.hookSpecificOutput = { hookEventName: "Stop", additionalContext: asString(opts.toClaude) };
+    }
+    return emitJson(out);
+  }
+};
+var StopFailure = class {
+  static parse() {
+    return readHookInput("StopFailure");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    return emitJson(out);
+  }
+};
+var SubagentStart = class {
+  static parse() {
+    return readHookInput("SubagentStart");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    if (opts.toClaude !== undefined) {
+      out.hookSpecificOutput = { hookEventName: "SubagentStart", additionalContext: asString(opts.toClaude) };
+    }
     return emitJson(out);
   }
 };
@@ -338,6 +626,68 @@ var SubagentStop = class {
       out.decision = "block";
     if (opts.reason !== undefined)
       out.reason = opts.reason;
+    if (opts.toClaude !== undefined) {
+      out.hookSpecificOutput = { hookEventName: "SubagentStop", additionalContext: asString(opts.toClaude) };
+    }
+    return emitJson(out);
+  }
+};
+var TaskCompleted = class {
+  static parse() {
+    return readHookInput("TaskCompleted");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    if (opts.deny)
+      out.decision = "block";
+    if (opts.reason !== undefined)
+      out.reason = opts.reason;
+    return emitJson(out);
+  }
+};
+var TaskCreated = class {
+  static parse() {
+    return readHookInput("TaskCreated");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    if (opts.deny)
+      out.decision = "block";
+    if (opts.reason !== undefined)
+      out.reason = opts.reason;
+    return emitJson(out);
+  }
+};
+var TeammateIdle = class {
+  static parse() {
+    return readHookInput("TeammateIdle");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    if (opts.deny)
+      out.decision = "block";
+    if (opts.reason !== undefined)
+      out.reason = opts.reason;
+    return emitJson(out);
+  }
+};
+var UserPromptExpansion = class {
+  static parse() {
+    return readHookInput("UserPromptExpansion");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
+    if (opts.deny)
+      out.decision = "block";
+    if (opts.reason !== undefined)
+      out.reason = opts.reason;
+    const hs = { hookEventName: "UserPromptExpansion" };
+    if (opts.toClaude !== undefined)
+      hs.additionalContext = asString(opts.toClaude);
+    if (opts.suppressOriginalPrompt !== undefined)
+      hs.suppressOriginalPrompt = opts.suppressOriginalPrompt;
+    if (hasHookSpecificFields(hs))
+      out.hookSpecificOutput = hs;
     return emitJson(out);
   }
 };
@@ -351,12 +701,32 @@ var UserPromptSubmit = class {
       out.decision = "block";
     if (opts.reason !== undefined)
       out.reason = opts.reason;
-    if (opts.toClaude !== undefined) {
-      out.hookSpecificOutput = {
-        hookEventName: "UserPromptSubmit",
-        additionalContext: asString(opts.toClaude)
-      };
-    }
+    const hs = { hookEventName: "UserPromptSubmit" };
+    if (opts.toClaude !== undefined)
+      hs.additionalContext = asString(opts.toClaude);
+    if (opts.suppressOriginalPrompt !== undefined)
+      hs.suppressOriginalPrompt = opts.suppressOriginalPrompt;
+    if (opts.sessionTitle !== undefined)
+      hs.sessionTitle = opts.sessionTitle;
+    if (hasHookSpecificFields(hs))
+      out.hookSpecificOutput = hs;
+    return emitJson(out);
+  }
+};
+var WorktreeCreate = class {
+  static parse() {
+    return readHookInput("WorktreeCreate");
+  }
+  static emitOutput(opts) {
+    return emitText(opts.worktreePath);
+  }
+};
+var WorktreeRemove = class {
+  static parse() {
+    return readHookInput("WorktreeRemove");
+  }
+  static emitOutput(opts = {}) {
+    const out = mixinCommon({}, opts);
     return emitJson(out);
   }
 };
@@ -581,19 +951,43 @@ export {
   runHook,
   renderTags,
   currentTheme,
+  WorktreeRemove,
+  WorktreeCreate,
   UserPromptSubmit,
+  UserPromptExpansion,
+  TeammateIdle,
+  TaskCreated,
+  TaskCompleted,
   SubagentStop,
+  SubagentStart,
+  StopFailure,
   Stop,
+  Setup,
   SessionStart,
   SessionEnd,
   PreToolUse,
+  PreModelSwitch,
   PreCompact,
+  PostToolUseFailure,
   PostToolUse,
+  PostToolBatch,
+  PostModelSwitch,
+  PostCompact,
+  PermissionRequest,
+  PermissionDenied,
   OutputBuilder,
   Notification,
+  MessageDisplay,
   MODIFIERS,
+  InstructionsLoaded,
   ICONS,
   HookParseError,
   HOOK_EVENT_NAMES,
+  FileChanged,
+  ElicitationResult,
+  Elicitation,
+  DirectoryAdded,
+  CwdChanged,
+  ConfigChange,
   COLORS
 };

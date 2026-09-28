@@ -59,7 +59,7 @@
     "onnxruntime-node": "^1.21.0"
   },
   "devDependencies": {
-    "@aeriondyseti/hook-kit": "^1.0.0",
+    "@aeriondyseti/hook-kit": "^1.1.0",
     "@types/bun": "latest",
     "typescript": "^5.0.0"
   },
