@@ -2,12 +2,12 @@ import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { ConversationHistoryService, chunkMessages } from "../server/core/conversation.service.js";
-import type { ConversationRepository } from "../server/core/conversation.repository.js";
-import type { EmbeddingsService } from "../server/core/embeddings.service.js";
-import type { SessionLogParser } from "../server/core/parsers/types.js";
-import type { ConversationHistoryConfig } from "../server/config/index.js";
-import type { ParsedMessage, SessionFileInfo, ConversationHybridRow } from "../server/core/conversation.js";
+import { ConversationHistoryService, chunkMessages } from "../server/core/conversation.service";
+import type { ConversationRepository } from "../server/core/conversation.repository";
+import type { EmbeddingsService } from "../server/core/embeddings.service";
+import type { SessionLogParser } from "../server/core/parsers/types";
+import type { ConversationHistoryConfig } from "../server/config/index";
+import type { IndexedSession, ParsedMessage, SessionFileInfo, ConversationHybridRow } from "../server/core/conversation";
 
 // --- Helpers ---
 
@@ -41,10 +41,18 @@ function makeConfig(overrides: Partial<ConversationHistoryConfig> = {}): Convers
 }
 
 function createMockRepository(): ConversationRepository {
+  // Index state now lives in the database — the mock keeps it in a Map
+  const state = new Map<string, IndexedSession>();
   return {
     insertBatch: mock(() => Promise.resolve()),
     deleteBySessionId: mock(() => Promise.resolve()),
+    replaceSession: mock(() => Promise.resolve()),
     findHybrid: mock(() => Promise.resolve([])),
+    loadIndexState: mock(() => new Map(state)),
+    upsertIndexState: mock((sessions: IndexedSession[]) => {
+      for (const s of sessions) state.set(s.sessionId, s);
+    }),
+    countIndexState: mock(() => state.size),
   } as unknown as ConversationRepository;
 }
 
@@ -150,8 +158,8 @@ describe("ConversationHistoryService", () => {
 
       // Verify embeddings were generated
       expect(mockEmbeddings.embedBatch).toHaveBeenCalled();
-      // Verify chunks were inserted
-      expect(mockRepo.insertBatch).toHaveBeenCalled();
+      // Verify chunks were atomically replaced
+      expect(mockRepo.replaceSession).toHaveBeenCalled();
     });
 
     test("skips unchanged session files", async () => {
@@ -179,13 +187,13 @@ describe("ConversationHistoryService", () => {
 
       // First pass — indexes
       await service.indexConversations("/tmp");
-      expect(mockRepo.insertBatch).toHaveBeenCalledTimes(1);
+      expect(mockRepo.replaceSession).toHaveBeenCalledTimes(1);
 
       // Second pass — same lastModified, should skip
       const result = await service.indexConversations("/tmp");
       expect(result.indexed).toBe(0);
       expect(result.skipped).toBe(1);
-      expect(mockRepo.insertBatch).toHaveBeenCalledTimes(1); // No additional call
+      expect(mockRepo.replaceSession).toHaveBeenCalledTimes(1); // No additional call
     });
 
     test("re-indexes when file lastModified changes", async () => {
@@ -229,8 +237,8 @@ describe("ConversationHistoryService", () => {
       const result = await service.indexConversations("/tmp");
       expect(result.indexed).toBe(1);
       expect(result.skipped).toBe(0);
-      // Should have deleted old chunks first
-      expect(mockRepo.deleteBySessionId).toHaveBeenCalledWith("session-1");
+      // Should have atomically replaced old chunks with new ones
+      expect(mockRepo.replaceSession).toHaveBeenCalledWith("session-1", expect.any(Array));
     });
 
     test("handles parse errors gracefully", async () => {
@@ -409,8 +417,8 @@ describe("ConversationHistoryService", () => {
       const result = await service.reindexSession("session-1");
       expect(result.success).toBe(true);
       expect(result.chunkCount).toBeGreaterThan(0);
-      // Should have called deleteBySessionId again for re-index
-      expect(mockRepo.deleteBySessionId).toHaveBeenCalledWith("session-1");
+      // Should have called replaceSession for the re-index
+      expect(mockRepo.replaceSession).toHaveBeenCalledWith("session-1", expect.any(Array));
     });
   });
 
@@ -577,7 +585,7 @@ describe("ConversationHistoryService", () => {
   });
 
   describe("index state persistence", () => {
-    test("persists index state to JSON file", async () => {
+    test("persists index state via the repository", async () => {
       const config = makeConfig();
       const mockRepo = createMockRepository();
       const messages = [makeMessage(0)];
@@ -601,17 +609,13 @@ describe("ConversationHistoryService", () => {
 
       await service.indexConversations("/tmp");
 
-      // Verify state file was written
-      const statePath = join(tmpDir, "conversation_index_state.json");
-      expect(existsSync(statePath)).toBe(true);
-
-      const stateContent = JSON.parse(readFileSync(statePath, "utf-8"));
-      expect(stateContent).toBeArray();
-      expect(stateContent).toHaveLength(1);
-      expect(stateContent[0].sessionId).toBe("session-1");
+      expect(mockRepo.upsertIndexState).toHaveBeenCalled();
+      const { sessions, total } = await service.listIndexedSessions();
+      expect(total).toBe(1);
+      expect(sessions[0].sessionId).toBe("session-1");
     });
 
-    test("loads index state from existing file", async () => {
+    test("shares index state across service instances", async () => {
       const config = makeConfig();
       const mockRepo = createMockRepository();
       const messages = [makeMessage(0)];
@@ -637,7 +641,7 @@ describe("ConversationHistoryService", () => {
       );
       await service1.indexConversations("/tmp");
 
-      // Create new service instance — should load persisted state and skip
+      // New service instance sharing the same repository sees the state
       const service2 = new ConversationHistoryService(
         mockRepo,
         createMockEmbeddings(),
@@ -650,7 +654,42 @@ describe("ConversationHistoryService", () => {
       expect(result.indexed).toBe(0);
     });
 
-    test("handles corrupted state file gracefully", async () => {
+    test("imports legacy JSON state file on first run", async () => {
+      const config = makeConfig();
+      const mockRepo = createMockRepository();
+      const statePath = join(tmpDir, "conversation_index_state.json");
+      mkdirSync(tmpDir, { recursive: true });
+      writeFileSync(
+        statePath,
+        JSON.stringify([
+          {
+            sessionId: "legacy-1",
+            filePath: "/tmp/legacy.jsonl",
+            project: "test-project",
+            lastModified: 1700000000000,
+            chunkCount: 2,
+            messageCount: 5,
+            indexedAt: "2026-03-03T12:00:00Z",
+            firstMessageAt: "2026-03-03T10:00:00Z",
+            lastMessageAt: "2026-03-03T11:00:00Z",
+          },
+        ])
+      );
+
+      const service = new ConversationHistoryService(
+        mockRepo,
+        createMockEmbeddings(),
+        config,
+        dbPath
+      );
+
+      const { sessions, total } = await service.listIndexedSessions();
+      expect(total).toBe(1);
+      expect(sessions[0].sessionId).toBe("legacy-1");
+      expect(mockRepo.upsertIndexState).toHaveBeenCalled();
+    });
+
+    test("handles corrupted legacy state file gracefully", async () => {
       const config = makeConfig();
       const statePath = join(tmpDir, "conversation_index_state.json");
       mkdirSync(tmpDir, { recursive: true });

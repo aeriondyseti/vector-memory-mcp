@@ -9,18 +9,18 @@
  * will see the UTC offset as elapsed time instead of actual age.
  */
 import { describe, expect, test, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { Database } from "bun:sqlite";
-import { connectToDatabase } from "../server/core/connection.js";
-import { MemoryRepository } from "../server/core/memory.repository.js";
-import { EmbeddingsService } from "../server/core/embeddings.service.js";
-import { MemoryService } from "../server/core/memory.service.js";
-import { createHttpApp } from "../server/transports/http/server.js";
-import { fakeEmbedding } from "./utils/test-helpers.js";
-import type { Memory } from "../server/core/memory.js";
-import type { Config } from "../server/config/index.js";
+import { connectToDatabase } from "../server/core/connection";
+import { MemoryRepository } from "../server/core/memory.repository";
+import { EmbeddingsService } from "../server/core/embeddings.service";
+import { MemoryService } from "../server/core/memory.service";
+import { createHttpApp } from "../server/transports/http/server";
+import { fakeEmbedding, removeDir } from "./utils/test-helpers";
+import type { Memory } from "../server/core/memory";
+import type { Config } from "../server/config/index";
 
 // A fixed UTC moment with a non-zero hour so a UTC-offset bug shifts it visibly.
 const KNOWN_UTC_MS = new Date("2026-01-15T09:30:00.000Z").getTime();
@@ -52,7 +52,7 @@ describe("Timestamp round-trip — LanceDB UTC preservation", () => {
 
   afterEach(() => {
     db.close();
-    rmSync(tmpDir, { recursive: true });
+    removeDir(tmpDir);
   });
 
   test("insert + findById: updatedAt round-trips as UTC", async () => {
@@ -161,7 +161,7 @@ describe("GET /waypoint — updatedAt UTC serialization", () => {
 
   afterAll(() => {
     db.close();
-    rmSync(httpTmpDir, { recursive: true });
+    removeDir(httpTmpDir);
   });
 
   test("updatedAt in response ends with Z (is UTC ISO 8601)", async () => {

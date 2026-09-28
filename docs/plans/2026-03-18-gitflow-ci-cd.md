@@ -1,5 +1,7 @@
 # Git-Flow CI/CD Implementation Plan
 
+> **Superseded (2026-09-27):** The `dev` branch and `@dev` dist-tag are retired. Publishing is now tag-driven from a trunk on `main` — see "Git Flow" and "Publishing" in `CLAUDE.md`.
+
 **Goal:** Align CI/CD with simplified git-flow: `dev` auto-publishes `@dev`, stable tags from `main` publish `@latest` + `@dev`.
 **Execution:** Serial
 **Branch:** `fix/ci-gitflow`

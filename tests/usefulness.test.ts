@@ -1,12 +1,13 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { Database } from "bun:sqlite";
-import { connectToDatabase } from "../server/core/connection.js";
-import { MemoryRepository } from "../server/core/memory.repository.js";
-import { EmbeddingsService } from "../server/core/embeddings.service.js";
-import { MemoryService } from "../server/core/memory.service.js";
+import { connectToDatabase } from "../server/core/connection";
+import { MemoryRepository } from "../server/core/memory.repository";
+import { EmbeddingsService } from "../server/core/embeddings.service";
+import { MemoryService } from "../server/core/memory.service";
+import { removeDir } from "./utils/test-helpers";
 
 describe("MemoryService - Usefulness", () => {
     let db: Database;
@@ -26,7 +27,8 @@ describe("MemoryService - Usefulness", () => {
     });
 
     afterEach(() => {
-        rmSync(tmpDir, { recursive: true });
+        db.close();
+        removeDir(tmpDir);
     });
 
     test("initial usefulness is 0", async () => {

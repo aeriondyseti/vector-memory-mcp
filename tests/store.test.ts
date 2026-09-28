@@ -1,13 +1,14 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { Database } from "bun:sqlite";
-import { connectToDatabase } from "../server/core/connection.js";
-import { MemoryRepository } from "../server/core/memory.repository.js";
-import { EmbeddingsService } from "../server/core/embeddings.service.js";
-import { MemoryService } from "../server/core/memory.service.js";
-import { DELETED_TOMBSTONE } from "../server/core/memory.js";
+import { connectToDatabase } from "../server/core/connection";
+import { MemoryRepository } from "../server/core/memory.repository";
+import { EmbeddingsService } from "../server/core/embeddings.service";
+import { MemoryService } from "../server/core/memory.service";
+import { DELETED_TOMBSTONE } from "../server/core/memory";
+import { removeDir } from "./utils/test-helpers";
 
 describe("MemoryService", () => {
   let db: Database;
@@ -27,7 +28,8 @@ describe("MemoryService", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true });
+    db.close();
+    removeDir(tmpDir);
   });
 
   describe("createDatabase", () => {
@@ -165,7 +167,7 @@ describe("MemoryService", () => {
       await service.store("Memory 2");
       await service.store("Memory 3");
 
-      const results = await service.search("memory", "fact_check", 2);
+      const results = await service.search("memory", "fact_check", { limit: 2 });
       expect(results.length).toBe(2);
     });
 
@@ -220,7 +222,8 @@ describe("MemoryRepository", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true });
+    db.close();
+    removeDir(tmpDir);
   });
 
   describe("findHybrid", () => {

@@ -1,17 +1,19 @@
 import { describe, expect, test, beforeAll, afterAll, mock } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { connectToDatabase } from "../server/core/connection.js";
-import { MemoryRepository } from "../server/core/memory.repository.js";
-import { EmbeddingsService } from "../server/core/embeddings.service.js";
-import { MemoryService } from "../server/core/memory.service.js";
-import { createHttpApp, startHttpServer } from "../server/transports/http/server.js";
-import type { Config } from "../server/config/index.js";
+import { connectToDatabase } from "../server/core/connection";
+import { MemoryRepository } from "../server/core/memory.repository";
+import { EmbeddingsService } from "../server/core/embeddings.service";
+import { MemoryService } from "../server/core/memory.service";
+import { createHttpApp, startHttpServer } from "../server/transports/http/server";
+import { removeDir } from "./utils/test-helpers";
+import type { Config } from "../server/config/index";
 
 function createTestConfig(dbPath: string): Config {
   return {
     dbPath,
+    project: "/test-project",
     embeddingModel: "Xenova/all-MiniLM-L6-v2",
     embeddingDimension: 384,
     httpPort: 3271,
@@ -35,12 +37,13 @@ describe("HTTP API", () => {
   let app: ReturnType<typeof createHttpApp>;
   let tmpDir: string;
   let testConfig: Config;
+  let db: ReturnType<typeof connectToDatabase>;
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-http-test-"));
     const dbPath = join(tmpDir, "test.db");
     testConfig = createTestConfig(dbPath);
-    const db = connectToDatabase(dbPath);
+    db = connectToDatabase(dbPath);
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     memoryService = new MemoryService(repository, embeddings);
@@ -48,7 +51,8 @@ describe("HTTP API", () => {
   });
 
   afterAll(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    db.close();
+    removeDir(tmpDir);
   });
 
   describe("GET /health", () => {
@@ -200,7 +204,7 @@ describe("HTTP API", () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.content).toContain("test-project");
-      expect(body.metadata.project).toBe("test-project");
+      expect(body.metadata.project).toBe("/test-project");
       expect(body.updatedAt).toBeDefined();
     });
 
@@ -260,12 +264,13 @@ describe("MCP Transport", () => {
   let memoryService: MemoryService;
   let app: ReturnType<typeof createHttpApp>;
   let tmpDir: string;
+  let db: ReturnType<typeof connectToDatabase>;
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-mcp-transport-test-"));
     const dbPath = join(tmpDir, "test.db");
     const testConfig = createTestConfig(dbPath);
-    const db = connectToDatabase(dbPath);
+    db = connectToDatabase(dbPath);
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     memoryService = new MemoryService(repository, embeddings);
@@ -273,7 +278,8 @@ describe("MCP Transport", () => {
   });
 
   afterAll(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    db.close();
+    removeDir(tmpDir);
   });
 
   describe("POST /mcp", () => {
@@ -472,12 +478,13 @@ describe("HTTP API Integration", () => {
   let memoryService: MemoryService;
   let app: ReturnType<typeof createHttpApp>;
   let tmpDir: string;
+  let db: ReturnType<typeof connectToDatabase>;
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-http-integration-"));
     const dbPath = join(tmpDir, "test.db");
     const testConfig = createTestConfig(dbPath);
-    const db = connectToDatabase(dbPath);
+    db = connectToDatabase(dbPath);
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     memoryService = new MemoryService(repository, embeddings);
@@ -485,7 +492,8 @@ describe("HTTP API Integration", () => {
   });
 
   afterAll(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    db.close();
+    removeDir(tmpDir);
   });
 
   test("end-to-end: store, search, delete workflow", async () => {
@@ -542,23 +550,25 @@ describe("HTTP API Integration", () => {
 describe("startHttpServer", () => {
   let tmpDir: string;
   let memoryService: MemoryService;
+  let db: ReturnType<typeof connectToDatabase>;
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-start-test-"));
     const dbPath = join(tmpDir, "test.db");
-    const db = connectToDatabase(dbPath);
+    db = connectToDatabase(dbPath);
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
     memoryService = new MemoryService(repository, embeddings);
   });
 
   afterAll(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    db.close();
+    removeDir(tmpDir);
   });
 
   test("starts server on configured port and stops cleanly", async () => {
     const config = createTestConfig(join(tmpDir, "test.db"));
-    config.httpPort = 49152 + Math.floor(Math.random() * 1000);
+    config.httpPort = 20000 + Math.floor(Math.random() * 20000);
 
     const { stop, port } = await startHttpServer(memoryService, config);
     expect(port).toBe(config.httpPort);
@@ -572,7 +582,7 @@ describe("startHttpServer", () => {
 
   test("finds alternative port when preferred is in use", async () => {
     const config = createTestConfig(join(tmpDir, "test.db"));
-    config.httpPort = 49152 + Math.floor(Math.random() * 1000);
+    config.httpPort = 20000 + Math.floor(Math.random() * 20000);
 
     // Start first server — may or may not get the requested port
     const server1 = await startHttpServer(memoryService, config);
@@ -591,12 +601,13 @@ describe("startHttpServer", () => {
 describe("HTTP error handling", () => {
   let app: ReturnType<typeof createHttpApp>;
   let tmpDir: string;
+  let db: ReturnType<typeof connectToDatabase>;
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-error-test-"));
     const dbPath = join(tmpDir, "test.db");
     const testConfig = createTestConfig(dbPath);
-    const db = connectToDatabase(dbPath);
+    db = connectToDatabase(dbPath);
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService("Xenova/all-MiniLM-L6-v2", 384);
 
@@ -616,7 +627,8 @@ describe("HTTP error handling", () => {
   });
 
   afterAll(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    db.close();
+    removeDir(tmpDir);
   });
 
   test("POST /search returns 500 on service error", async () => {

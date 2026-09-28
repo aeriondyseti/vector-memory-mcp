@@ -1,40 +1,14 @@
 # Roadmap
 
-Current version: **2.4.0**
+Current version: **3.0.0** (in development)
+
+> **3.0.0 status:** The entire planned feature set below (Phases 1–4, including the
+> Knowledge Graph subsystem) is **implemented**. 3.0.0 is a **major** release because
+> the global memory store (single `~/.vector-memory/memories.db` with per-project
+> tagging) is a breaking change to the storage model. The MCP surface grew from 11 to
+> **69 tools**. See the "Completed" section for the per-feature breakdown.
 
 ## Tech Debt
-
-- **Switch `moduleResolution` from `nodenext` to `bundler`**: The project runs on Bun which resolves `.ts` imports natively, but `tsc --noEmit` under `nodenext` resolution requires `.js` extensions on every relative import. Switching to `"moduleResolution": "bundler"` in tsconfig would eliminate the `.js` extension requirement and match how the code actually runs. Requires stripping `.js` from all relative imports across the codebase.
-
-- **Duplicate memory formatting in `handleSearchMemories`**: The memory-only code path (default, no `include_history`) formats results inline with the same logic as `formatSearchResult` for `source: "memory"`, minus the `Source:` label. Consolidating would require adding a `Source: memory` prefix to default output, changing existing behavior. Deferred to avoid breaking consumers that parse the output.
-
-- **Inconsistent parameter validation in MCP handlers**: `handleReindexSession` validates its required `session_id` arg defensively, but other handlers (`handleStoreMemories`, `handleDeleteMemories`, `handleReportMemoryUsefulness`, etc.) trust the MCP SDK schema validation and would throw unhandled `TypeError` on missing input. Low risk today since the SDK validates before calling handlers, but fragile if handlers are ever called directly (e.g. from HTTP routes).
-
-- **Hardcoded model name in `update-benchmarks.ts`**: The benchmark report bakes in `"Xenova/all-MiniLM-L6-v2 (384d)"` as a string literal. Should read from `BenchmarkRunner` or config so the report stays accurate if the model changes (especially relevant for Feature 30 — embedding model evaluation).
-
-- **Untyped transcript parsing in `context-monitor.ts`**: `analyzeTranscript()` uses `any` for parsed JSON lines from the Claude Code transcript. Should define a `TranscriptEntry` interface for the fields it reads (`message.usage`, `isSidechain`, `isApiErrorMessage`, `timestamp`) to catch schema drift early.
-
-- **N individual upserts for access tracking in `getMultiple()`**: `memory.service.ts:getMultiple()` batches the read via `findByIds` (single IN query), but fans out to N individual `repository.upsert()` calls for access tracking. Each upsert does a SELECT (existence check) + UPDATE — 2N queries total. A `bulkUpdateAccess(ids, now)` repository method using a single `UPDATE ... WHERE id IN (...)` would collapse this to 1 query. Same pattern applies to `trackAccess()`.
-
-- **Unbounded IN clause in `findByIds()`**: `memory.repository.ts:findByIds()` builds a SQL IN clause from an unbounded array of IDs. SQLite has a default SQLITE_MAX_VARIABLE_NUMBER limit (usually 999). Add a size guard (e.g., 100 IDs) and batch if needed.
-
-- **GitHub Actions Node.js 20 deprecation**: `actions/checkout@v4` and `actions/setup-node@v4` run on Node.js 20, which GitHub will force to Node.js 24 starting June 2, 2026. Update to newer action versions that support Node.js 24 before then.
-
-- **Non-atomic delete-insert in conversation reindexing**: `conversation.service.ts` calls `deleteBySessionId()` before `embedBatch()`/`insertBatch()`. If embedding or insert fails after delete, the session's chunks are lost until the next re-index. Wrap in a SQLite transaction or insert-then-delete to make it crash-safe.
-
-- **ConversationChunk field duplication**: `ConversationChunk` duplicates `sessionId`, `role`, `messageIndexStart`, `messageIndexEnd`, and `project` at both the top level and inside `metadata`. Consolidate to one location to eliminate divergence risk.
-
-- **Conversation search filters applied post-candidate selection**: `conversation.repository.ts` runs KNN/FTS without applying session/role/date filters, then filters after RRF scoring. This can return fewer than `limit` results. Intentional performance tradeoff — document or push filters into candidate queries.
-
-- **Platform-dependent path separator in subagent detection**: `claude-code.parser.ts` uses hardcoded `/subagents/` check which won't match on Windows. Low priority since Bun runtime is Linux/macOS focused, but should use `path.sep` or a regex for correctness.
-
-- **Parameter sprawl in `MemoryService.search()`**: `limit` and `includeDeleted` are positional arguments while `offset`, `historyOnly`, etc. live in the `SearchOptions` bag. Consolidate all search-shaping params into `SearchOptions` for a cleaner `search(query, intent, options?)` signature.
-
-- **`waypointId()` produces non-RFC-4122 UUID**: The deterministic project-scoped waypoint ID is SHA-256 formatted as `8-4-4-4-12` but lacks version/variant bits, making it a pseudo-UUID that could theoretically collide with `randomUUID()` values in the same table. Low risk since waypoint IDs occupy a distinct semantic slot, but should either use proper UUIDv5 or a non-UUID format (e.g. `wp:<hex>`). Deferred since multi-project waypoints are experimental.
-
-- **No normalization of `project` string in waypoint operations**: The `project` parameter flows through `set_waypoint` / `get_waypoint` without trimming or case normalization, so `"MyProject"` and `"myproject"` silently produce different waypoint slots. Add boundary normalization (e.g. trim + lowercase) or document case-sensitivity. Deferred since multi-project waypoints are experimental.
-
-- **Migration and backfill testing**: `server/core/migrations.ts` has no dedicated test coverage. The `backfillVectors()` function (which re-embeds rows missing from `_vec` tables after the vec0-to-BLOB migration) was validated manually by restarting the live server and confirming `search_memories` returned ranked results, but no automated test exists. Should cover: migration sequencing, backfill detection of missing/empty vectors, idempotent re-runs, and edge cases like zero-vector waypoints.
 
 - **In-memory vector cache for brute-force KNN**: `knnSearch()` in `sqlite-utils.ts` does a full `SELECT id, vector FROM table` on every search call. For a personal memory system (<10K records, ~15MB) this is acceptable, but a write-through `Map<string, Float32Array>` cache invalidated on insert/update/delete would eliminate repeated I/O and allocation. Becomes more important as memory count grows.
 
@@ -45,6 +19,58 @@ Current version: **2.4.0**
 - **Multi-project waypoint support**: `set_waypoint` and `get_waypoint` now use deterministic per-project IDs (SHA-256 of project name). Each project gets its own waypoint slot instead of sharing a single global slot (`UUID_ZERO`). The legacy no-project path still reads/writes `UUID_ZERO` for backwards compatibility. This feature is experimental and may be removed or redesigned.
 
 ## Completed
+
+### v3.0.0 — Full Roadmap Implementation + Global Store
+
+Breaking: single global SQLite store (`~/.vector-memory/memories.db`) with per-project
+tagging (supersedes the per-project federated search, Feature 29). Schema v2 adds
+`pinned, archived, confidence, importance, expires_at, quality_score, episode_id,
+sequence_number, preceding_memory_id` plus the knowledge-graph tables. Tool count 11 → 69.
+
+- **#1 Date/time filtering** — `after`/`before`/`time_expr` on `search_memories`
+- **#2 Flexible deletion** — `delete_memories` by ids/tags/date-range, `dry_run`, `force`, pinned/critical protection
+- **#3 Memory pinning** — settable via store/update, protects from deletion, shown in search
+- **#4 Pagination** — `offset` on `search_memories`
+- **#5 Health & storage stats** — `memory_health`, `get_storage_stats`
+- **#6 Maintenance** — `optimize_database`, `cleanup_orphans`, `get_maintenance_history` (sidecar audit log)
+- **#7 Response size controls** — `max_response_chars` with whole-memory truncation
+- **#8 Archiving** — `archive_memory` / `unarchive_memory` + `include_archived`
+- **#9 Confidence & importance levels** — attributes + `min_confidence` / `min_importance` filters
+- **#10 TTL** — `expires_at` / `ttl_seconds`, auto-exclusion, `expire_memories`
+- **#11 Search modes** — `mode`: semantic / exact / hybrid
+- **#12 Tag search** — `search_by_tags` + `tags`/`tag_match` filters
+- **#13 Stale detection** — `find_stale_memories`
+- **#14 Duplicate detection & merge** — `find_duplicates` / `merge_duplicates` / `cleanup_duplicates`
+- **#15 Quality scoring** — `quality_score` + `score_memories`; recomputed on vote; feeds hybrid ranking
+- **#16 Tag management** — `list_tags` / `rename_tag` / `merge_tags` / `delete_tag`
+- **#17 Document ingestion** — `ingest_document` (Markdown/text/JSON, sentence-boundary chunking)
+- **#18 Memory consolidation** — `consolidate_memories` (decay / cluster+merge / forget)
+- **#19 Knowledge graph** — entity/edge type registry, entities, domain edges, memory lineage, memory→entity reference bridge (25 tools)
+- **#20 Session handoff** — `prepare_handoff` / `resume_from_handoff` / `list_handoffs` / `get_startup_context`
+- **#21 Formal memory types** — type taxonomy + importance bonus feeding quality scoring; `type` search filter
+- **#23 Episodic chains** — `episode_id`/`sequence_number` + `get_episode` / `list_episodes`
+- **#24 Proactive context** — `proactive_context`
+- **#26 Backup & restore** — `backup_create` / `list` / `verify` / `restore` / `purge` (SHA-256 verified)
+- **#28 Session-context menu** — `get_session_context` (pinned/critical, char-budgeted)
+- Cross-platform hardening: Windows SQLite file-lock handling in tests and consolidation `--archive`
+
+### v2.4.4 — Tech Debt Cleanup
+- Switched `moduleResolution` from `nodenext` to `bundler`; stripped `.js` from all 176 relative imports
+- Added `batchedQuery()` utility and `SQLITE_BATCH_SIZE` constant; `findByIds()` now batches IN clauses
+- Added `bulkUpdateAccess()` to `MemoryRepository`; `getMultiple()` and `trackAccess()` use single UPDATE instead of N upserts
+- Made conversation re-indexing atomic: embed first, then `replaceSession()` does delete+insert in one transaction
+- Consolidated `search()` API from `(query, intent, limit, includeDeleted, options?)` to `(query, intent, options?)`
+- Added `requireString()` handler validation for `report_memory_usefulness` and `set_waypoint`
+- Defined `TranscriptEntry` interface in `context-monitor.ts`, replacing `any` annotations
+- Removed duplicated fields from `ConversationChunkMetadata`; top-level `ConversationChunk` is source of truth
+- Extracted `formatSearchResult()` helper from inline formatting in `handleSearchMemories`
+- Exported `MODEL_NAME`/`MODEL_DIMENSION` from benchmark runner; replaced hardcoded string in `update-benchmarks.ts`
+- Documented post-filter design tradeoff in `findHybrid()` JSDoc
+- Used cross-platform regex for subagent path detection
+- Added project string normalization (`trim().toLowerCase()`) in `waypointId()`
+- Switched waypoint IDs from pseudo-UUID to `wp:<hex>` format with legacy fallback migration
+- Added 14 migration and backfill tests (`tests/migrations.test.ts`)
+- Verified GitHub Actions already uses `actions/checkout@v6` (Node.js 20 deprecation resolved)
 
 ### Post-v2.1.1 — Quick Wins Batch 1
 - Extracted `errorResult()` helper in `handlers.ts`, replacing 11 inline error-response constructions (tech debt)
@@ -84,6 +110,10 @@ Current version: **2.4.0**
 ---
 
 ## Planned
+
+> **All features in this section are implemented as of 3.0.0** — see the "Completed"
+> section above for the delivery summary. The design notes below are retained as
+> reference documentation for each feature's rationale and shape.
 
 Features below were selected from a comparative analysis of three reference implementations ([cccmemory](reference/cccmemory), [mcp-memory-service](reference/mcp-memory-service), [shodh-memory](reference/shodh-memory)), extended with additional design work.
 
@@ -529,35 +559,35 @@ SQLite's single-file format makes backup straightforward — a file copy or `.ba
 
 ## Summary Table
 
-| # | Feature | Phase | Schema Change |
-|---|---------|-------|---------------|
-| 27 | Conversation history indexing | **Done** | Yes — new `conversation_history` table |
-| 1 | Date/time filtering in search | 1 | No |
-| 2 | Flexible deletion (tags, time, dry_run) | 1 | No |
-| 3 | Memory pinning | 1 | Yes — `pinned` column |
-| 4 | ~~Result pagination (offset)~~ | **Done** | No |
-| 5 | Health & storage stats tools | 1 | No |
-| 6 | Database maintenance tools | 1 | No |
-| 7 | Response size controls | 1 | No |
-| 28 | Pinned memory menu (session context) | 1 | No (builds on #3) |
-| 29 | Federated cross-project search | 1 | No |
-| 30 | Embedding model evaluation | 1 | Possible (if dimensions change) |
-| 8 | Memory archiving | 2 | Yes — `archived` column |
-| 9 | Confidence & importance levels | 2 | Yes — two `Utf8` columns |
-| 10 | TTL (auto-expiry) | 2 | Yes — `expires_at` column |
-| 11 | Search modes (exact, hybrid) | 2 | No (FTS index only) |
-| 12 | Tag-based search & filtering | 2 | No |
-| 13 | Stale item detection | 2 | No |
-| 14 | Duplicate detection & merge | 3 | No |
-| 15 | Quality scoring system | 3 | Yes — `quality_score` column |
-| 16 | Tag management system | 3 | Optional sidecar table |
-| 17 | Document ingestion | 3 | No |
-| 18 | Memory consolidation | 3 | No (requires #15) |
-| 19 | Knowledge graph subsystem | 3 | Yes — `entity_types`, `edge_types`, `entities`, `graph_edges` |
-| 20 | Session handoff system | 3 | No (sidecar store) |
-| 21 | Formal memory type taxonomy | 3 | No |
-| 22 | ~~Source & credibility tracking~~ | — | Absorbed into Feature 19 |
-| 23 | Episodic memory chains | 4 | Yes — three nullable columns |
-| 24 | Proactive context tool | 4 | No |
-| 25 | ~~Decision lineage graph~~ | — | Absorbed into Feature 19 |
-| 26 | Backup & restore | 4 | No (sidecar storage) |
+| # | Feature | Status | Schema Change |
+|---|---------|--------|---------------|
+| 27 | Conversation history indexing | **Done** (v1.1) | Yes — `conversation_history` table |
+| 1 | Date/time filtering in search | **Done** (3.0) | No |
+| 2 | Flexible deletion (tags, time, dry_run) | **Done** (3.0) | No |
+| 3 | Memory pinning | **Done** (3.0) | Yes — `pinned` column |
+| 4 | Result pagination (offset) | **Done** | No |
+| 5 | Health & storage stats tools | **Done** (3.0) | No |
+| 6 | Database maintenance tools | **Done** (3.0) | No |
+| 7 | Response size controls | **Done** (3.0) | No |
+| 28 | Pinned memory menu (session context) | **Done** (3.0) | No (builds on #3) |
+| 29 | Federated cross-project search | **Superseded** by global store | No |
+| 30 | Embedding model evaluation | Ongoing investigation (benchmarks in `tests/benchmark/`) | Possible |
+| 8 | Memory archiving | **Done** (3.0) | Yes — `archived` column |
+| 9 | Confidence & importance levels | **Done** (3.0) | Yes — `confidence`, `importance` columns |
+| 10 | TTL (auto-expiry) | **Done** (3.0) | Yes — `expires_at` column |
+| 11 | Search modes (exact, hybrid) | **Done** (3.0) | No |
+| 12 | Tag-based search & filtering | **Done** (3.0) | No |
+| 13 | Stale item detection | **Done** (3.0) | No |
+| 14 | Duplicate detection & merge | **Done** (3.0) | No |
+| 15 | Quality scoring system | **Done** (3.0) | Yes — `quality_score` column |
+| 16 | Tag management system | **Done** (3.0) | No |
+| 17 | Document ingestion | **Done** (3.0) | No |
+| 18 | Memory consolidation | **Done** (3.0) | No (requires #15) |
+| 19 | Knowledge graph subsystem | **Done** (3.0) | Yes — `entity_types`, `edge_types`, `entities`, `graph_edges` |
+| 20 | Session handoff system | **Done** (3.0) | No (sidecar store) |
+| 21 | Formal memory type taxonomy | **Done** (3.0) | No |
+| 22 | ~~Source & credibility tracking~~ | Absorbed into #19 | — |
+| 23 | Episodic memory chains | **Done** (3.0) | Yes — three nullable columns |
+| 24 | Proactive context tool | **Done** (3.0) | No |
+| 25 | ~~Decision lineage graph~~ | Absorbed into #19 | — |
+| 26 | Backup & restore | **Done** (3.0) | No (sidecar storage) |

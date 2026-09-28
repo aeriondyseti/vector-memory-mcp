@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-07-07
+
+Major release: completes the entire feature roadmap (Phases 1–4 + Knowledge Graph)
+and adopts a single global memory store. MCP surface grew from 11 to **69 tools**.
+
+### Added
+- **Memory attributes** (schema v2): `pinned`, `archived`, `confidence`, `importance`, `expires_at`/`ttl_seconds`, `quality_score`, `episode_id`, `sequence_number`, `preceding_memory_id` — settable via `store_memories`/`update_memories`.
+- **Search filters**: date (`after`/`before`/`time_expr`), `min_confidence`, `min_importance`, `type`, `tags`/`tag_match`, `include_archived`, `include_expired`, `max_response_chars`, and a `mode` (semantic/exact/hybrid).
+- **Deletion & lifecycle**: flexible `delete_memories` (ids/tags/date-range, `dry_run`, `force`, pinned/critical protection); `archive_memory`/`unarchive_memory`; `expire_memories`; `find_stale_memories`.
+- **Quality & consolidation**: `score_memories` (usefulness/frequency/recency/type/importance), `consolidate_memories` (decay/compress/forget), `find_duplicates`/`merge_duplicates`/`cleanup_duplicates`.
+- **Organization**: `search_by_tags`, `list_tags`/`rename_tag`/`merge_tags`/`delete_tag`, `get_episode`/`list_episodes`, `get_session_context`, `proactive_context`.
+- **Operations**: `memory_health`, `get_storage_stats`, `optimize_database`, `cleanup_orphans`, `get_maintenance_history`; `backup_create`/`list`/`verify`/`restore`/`purge`; `ingest_document`.
+- **Session handoffs**: `prepare_handoff`/`resume_from_handoff`/`list_handoffs`/`get_startup_context` (history-preserving, unlike waypoints).
+- **Knowledge graph** (25 tools): entity/edge type registry with hard enforcement, entities with embeddings + provenance, domain edges with type constraints, memory-graph lineage (`caused`/`informed_by`/…), and a memory→entity reference bridge.
+
+### Changed
+- **BREAKING — global memory store**: all data lives in a single `~/.vector-memory/memories.db` shared by every project, with a `project` column (canonical cwd path). `search_memories` defaults to `scope: "all"` (current project boosted). Repo-local dbs remain available via `--db-file` / `VECTOR_MEMORY_DB_PATH`; the `consolidate` CLI imports legacy repo-local dbs.
+- **Release flow**: Publishing is tag-driven — `npm version <x> && git push --follow-tags`. `vX.Y.Z` publishes `@latest` (tag must be on `main`); `vX.Y.Z-<pre>` publishes `@next`. The `dev` and `rc/*` branches and the `@dev`/`@rc` dist-tags are retired; development is trunk-based on `main`.
+- **Plugin**: `plugin/.mcp.json` always runs `@latest`; hooks use vendored `@aeriondyseti/hook-kit` 1.1.0.
+- **Debug logging**: Auto-enabled for any pre-release version (`X.Y.Z-*`).
+
+### Fixed
+- **Cross-platform (Windows)**: SQLite file-lock release (GC + retry) before `rmSync`/rename in tests and in consolidation `--archive`; OS-agnostic path assertions. Full suite green on Windows.
+- **Release commit missing manifests**: `sync-version` ran as `postversion` (after `npm version` commits), so the synced plugin/marketplace versions never landed in the release commit. It now runs as the `version` hook and stages its output.
+
 ## [2.4.0] - 2026-03-27
 
 ### Added

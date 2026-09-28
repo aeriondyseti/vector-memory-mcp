@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { readFile } from "fs/promises";
 import { dirname, join } from "path";
-import type { ConversationRepository } from "./conversation.repository.js";
+import type { ConversationRepository } from "./conversation.repository";
 import type {
   ConversationChunk,
   ConversationHybridRow,
@@ -10,12 +10,12 @@ import type {
   ParsedMessage,
   SessionFileInfo,
   SessionIndexDetail,
-} from "./conversation.js";
-import type { ConversationHistoryConfig } from "../config/index.js";
-import { resolveSessionLogPath } from "../config/index.js";
-import type { EmbeddingsService } from "./embeddings.service.js";
-import type { SessionLogParser } from "./parsers/types.js";
-import { ClaudeCodeSessionParser } from "./parsers/claude-code.parser.js";
+} from "./conversation";
+import type { ConversationHistoryConfig } from "../config/index";
+import { resolveSessionLogPath } from "../config/index";
+import type { EmbeddingsService } from "./embeddings.service";
+import type { SessionLogParser } from "./parsers/types";
+import { ClaudeCodeSessionParser } from "./parsers/claude-code.parser";
 
 /**
  * Generate a deterministic chunk ID from session ID and message indices.
@@ -78,12 +78,7 @@ export function chunkMessages(
       messageIndexEnd: lastMsg.messageIndex,
       project: firstMsg.project,
       metadata: {
-        session_id: firstMsg.sessionId,
         timestamp: firstMsg.timestamp.toISOString(),
-        role,
-        message_index_start: firstMsg.messageIndex,
-        message_index_end: lastMsg.messageIndex,
-        project: firstMsg.project,
         git_branch: firstMsg.gitBranch,
         is_subagent: firstMsg.isSubagent,
         agent_id: firstMsg.agentId,
@@ -98,8 +93,8 @@ export function chunkMessages(
   return chunks;
 }
 
-/** Serializable index state format */
-interface IndexStateEntry {
+/** Legacy JSON index state format (pre-table), imported on first run. */
+interface LegacyIndexStateEntry {
   sessionId: string;
   filePath: string;
   project: string;
@@ -112,65 +107,63 @@ interface IndexStateEntry {
 }
 
 export class ConversationHistoryService {
-  private indexStatePath: string;
-  private indexStateCache: Map<string, IndexedSession> | null = null;
+  private legacyIndexStatePath: string;
+  private legacyImportAttempted = false;
 
   constructor(
     private repository: ConversationRepository,
     private embeddings: EmbeddingsService,
     public readonly config: ConversationHistoryConfig,
-    private dbPath: string,
+    dbPath: string,
     private parser: SessionLogParser = new ClaudeCodeSessionParser()
   ) {
-    this.indexStatePath = join(
+    this.legacyIndexStatePath = join(
       dirname(dbPath),
       "conversation_index_state.json"
     );
   }
 
+  /**
+   * Index state lives in the conversation_index_state table (shared by all
+   * server processes) — read fresh each time, never cached per-process.
+   * A pre-existing conversation_index_state.json is imported once.
+   */
   private async loadIndexState(): Promise<Map<string, IndexedSession>> {
-    if (this.indexStateCache) return this.indexStateCache;
-    try {
-      const raw = await readFile(this.indexStatePath, "utf-8");
-      const entries: IndexStateEntry[] = JSON.parse(raw);
-      const map = new Map<string, IndexedSession>();
-      for (const e of entries) {
-        map.set(e.sessionId, {
-          sessionId: e.sessionId,
-          filePath: e.filePath,
-          project: e.project,
-          lastModified: e.lastModified,
-          chunkCount: e.chunkCount,
-          messageCount: e.messageCount,
-          indexedAt: new Date(e.indexedAt),
-          firstMessageAt: new Date(e.firstMessageAt),
-          lastMessageAt: new Date(e.lastMessageAt),
-        });
+    if (!this.legacyImportAttempted) {
+      this.legacyImportAttempted = true;
+      if (this.repository.countIndexState() === 0) {
+        await this.importLegacyIndexState();
       }
-      this.indexStateCache = map;
-      return map;
-    } catch {
-      const map = new Map<string, IndexedSession>();
-      this.indexStateCache = map;
-      return map;
     }
+    return this.repository.loadIndexState();
   }
 
-  private async saveIndexState(state: Map<string, IndexedSession>): Promise<void> {
-    const entries: IndexStateEntry[] = [...state.values()].map((s) => ({
-      sessionId: s.sessionId,
-      filePath: s.filePath,
-      project: s.project,
-      lastModified: s.lastModified,
-      chunkCount: s.chunkCount,
-      messageCount: s.messageCount,
-      indexedAt: s.indexedAt.toISOString(),
-      firstMessageAt: s.firstMessageAt.toISOString(),
-      lastMessageAt: s.lastMessageAt.toISOString(),
-    }));
-    await mkdir(dirname(this.indexStatePath), { recursive: true });
-    await writeFile(this.indexStatePath, JSON.stringify(entries, null, 2));
-    this.indexStateCache = state;
+  private async importLegacyIndexState(): Promise<void> {
+    let entries: LegacyIndexStateEntry[];
+    try {
+      const raw = await readFile(this.legacyIndexStatePath, "utf-8");
+      entries = JSON.parse(raw);
+    } catch {
+      return; // no legacy state — fine
+    }
+
+    this.repository.upsertIndexState(
+      entries.map((e) => ({
+        sessionId: e.sessionId,
+        filePath: e.filePath,
+        project: e.project,
+        lastModified: e.lastModified,
+        chunkCount: e.chunkCount,
+        messageCount: e.messageCount,
+        indexedAt: new Date(e.indexedAt),
+        firstMessageAt: new Date(e.firstMessageAt),
+        lastMessageAt: new Date(e.lastMessageAt),
+      }))
+    );
+  }
+
+  private saveIndexState(sessions: IndexedSession[]): void {
+    this.repository.upsertIndexState(sessions);
   }
 
   async indexConversations(
@@ -212,6 +205,7 @@ export class ConversationHistoryService {
     let skipped = 0;
     const errors: string[] = [];
     const details: SessionIndexDetail[] = [];
+    const updated: IndexedSession[] = [];
 
     for (const file of sessionFiles) {
       const existing = indexState.get(file.sessionId);
@@ -223,6 +217,7 @@ export class ConversationHistoryService {
 
       try {
         const state = await this.indexSession(file, indexState);
+        updated.push(state);
         indexed++;
         details.push({
           sessionId: file.sessionId,
@@ -238,7 +233,7 @@ export class ConversationHistoryService {
       }
     }
 
-    await this.saveIndexState(indexState);
+    this.saveIndexState(updated);
     return { indexed, skipped, errors, details };
   }
 
@@ -273,20 +268,24 @@ export class ConversationHistoryService {
       this.config.chunkOverlap
     );
 
-    // Delete existing chunks for re-indexing
-    await this.repository.deleteBySessionId(file.sessionId);
-
-    // Embed all chunks
+    // Embed all chunks FIRST (pure computation, no DB side effects)
     const embeddings = await this.embeddings.embedBatch(
       chunks.map((c) => c.content)
     );
 
-    // Insert all chunks
+    // Build rows
     const rows = chunks.map((chunk, i) => ({
       id: chunk.id,
       vector: embeddings[i],
       content: chunk.content,
-      metadata: JSON.stringify(chunk.metadata),
+      metadata: JSON.stringify({
+        ...chunk.metadata,
+        session_id: chunk.sessionId,
+        role: chunk.role,
+        message_index_start: chunk.messageIndexStart,
+        message_index_end: chunk.messageIndexEnd,
+        project: chunk.project,
+      }),
       created_at: chunk.timestamp.getTime(),
       session_id: chunk.sessionId,
       role: chunk.role,
@@ -295,13 +294,15 @@ export class ConversationHistoryService {
       project: chunk.project,
     }));
 
-    await this.repository.insertBatch(rows);
+    // Atomically replace old chunks with new ones
+    await this.repository.replaceSession(file.sessionId, rows);
 
-    // Update index state
+    // Update index state. Prefer the parsed project (cwd-derived) over the
+    // lossy directory-name decode carried by the file listing.
     const session: IndexedSession = {
       sessionId: file.sessionId,
       filePath: file.filePath,
-      project: file.project,
+      project: messages[0].project,
       lastModified: file.lastModified.getTime(),
       chunkCount: chunks.length,
       messageCount: messages.length,
@@ -342,11 +343,10 @@ export class ConversationHistoryService {
       lastModified: new Date(),
     };
 
-    await this.indexSession(file, indexState);
-    await this.saveIndexState(indexState);
+    const state = await this.indexSession(file, indexState);
+    this.saveIndexState([state]);
 
-    const updated = indexState.get(sessionId)!;
-    return { success: true, chunkCount: updated.chunkCount };
+    return { success: true, chunkCount: state.chunkCount };
   }
 
   async listIndexedSessions(

@@ -30,7 +30,6 @@ For each significant item, call `mcp__vector-memory__store_memories` with approp
 Call `mcp__vector-memory__set_waypoint` with:
 
 ```
-project: [repository/project name]
 branch: [current git branch]
 summary: [2-3 sentences: what was the primary goal, what's the current status]
 
@@ -53,6 +52,10 @@ next_steps:
 memory_ids:
 - [IDs returned from store_memories calls above]
 ```
+
+Do not pass `project` — it is detected automatically from the working
+directory. Only pass it (as a canonical absolute path) to save a waypoint
+for a different project.
 
 ## 3. Report to User
 

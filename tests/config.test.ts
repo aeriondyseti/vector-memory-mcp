@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { parseCliArgs, loadConfig } from "../server/config/index.js";
+import { isAbsolute, join } from "path";
+import { parseCliArgs, loadConfig } from "../server/config/index";
 
 describe("parseCliArgs", () => {
   test("returns empty overrides for no args", () => {
@@ -99,8 +100,8 @@ describe("loadConfig", () => {
 
   test("resolves relative db paths to cwd", () => {
     const config = loadConfig({ dbPath: "relative/path.db" });
-    expect(config.dbPath).toContain("relative/path.db");
-    expect(config.dbPath.startsWith("/")).toBe(true);
+    expect(config.dbPath).toContain(join("relative", "path.db"));
+    expect(isAbsolute(config.dbPath)).toBe(true);
   });
 });
 
@@ -135,7 +136,7 @@ describe("environment variable fallbacks", () => {
 
   test("defaults are used when neither CLI flag nor env var is set", () => {
     const config = loadConfig();
-    expect(config.dbPath).toContain(".vector-memory/memories.db");
+    expect(config.dbPath).toContain(join(".vector-memory", "memories.db"));
     expect(config.httpPort).toBe(3271);
   });
 });

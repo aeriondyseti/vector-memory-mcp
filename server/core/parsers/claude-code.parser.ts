@@ -1,7 +1,8 @@
 import { readFile, readdir, stat } from "fs/promises";
 import { basename, dirname, join } from "path";
-import type { ParsedMessage, SessionFileInfo } from "../conversation.js";
-import type { SessionLogParser } from "./types.js";
+import type { ParsedMessage, SessionFileInfo } from "../conversation";
+import { normalizeProject } from "../project";
+import type { SessionLogParser } from "./types";
 
 // UUID pattern for session IDs
 const UUID_PATTERN =
@@ -18,16 +19,19 @@ function extractAssistantText(
 }
 
 /**
- * Extract project name from path-encoded directory name.
+ * Fallback project derivation from a path-encoded directory name.
  * Claude Code encodes paths by replacing `/` with `-`, e.g. `/home/user/project` → `-home-user-project`.
  * This is a lossy encoding: directory names containing literal dashes (e.g. `my-project`)
  * cannot be distinguished from path separators, so `my-project` decodes as `my/project`.
- * This is a known limitation of Claude Code's encoding scheme.
+ *
+ * Only used when a session file carries no `cwd` field — the authoritative
+ * project source is the `cwd` recorded on each message (see parse()).
  */
 function extractProjectFromDir(dirName: string): string {
-  return dirName.startsWith("-")
+  const decoded = dirName.startsWith("-")
     ? dirName.slice(1).replace(/-/g, "/")
     : dirName;
+  return normalizeProject(decoded);
 }
 
 export class ClaudeCodeSessionParser implements SessionLogParser {
@@ -45,7 +49,7 @@ export class ClaudeCodeSessionParser implements SessionLogParser {
     const fileName = basename(filePath, ".jsonl");
     const parentDir = basename(dirname(filePath));
     // Check if this is inside a subagents directory
-    const isSubagentFile = filePath.includes("/subagents/");
+    const isSubagentFile = /[/\\]subagents[/\\]/.test(filePath);
 
     // For subagent files, project dir is 3 levels up: <project>/<session>/subagents/<file>
     // For main files, project dir is direct parent
@@ -53,7 +57,10 @@ export class ClaudeCodeSessionParser implements SessionLogParser {
       ? basename(dirname(dirname(dirname(filePath))))
       : parentDir;
 
-    const project = extractProjectFromDir(projectDir);
+    // Project identity: the `cwd` recorded on session entries is the true
+    // absolute path. The dash-encoded directory name is a lossy fallback.
+    let project = extractProjectFromDir(projectDir);
+    let projectFromCwd = false;
 
     for (const line of lines) {
       let entry: Record<string, unknown>;
@@ -62,6 +69,13 @@ export class ClaudeCodeSessionParser implements SessionLogParser {
       } catch {
         // Skip malformed lines
         continue;
+      }
+
+      if (!projectFromCwd && typeof entry.cwd === "string" && entry.cwd.length > 0) {
+        project = normalizeProject(entry.cwd as string);
+        projectFromCwd = true;
+        // Retroactively fix messages parsed before the first cwd appeared
+        for (const m of messages) m.project = project;
       }
 
       const type = entry.type as string;

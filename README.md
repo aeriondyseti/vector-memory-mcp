@@ -117,13 +117,54 @@ Assistant: [calls search_memories with history_only: true, history_before/after 
 
 ---
 
+## Storage Model
+
+All memories live in a single global database (`~/.vector-memory/memories.db`)
+shared by every project. Each memory is tagged with the project (working
+directory) it was stored from:
+
+- **Searches default to all projects** — results carry their project path, and
+  hits from the current project rank slightly higher. Use `scope: "project"`
+  to restrict a search to the current repo.
+- **Waypoints are per-project** and resolved automatically from the working
+  directory.
+- A repo-local database is still available via `--db-file` or
+  `VECTOR_MEMORY_DB_PATH` (note: keep the db on local disk — WAL mode
+  misbehaves on network filesystems like NFS home directories).
+
+### Migrating repo-local databases
+
+Projects that used the old per-repo `.vector-memory/` layout can be imported
+into the global store:
+
+```bash
+# Import the current repo's .vector-memory/memories.db
+bunx @aeriondyseti/vector-memory-mcp consolidate
+
+# Scan a whole directory tree and import every repo-local db found
+bunx @aeriondyseti/vector-memory-mcp consolidate ~/Development --recursive
+
+# Preview without writing (prints planned imports and ID re-keys)
+bunx @aeriondyseti/vector-memory-mcp consolidate --dry-run
+```
+
+Consolidation tags every imported memory with its repo's path, preserves
+embeddings and usefulness stats, deduplicates by ID, re-keys waypoints to
+their per-project IDs (remapping references), and backs up the global db
+first. `--archive` renames the source `.vector-memory/` to
+`.vector-memory.migrated/` after a successful import; `--force` skips the
+live-server check.
+
+---
+
 ## Configuration
 
 CLI flags:
 
 | Flag | Alias | Default | Description |
 |------|-------|---------|-------------|
-| `--db-file <path>` | `-d` | `.vector-memory/memories.db` | Database location (relative to cwd) |
+| `--db-file <path>` | `-d` | `~/.vector-memory/memories.db` | Database location (global store) |
+| `--project <path>` | | *(cwd)* | Project identity used to tag memories |
 | `--port <number>` | `-p` | `3271` | HTTP server port |
 | `--no-http` | | *(HTTP enabled)* | Disable HTTP/SSE transport |
 | `--enable-history` | | *(disabled)* | Enable conversation history indexing |
@@ -134,7 +175,7 @@ CLI flags:
 
 ## Release Channels
 
-**Plugin users:** The plugin tracks the repo's default branch. To switch channels, reinstall from a specific branch or tag.
+**Plugin users:** The plugin runs the `@latest` npm release.
 
 **npm users:** The stable release is what you get by default:
 
@@ -142,20 +183,16 @@ CLI flags:
 bun install -g @aeriondyseti/vector-memory-mcp
 ```
 
-Pre-release channels are available for testing upcoming changes. **These are unstable and may break without notice — use at your own risk.**
+Pre-releases are published to `@next` for testing upcoming changes. **They are unstable and may break without notice — use at your own risk.**
 
 | Channel | npm | Description |
 |---------|-----|-------------|
 | `@latest` | *(default)* | Stable releases |
-| `@rc` | `@aeriondyseti/vector-memory-mcp@rc` | Release candidates — final testing before stable |
-| `@dev` | `@aeriondyseti/vector-memory-mcp@dev` | Development builds — latest features, least stable |
+| `@next` | `@aeriondyseti/vector-memory-mcp@next` | Pre-releases (e.g. `3.0.0-beta.1`) |
 
 ```bash
-# Install the dev channel
-bun install -g @aeriondyseti/vector-memory-mcp@dev
-
-# Pin to a specific pre-release version
-bun install -g @aeriondyseti/vector-memory-mcp@2.1.0-dev.1
+# Install the pre-release channel
+bun install -g @aeriondyseti/vector-memory-mcp@next
 
 # Go back to stable
 bun install -g @aeriondyseti/vector-memory-mcp@latest

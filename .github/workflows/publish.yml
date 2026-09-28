@@ -1,20 +1,12 @@
 name: Publish to npm
 
+# Releases are cut by pushing a version tag:
+#   npm version <patch|minor|major|X.Y.Z> && git push --follow-tags
+# vX.Y.Z        → @latest (tag must be on main)
+# vX.Y.Z-<pre>  → @next   (e.g. v3.0.0-beta.1; any branch)
 on:
   push:
-    branches: [dev, 'rc/*']
     tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'npm dist-tag (dev, rc, or latest)'
-        required: true
-        default: 'dev'
-        type: choice
-        options:
-          - dev
-          - rc
-          - latest
 
 permissions:
   id-token: write   # Required for OIDC trusted publishing
@@ -29,48 +21,35 @@ jobs:
         with:
           fetch-depth: 0  # Full history needed for branch-tag validation
 
-      - name: Validate stable tag is on main
-        if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref, '-dev.') && !contains(github.ref, '-rc.')
-        run: |
-          TAG="${{ github.ref_name }}"
-          # Check that the tagged commit exists on main
-          if ! git branch -r --contains "${{ github.sha }}" | grep -q 'origin/main$'; then
-            echo "::error::Tag $TAG does not point to a commit on main. Stable releases must be tagged from main."
-            exit 1
-          fi
-          echo "Stable tag $TAG is on main"
-
       - name: Determine npm tag
         id: npm-tag
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            TAG="${{ inputs.tag }}"
-          elif [[ "${{ github.ref }}" == refs/heads/rc/* ]]; then
-            TAG="rc"
-          elif [[ "${{ github.ref }}" == *-dev.* ]]; then
-            TAG="dev"
-          elif [[ "${{ github.ref }}" == *-rc.* ]]; then
-            TAG="rc"
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            TAG="latest"
-          else
-            TAG="dev"
-          fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$VERSION" == *-* ]]; then TAG="next"; else TAG="latest"; fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "Publishing with npm tag: $TAG"
+          echo "Publishing $VERSION with npm tag: $TAG"
 
-      - name: Set version from git tag
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Validate tag matches package.json
         run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"
-          npm version "$VERSION" --no-git-tag-version --allow-same-version
-          echo "Set package.json version to $VERSION"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [[ "$PKG_VERSION" != "${{ steps.npm-tag.outputs.version }}" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG_VERSION. Cut releases with 'npm version'."
+            exit 1
+          fi
+
+      - name: Validate stable tag is on main
+        if: steps.npm-tag.outputs.tag == 'latest'
+        run: |
+          if ! git branch -r --contains "$GITHUB_SHA" | grep -q 'origin/main$'; then
+            echo "::error::Tag $GITHUB_REF_NAME does not point to a commit on main. Stable releases must be tagged from main."
+            exit 1
+          fi
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - name: Setup Node.js (for npm publish)
         uses: actions/setup-node@v6
@@ -79,66 +58,37 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
+
+      - name: Verify vendored hook-kit matches lockfile
+        run: |
+          bun run vendor:hooks
+          if [ -n "$(git status --porcelain -- plugin/hooks/scripts/vendor)" ]; then
+            echo "::error::Vendored hook-kit is stale for this release. Run 'bun run vendor:hooks:latest' locally and re-commit."
+            git status --porcelain -- plugin/hooks/scripts/vendor
+            exit 1
+          fi
 
       - name: Run tests
-        if: steps.npm-tag.outputs.tag != 'dev'
         run: bun run test
 
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Check if version already published
-        id: check-version
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          if npm view "@aeriondyseti/vector-memory-mcp@$VERSION" version 2>/dev/null; then
-            echo "skip=true" >> $GITHUB_OUTPUT
-            echo "Version $VERSION already published, skipping"
-          else
-            echo "skip=false" >> $GITHUB_OUTPUT
-            echo "Version $VERSION not yet published"
-          fi
-
       - name: Publish to npm
-        if: steps.check-version.outputs.skip != 'true'
         run: npm publish --access public --provenance --tag ${{ steps.npm-tag.outputs.tag }}
 
-      # Cascade dist-tags via shadow publishes. OIDC tokens are publish-scoped
-      # and can't run `npm dist-tag add` (npm/cli#8547), so we publish a shadow
-      # prerelease version under the target tag instead. This ensures @dev and
-      # @rc always point to content >= @latest without needing an NPM_TOKEN.
-      - name: Publish shadow @dev version
-        if: steps.npm-tag.outputs.tag == 'latest' && steps.check-version.outputs.skip != 'true'
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          npm version "${VERSION}-dev.0" --no-git-tag-version
-          npm publish --access public --provenance --tag dev
-          echo "Published ${VERSION}-dev.0 as @dev"
-
-      - name: Extract changelog for this version
-        if: steps.npm-tag.outputs.tag == 'latest'
-        id: changelog
-        run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION_NUMBER="${VERSION#v}"
-
-          # Extract changelog section between this version and the next
-          CHANGELOG=$(awk "/^## \[$VERSION_NUMBER\]/,/^## \[/" CHANGELOG.md | sed '$d' | tail -n +2)
-
-          # Use multiline output
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
       - name: Create GitHub Release
-        if: steps.npm-tag.outputs.tag == 'latest'
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.npm-tag.outputs.version }}
         run: |
-          VERSION="${{ github.ref_name }}"
-
-          gh release create "$VERSION" \
-            --title "$VERSION" \
-            --notes "${{ steps.changelog.outputs.notes }}" \
-            --verify-tag
+          if [[ "${{ steps.npm-tag.outputs.tag }}" == "next" ]]; then
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" \
+              --prerelease --generate-notes --verify-tag
+          else
+            # Section between this version's heading and the next one
+            awk "/^## \[$VERSION\]/,/^## \[/" CHANGELOG.md | sed '$d' | tail -n +2 > notes.md
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" \
+              --notes-file notes.md --verify-tag
+          fi

@@ -1,14 +1,14 @@
 import arg from "arg";
 import { homedir } from "os";
 import { isAbsolute, join } from "path";
+import { normalizeProject } from "../core/project";
 import packageJson from "../../package.json" with { type: "json" };
 
 export const VERSION = packageJson.version;
 
-/** Debug mode: auto-enabled for pre-release versions (dev/rc), or via VECTOR_MEMORY_DEBUG env var */
+/** Debug mode: auto-enabled for pre-release versions (X.Y.Z-*), or via VECTOR_MEMORY_DEBUG env var */
 export const DEBUG = process.env.VECTOR_MEMORY_DEBUG === "1"
-  || VERSION.includes("-dev.")
-  || VERSION.includes("-rc.");
+  || VERSION.includes("-");
 
 export type TransportMode = "stdio" | "http" | "both";
 
@@ -23,6 +23,8 @@ export interface ConversationHistoryConfig {
 
 export interface Config {
   dbPath: string;
+  /** Canonical project identifier — normalized absolute path of the project root. */
+  project: string;
   embeddingModel: string;
   embeddingDimension: number;
   httpPort: number;
@@ -35,6 +37,7 @@ export interface Config {
 
 export interface ConfigOverrides {
   dbPath?: string;
+  project?: string;
   httpPort?: number;
   enableHttp?: boolean;
   pluginMode?: boolean;
@@ -44,8 +47,10 @@ export interface ConfigOverrides {
   historyWeight?: number;
 }
 
-// Defaults - always use repo-local .vector-memory folder
-const DEFAULT_DB_PATH = join(process.cwd(), ".vector-memory", "memories.db");
+// Defaults — single global store shared by all projects. Memories are tagged
+// with the project (cwd) they came from. Use --db-file / VECTOR_MEMORY_DB_PATH
+// for a repo-local database.
+const DEFAULT_DB_PATH = join(homedir(), ".vector-memory", "memories.db");
 const DEFAULT_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 const DEFAULT_EMBEDDING_DIMENSION = 384;
 const DEFAULT_HTTP_PORT = 3271;
@@ -69,6 +74,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): Config {
       ?? process.env.VECTOR_MEMORY_DB_PATH
       ?? DEFAULT_DB_PATH
     ),
+    project: normalizeProject(overrides.project ?? process.cwd()),
     embeddingModel: DEFAULT_EMBEDDING_MODEL,
     embeddingDimension: DEFAULT_EMBEDDING_DIMENSION,
     httpPort:
@@ -99,6 +105,7 @@ export function parseCliArgs(argv: string[]): ConfigOverrides {
   const args = arg(
     {
       "--db-file": String,
+      "--project": String,
       "--port": Number,
       "--no-http": Boolean,
       "--plugin": Boolean,
@@ -115,6 +122,7 @@ export function parseCliArgs(argv: string[]): ConfigOverrides {
 
   return {
     dbPath: args["--db-file"],
+    project: args["--project"],
     httpPort: args["--port"],
     enableHttp: args["--no-http"] ? false : undefined,
     pluginMode: args["--plugin"] ?? undefined,

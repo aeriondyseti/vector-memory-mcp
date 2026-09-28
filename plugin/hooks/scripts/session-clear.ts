@@ -6,7 +6,7 @@
  */
 
 import { unlinkSync } from "fs";
-import { debug, getStatePath, indexAndLoadWaypoint, withHookTimeout, runHook } from "./hooks-lib.js";
+import { debug, getStatePath, indexAndLoadWaypoint, withHookTimeout, runHook } from "./hooks-lib";
 
 const HOOK_TIMEOUT = 45_000;
 

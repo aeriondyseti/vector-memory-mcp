@@ -5,17 +5,17 @@ description: This skill should be used when the user asks to "store a memory", "
 
 # Vector Memory Usage
 
-The vector memory system provides semantic, project-scoped memory storage. Memories persist across sessions and are retrieved via semantic search — meaning queries find relevant memories by meaning, not just keyword matching.
+The vector memory system provides semantic memory storage shared across every project. Memories persist across sessions and are retrieved via semantic search — meaning queries find relevant memories by meaning, not just keyword matching.
 
-## Database Storage and Version Control
+## Global Storage Model
 
-The vector-memory MCP server stores its database as a single SQLite file (`.vector-memory/memories.db`) inside the project directory. **This database should be committed to version control by default.** Committing the database ensures:
+The vector-memory MCP server stores all memories in a single global SQLite database (`~/.vector-memory/memories.db`), shared by every project on the machine. Each memory is automatically tagged with the project (the working directory) it was stored from — no per-repo database, nothing to commit to version control.
 
-- **Portability** — cloning the repo includes all accumulated project context, so new sessions (or new machines) start with full memory intact
-- **Collaboration** — teammates benefit from shared architectural decisions, known blockers, and implementation insights
-- **Durability** — the database is backed up alongside the code it describes, preventing accidental loss
+- **Storing:** memories are stamped with the current project automatically. Only pass an explicit `project` to file a memory under a different project.
+- **Searching:** by default, search covers all projects; results from the current project rank slightly higher, and every result carries its project path. Pass `scope: "project"` when the query is clearly specific to the current repo (cuts cross-project noise), or an explicit project path to search another repo's memories.
+- **Migrating:** repos with a legacy `.vector-memory/` directory can be imported into the global store with `bunx @aeriondyseti/vector-memory-mcp consolidate` (see the README). If a repo still has `.vector-memory/` in version control, remove it and add `.vector-memory/` to `.gitignore`.
 
-The database is a single SQLite file with sqlite-vec for vector search and FTS5 for full-text search. If a project has sensitive memories that should not be committed, add `.vector-memory/` to `.gitignore` on a per-project basis — but the default expectation is to commit it.
+A repo-local database is still available via `--db-file` or `VECTOR_MEMORY_DB_PATH` for special cases.
 
 ## When to Proactively Search Memories
 

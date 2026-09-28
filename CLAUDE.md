@@ -36,6 +36,13 @@ bun run warmup        # download ML models
 | `server/core/conversation.service.ts` | Conversation indexing service |
 | `server/core/embeddings.service.ts` | Local embeddings via ONNX Runtime + @huggingface/tokenizers |
 | `server/core/migration.service.ts` | Cross-format database migration |
+| `server/core/consolidation.service.ts` | Repo-local → global db consolidation (`consolidate` CLI) |
+| `server/core/maintenance.service.ts` | Health/storage stats, VACUUM/ANALYZE, orphan cleanup, maintenance history |
+| `server/core/backup.service.ts` | SHA-256-verified DB snapshots (backup/restore/verify/purge) |
+| `server/core/handoff.service.ts` | History-preserving session handoffs (sidecar store) |
+| `server/core/document-ingestion.service.ts` | Chunk + ingest Markdown/text/JSON files into memories |
+| `server/core/graph.ts` / `graph.repository.ts` / `graph.service.ts` | Knowledge graph subsystem (entity/edge type registry, entities, edges, lineage, memory→entity refs) |
+| `server/core/project.ts` | Canonical project identity (`normalizeProject`) |
 | `server/core/parsers/` | Session log parsers (Claude Code JSONL) |
 | `server/core/memory.ts` | Memory type definitions |
 | `server/core/conversation.ts` | Conversation type definitions |
@@ -61,72 +68,50 @@ bun run warmup        # download ML models
 
 ## Git Flow
 
-`main` -> `dev` -> `feat/*` -> `dev` -> `rc/X.Y.Z` -> `main` -> `dev` (reset)
+Trunk-based: `feat/*` / `fix/*` → PR → `main`. There are no long-lived `dev` or `rc/*` branches.
 
-- **RC branches:** bugfixes and chores only, no new features
-- **Branch protection:** require test status check on `main` only; `dev` is unprotected (integration/dogfooding branch)
+- **Branch protection:** require the test status check on `main`
 
 ## Publishing
 
-Three-tier npm dist-tags: `@dev`, `@rc`, `@latest`. Use `/publish` to run the workflow interactively.
+Pushing a `v*` tag triggers `.github/workflows/publish.yml`. Nothing publishes on branch pushes.
+
+```sh
+# stable → npm @latest (must be on main); add a CHANGELOG section for X.Y.Z first
+npm version <patch|minor|major|X.Y.Z> && git push --follow-tags
+
+# pre-release → npm @next (any branch)
+npm version 3.0.0-beta.1 && git push --follow-tags
+```
+
+`npm version` bumps `package.json`, runs `scripts/sync-version.ts` as the `version` lifecycle hook (stamps `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json`, refreshes vendored hook-kit, stages them), then commits and tags. The workflow checks the tag equals `package.json`'s version, requires stable tags to be on `main`, runs tests, publishes with provenance, and creates a GitHub Release (marked pre-release for `@next`).
 
 ### Version Source of Truth
 
-`package.json` is the single source of truth. `scripts/sync-version.ts` stamps the version into `plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, and stamps the npm dist-tag into `plugin/.mcp.json` based on the current git branch. It accepts an optional explicit version argument; without one it reads from `package.json`.
-
-Branch → dist-tag mapping: `main` → `@latest`, `rc/*` → `@rc`, `dev`/feature → `@dev`.
+`package.json` is the single source of truth. `sync-version.ts` accepts an optional explicit version argument; without one it reads from `package.json`.
 
 ### Two Installation Paths
 
 - **npm** (`bunx @aeriondyseti/vector-memory-mcp`) — standalone MCP server, no hooks/skills
-- **Plugin/marketplace** (install from GitHub) — lightweight shell with hooks + skills; MCP server runs via `bunx` from npm. Install with ref for channel: `@rc`, `@dev`, or default (`main` = `@latest`)
-
-### Dev Flow (`/publish dev`)
-
-Lightweight snapshot of current `dev` branch. Backward-looking: "stuff since last release."
-
-1. Must be on `dev`, clean, up to date
-2. Compute version: latest stable tag + `-dev.N` (e.g., `2.2.3-dev.4`)
-3. `sync-version.ts "${NEW_VERSION}"` → commit → tag `v${NEW_VERSION}` → push branch + tags
-4. GHA publishes to npm `@dev` (overrides `package.json` version from tag at build time)
-
-### RC Flow (`/publish rc`)
-
-Stabilization branch. Forward-looking: "this will become X.Y.Z." No new features — bugfixes and chores only.
-
-1. Must be on `dev`, clean, up to date. Check for existing `rc/*` branches
-2. Analyze commits since last stable tag → determine semver bump (`feat:` = minor, `fix:` = patch, `feat!:` = major)
-3. Create `rc/X.Y.Z` branch, `npm version X.Y.Z-rc.1`, `sync-version.ts` → commit → push
-4. GHA publishes to npm `@rc` on every push to the `rc/*` branch
-5. Iterate: fix bugs → bump rc number (`X.Y.Z-rc.N`) → sync → commit → push
-
-### Release Flow (`/publish release`)
-
-Promote an RC to stable. Must be on an `rc/*` branch.
-
-1. Version from branch name: `rc/2.3.0` → `2.3.0`
-2. Write CHANGELOG, `npm version X.Y.Z`, `sync-version.ts` → commit → push
-3. Create PR: `rc/X.Y.Z` → `main`
-4. After merge: tag `vX.Y.Z` on main, push tags, merge main → dev, delete rc branch
-5. GHA publishes to npm `@latest`, cascades `@dev` via shadow publish, creates GitHub Release
+- **Plugin/marketplace** (install from GitHub) — lightweight shell with hooks + skills; MCP server runs via `bunx @aeriondyseti/vector-memory-mcp@latest`
 
 ### Plugin & Marketplace
 
 This repo ships two independent artifacts from one codebase:
 
 - **npm package** — `server/` only, published to npm. Consumers run via `bunx`.
-- **Plugin** — `plugin/` directory, self-contained. Installed via marketplace; only `plugin/` is copied to the user's machine. The MCP server runs via `bunx @aeriondyseti/vector-memory-mcp@<dist-tag>`.
+- **Plugin** — `plugin/` directory, self-contained. Installed via marketplace; only `plugin/` is copied to the user's machine. The MCP server runs via `bunx @aeriondyseti/vector-memory-mcp@latest`.
 
 | File | Purpose |
 |------|---------|
 | `.claude-plugin/marketplace.json` | Marketplace manifest — single plugin, `"source": "./plugin"` |
 | `.claude-plugin/schemas/` | Local JSON Schema files for plugin.json and marketplace.json |
-| `plugin/.claude-plugin/plugin.json` | Plugin manifest (self-contained inside `plugin/`) |
-| `plugin/.mcp.json` | Runs MCP server via `bunx @aeriondyseti/vector-memory-mcp@<dist-tag>` |
+| `.claude-plugin/plugin.json` | Plugin manifest |
+| `plugin/.mcp.json` | Runs MCP server via `bunx @aeriondyseti/vector-memory-mcp@latest` |
 | `plugin/hooks/` | Session lifecycle hooks (start, clear, compact, context monitor) |
 | `plugin/hooks/scripts/hooks-lib.ts` | Hook utilities (formatting, server discovery) — self-contained copy |
 | `plugin/skills/` | Skills: vector-memory-usage, waypoint-set, waypoint-get, waypoint-workflow |
-| `scripts/sync-version.ts` | Stamps version + branch-aware dist-tag into plugin/marketplace files |
+| `scripts/sync-version.ts` | `npm version` hook: stamps version into plugin/marketplace manifests |
 
 **Important:** `plugin/` has no imports from `server/`. Shared utilities (ANSI codes, icons, message builders) are duplicated in `plugin/hooks/scripts/hooks-lib.ts` to keep the plugin self-contained.
 
@@ -136,7 +121,7 @@ This repo ships two independent artifacts from one codebase:
 - **Classes**: PascalCase (`MemoryService`)
 - **Functions/methods**: camelCase (`findById`)
 - **Constants**: SCREAMING_SNAKE_CASE (`DEFAULT_HTTP_PORT`)
-- **Imports**: include `.js` extension (NodeNext resolution); use `import type` for type-only imports
+- **Imports**: no `.js` extensions (Bundler resolution); use `import type` for type-only imports
 - **No JSDoc**: TypeScript types serve as documentation
 - **No linter/formatter**: Bun/TypeScript handles style; follow existing patterns
 - **No console.log**: except server startup messages
@@ -150,9 +135,13 @@ This repo ships two independent artifacts from one codebase:
 
 ## Important Conventions
 
-- All data stored in `.vector-memory/` directory (single SQLite file: `memories.db`)
+- All data stored in a single **global** SQLite file: `~/.vector-memory/memories.db`, shared by every project. Memories are tagged with a `project` column (canonical absolute path of the cwd, via `normalizeProject()` in `server/core/project.ts`). Repo-local dbs remain available via `--db-file` / `VECTOR_MEMORY_DB_PATH`
+- `search_memories` defaults to `scope: "all"` (cross-project, current project boosted); `scope: "project"` restricts to the current repo. Project filters are **pre-filtered** into KNN/FTS candidate selection — never post-filter a global top-K
+- Waypoints are keyed per-project (`wp:<sha256 of normalized path>`); there is deliberately no global UUID_ZERO waypoint copy (last-writer-wins clobber in a shared db)
+- `consolidate` CLI subcommand imports legacy repo-local `.vector-memory/` dbs into the global store (`server/core/consolidation.service.ts`)
+- Multi-process safety: `busy_timeout` is set before the WAL switch; the legacy vec0 cleanup runs only behind a read-only probe + exclusive lock; non-idempotent migrations are gated by `PRAGMA user_version` inside `BEGIN IMMEDIATE`
 - Embedding model: `Xenova/all-MiniLM-L6-v2` (384 dimensions, loaded lazily on first use)
 - Embeddings are local via ONNX Runtime + `@huggingface/tokenizers` — no API keys needed
 - MCP tool handlers may receive array args as JSON strings; use the `asArray()` helper from `server/transports/mcp/handlers.ts`
-- Version-based debug logging: auto-enabled for `-dev.N` and `-rc.N` versions, or set `VECTOR_MEMORY_DEBUG=1`
+- Version-based debug logging: auto-enabled for any pre-release version (`X.Y.Z-*`), or set `VECTOR_MEMORY_DEBUG=1`
 - Config is CLI-arg driven (no env vars except `VECTOR_MEMORY_DEBUG`)

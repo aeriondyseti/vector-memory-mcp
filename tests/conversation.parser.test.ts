@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
-import { ClaudeCodeSessionParser } from "../server/core/parsers/claude-code.parser.js";
+import { ClaudeCodeSessionParser } from "../server/core/parsers/claude-code.parser";
 
 const TEST_DIR = join(import.meta.dir, ".test-sessions");
 const PROJECT_DIR = join(TEST_DIR, "-home-user-project");
@@ -269,7 +269,7 @@ not valid json
       ]);
 
       const messages = await parser.parse(filePath);
-      expect(messages[0].project).toBe("home/user/project");
+      expect(messages[0].project).toBe("/home/user/project");
     });
 
     test("tracks message indices correctly", async () => {
@@ -326,7 +326,7 @@ not valid json
       const files = await parser.findSessionFiles(TEST_DIR);
       expect(files).toHaveLength(1);
       expect(files[0].sessionId).toBe("11111111-2222-3333-4444-555555555555");
-      expect(files[0].project).toBe("home/user/project");
+      expect(files[0].project).toBe("/home/user/project");
     });
 
     test("skips non-UUID JSONL files", async () => {
@@ -383,8 +383,8 @@ not valid json
       const files = await parser.findSessionFiles(TEST_DIR);
       expect(files).toHaveLength(2);
       const projects = files.map((f) => f.project).sort();
-      expect(projects).toContain("home/user/project");
-      expect(projects).toContain("home/user/other");
+      expect(projects).toContain("/home/user/project");
+      expect(projects).toContain("/home/user/other");
     });
 
     test("skips subagents directory when indexSubagents is false", async () => {
@@ -483,7 +483,7 @@ not valid json
       ]);
 
       const messages = await parser.parse(subagentFile, true);
-      expect(messages[0].project).toBe("home/user/project");
+      expect(messages[0].project).toBe("/home/user/project");
     });
   });
 

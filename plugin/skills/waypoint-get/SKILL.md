@@ -16,7 +16,7 @@ git branch --show-current 2>/dev/null
 
 ## 2. Fetch Waypoint
 
-Call `mcp__vector-memory__get_waypoint` to retrieve the latest waypoint snapshot.
+Call `mcp__vector-memory__get_waypoint` to retrieve the latest waypoint snapshot. The project is detected automatically from the working directory — only pass `project` (a canonical absolute path) to load another project's waypoint.
 
 After reading waypoint, check for staleness:
 ```bash
@@ -33,6 +33,7 @@ Call `mcp__vector-memory__search_memories` with:
 - query: "[project name] architecture decisions patterns"
 - intent: "continuity"
 - reason_for_search: "Loading project context for session resumption"
+- scope: "project" (memories are stored globally across all projects; this restricts to the current repo)
 - limit: 10
 
 ## 4. Load Referenced Memories

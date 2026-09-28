@@ -3,9 +3,9 @@ import { createHash } from "crypto";
 import { existsSync, statSync, readdirSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { serializeVector } from "./sqlite-utils.js";
-import type { MemoryRepository } from "./memory.repository.js";
-import type { EmbeddingsService } from "./embeddings.service.js";
+import { serializeVector } from "./sqlite-utils";
+import type { MemoryRepository } from "./memory.repository";
+import type { EmbeddingsService } from "./embeddings.service";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

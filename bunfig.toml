@@ -1,4 +1,7 @@
 [test]
+# Only discover tests under tests/ — the gitignored references/ checkouts contain
+# third-party test suites whose deps are not installed here.
+root = "tests"
 coverageSkipTestFiles = true
 coverageThreshold = 0.9
 coveragePathIgnorePatterns = [

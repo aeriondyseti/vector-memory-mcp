@@ -21,11 +21,11 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
-import { tools } from "../mcp/tools.js";
-import { handleToolCall } from "../mcp/handlers.js";
-import { SERVER_INSTRUCTIONS } from "../mcp/server.js";
-import { VERSION } from "../../config/index.js";
-import type { MemoryService } from "../../core/memory.service.js";
+import { tools } from "../mcp/tools";
+import { handleToolCall } from "../mcp/handlers";
+import { SERVER_INSTRUCTIONS } from "../mcp/server";
+import { VERSION } from "../../config/index";
+import type { MemoryService } from "../../core/memory.service";
 
 interface Session {
   server: Server;

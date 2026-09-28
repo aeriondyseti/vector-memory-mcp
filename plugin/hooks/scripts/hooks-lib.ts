@@ -259,12 +259,35 @@ function projectSessionLogPath(): string {
 }
 
 /**
- * Try to read the lockfile and verify the PID is alive.
+ * Canonical project identifier for this hook invocation: the normalized
+ * absolute path of the project root. Must produce the same value as
+ * normalizeProject() in server/core/project.ts.
+ */
+export function currentProject(): string {
+  let p = process.cwd().trim().replace(/\/+$/, "");
+  if (p.length === 0) return "/";
+  if (!p.startsWith("/")) p = `/${p}`;
+  return p;
+}
+
+/**
+ * Per-project lock path under the global data directory. Must stay in sync
+ * with globalLockPath() in server/transports/http/server.ts.
+ */
+function globalLockPath(): string {
+  const hash = new Bun.CryptoHasher("sha256")
+    .update(currentProject())
+    .digest("hex")
+    .slice(0, 16);
+  return join(homedir(), ".vector-memory", "locks", `${hash}.lock`);
+}
+
+/**
+ * Try to read a lockfile and verify the PID is alive.
  * Returns the server URL or null if the lockfile is missing/stale.
  */
-function tryReadLockfile(): string | null {
+function readLockfileAt(lockPath: string): string | null {
   try {
-    const lockPath = join(process.cwd(), ".vector-memory", "server.lock");
     const { port, pid } = JSON.parse(readFileSync(lockPath, "utf8"));
 
     // Stale check: signal 0 throws ESRCH if the process is gone
@@ -275,9 +298,18 @@ function tryReadLockfile(): string | null {
   }
 }
 
+function tryReadLockfile(): string | null {
+  // Global per-project lock first; legacy per-repo lock as fallback for
+  // pre-2.5 servers (remove after one stable release cycle).
+  return (
+    readLockfileAt(globalLockPath()) ??
+    readLockfileAt(join(process.cwd(), ".vector-memory", "server.lock"))
+  );
+}
+
 /**
- * Discover the server URL by reading the per-repo lockfile.
- * Priority: env var > lockfile (with PID liveness check).
+ * Discover the server URL by reading this project's lockfile.
+ * Priority: env var > global lock > legacy per-repo lock (PID-checked).
  *
  * Never falls back to a default port — that risks connecting to a
  * different project's server. If the lockfile isn't available after
@@ -442,7 +474,10 @@ export async function indexAndLoadWaypoint(label: string): Promise<void> {
       })
     : null;
 
-  const waypointPromise = fetchJson<WaypointResponse>(serverUrl, "/waypoint");
+  const waypointPromise = fetchJson<WaypointResponse>(
+    serverUrl,
+    `/waypoint?project=${encodeURIComponent(currentProject())}`
+  );
 
   const [indexResult, waypoint] = await Promise.all([
     indexPromise,

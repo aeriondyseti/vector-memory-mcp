@@ -6,7 +6,7 @@
       "args": [
         "-y",
         "--bun",
-        "@aeriondyseti/vector-memory-mcp@dev",
+        "@aeriondyseti/vector-memory-mcp@latest",
         "--plugin",
         "--enable-history"
       ]
