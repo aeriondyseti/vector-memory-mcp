@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 /**
  * Sync the package version into the plugin manifests and refresh the
- * vendored hook-kit. Runs as npm's `version` lifecycle hook, so everything
- * it writes is staged into the release commit that `npm version` creates.
+ * plugin's hook-kit dependency. Runs as npm's `version` lifecycle hook, so
+ * everything it writes is staged into the release commit that `npm version`
+ * creates.
  *
  * Usage:
  *   bun scripts/sync-version.ts              # reads version from package.json
@@ -13,11 +14,12 @@
 
 import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { vendorHookKit } from "./vendor-hook-kit";
+import { execSync } from "child_process";
 
 const ROOT = join(import.meta.dir, "..");
 const PKG_PATH = join(ROOT, "package.json");
-const PLUGIN_PATH = join(ROOT, ".claude-plugin", "plugin.json");
+const PLUGIN_DIR = join(ROOT, "plugin");
+const PLUGIN_PATH = join(PLUGIN_DIR, ".claude-plugin", "plugin.json");
 const MARKETPLACE_PATH = join(ROOT, ".claude-plugin", "marketplace.json");
 
 const explicit = process.argv[2];
@@ -41,16 +43,15 @@ writeFileSync(MARKETPLACE_PATH, JSON.stringify(marketplace, null, 2) + "\n");
 
 console.error(`Synced version ${version} → plugin.json, marketplace.json`);
 
-// ── Refresh vendored hook-kit to the latest in-range (1.x) release ───
+// ── Refresh hook-kit to the latest in-range (1.x) release ───────────
 //
-// Runs only for local release prep. In CI the committed bundle + lockfile
-// are authoritative (a tag is immutable) and the freshness guard verifies
-// them — auto-updating there would drift the tree out from under the tag.
+// Updates plugin/bun.lock, which Claude Code installs from when it copies
+// the plugin. Runs only for local release prep: in CI the committed
+// lockfile is authoritative (a tag is immutable).
 const inCI = process.env.CI === "true" || !!process.env.GITHUB_ACTIONS;
 if (!inCI) {
   try {
-    const shipped = await vendorHookKit({ update: true });
-    console.error(`Refreshed vendored hook-kit → ${shipped.join(", ")}`);
+    execSync("bun update @aeriondyseti/hook-kit", { cwd: PLUGIN_DIR, stdio: "inherit" });
   } catch (e) {
     console.error(`[sync-version] hook-kit refresh skipped: ${(e as Error).message}`);
   }

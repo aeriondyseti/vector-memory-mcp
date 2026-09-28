@@ -13,7 +13,7 @@
   "plugins": [
     {
       "name": "vector-memory",
-      "source": "./",
+      "source": "./plugin",
       "description": "RAG-powered session memory with waypoints for Claude Code",
       "version": "3.0.0",
       "author": {

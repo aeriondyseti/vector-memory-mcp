@@ -18,6 +18,7 @@ bun run dev           # watch mode
 bun run typecheck     # bunx tsc --noEmit
 bun run smoke         # smoke tests (scripts/smoke-test.ts)
 bun run warmup        # download ML models
+bun run install:plugin # install plugin/ deps (hook-kit); needed for typecheck
 ```
 
 ## Architecture
@@ -86,7 +87,7 @@ npm version 3.0.0-beta.1 && git push --follow-tags
 
 `main` requires a PR + passing `test` check; admins bypass this, so the one-liner works for the repo owner. Otherwise run `npm version` on a `release/X.Y.Z` branch, merge its PR with a **merge commit** (not squash, so the tagged commit is on `main`), then `git push origin vX.Y.Z`. A stable tag fails fast if `CHANGELOG.md` has no `## [X.Y.Z]` section.
 
-`npm version` bumps `package.json`, runs `scripts/sync-version.ts` as the `version` lifecycle hook (stamps `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json`, refreshes vendored hook-kit, stages them), then commits and tags. The workflow checks the tag equals `package.json`'s version, requires stable tags to be on `main`, runs tests, publishes with provenance, and creates a GitHub Release (marked pre-release for `@next`).
+`npm version` bumps `package.json`, runs `scripts/sync-version.ts` as the `version` lifecycle hook (stamps `plugin/.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json`, runs `bun update @aeriondyseti/hook-kit` in `plugin/`, stages them), then commits and tags. The workflow checks the tag equals `package.json`'s version, requires stable tags to be on `main`, runs tests, publishes with provenance, and creates a GitHub Release (marked pre-release for `@next`).
 
 ### Version Source of Truth
 
@@ -108,14 +109,15 @@ This repo ships two independent artifacts from one codebase:
 |------|---------|
 | `.claude-plugin/marketplace.json` | Marketplace manifest — single plugin, `"source": "./plugin"` |
 | `.claude-plugin/schemas/` | Local JSON Schema files for plugin.json and marketplace.json |
-| `.claude-plugin/plugin.json` | Plugin manifest |
+| `plugin/.claude-plugin/plugin.json` | Plugin manifest (paths relative to `plugin/`) |
+| `plugin/package.json` + `plugin/bun.lock` | Hook dependencies (`@aeriondyseti/hook-kit`). Claude Code runs `bun install --frozen-lockfile --ignore-scripts` in each cached plugin version |
 | `plugin/.mcp.json` | Runs MCP server via `bunx @aeriondyseti/vector-memory-mcp@latest` |
 | `plugin/hooks/` | Session lifecycle hooks (start, clear, compact, context monitor) |
 | `plugin/hooks/scripts/hooks-lib.ts` | Hook utilities (formatting, server discovery) — self-contained copy |
 | `plugin/skills/` | Skills: vector-memory-usage, waypoint-set, waypoint-get, waypoint-workflow |
 | `scripts/sync-version.ts` | `npm version` hook: stamps version into plugin/marketplace manifests |
 
-**Important:** `plugin/` has no imports from `server/`. Shared utilities (ANSI codes, icons, message builders) are duplicated in `plugin/hooks/scripts/hooks-lib.ts` to keep the plugin self-contained.
+**Important:** `plugin/` has no imports from `server/`. Shared utilities (ANSI codes, icons, message builders) are duplicated in `plugin/hooks/scripts/hooks-lib.ts` to keep the plugin self-contained. npm packages the hooks need go in `plugin/package.json`, never the root one. Keep `plugin/` free of `bunfig.toml` and of Yarn/pnpm lockfiles: either makes Claude Code skip the dependency install.
 
 ## Code Style
 

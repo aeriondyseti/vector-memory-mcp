@@ -35,12 +35,11 @@
     "benchmark:update": "bun run scripts/update-benchmarks.ts",
     "test:preload": "bun run tests/preload.ts",
     "smoke": "bun run scripts/smoke-test.ts",
-    "vendor:hooks": "bun run scripts/vendor-hook-kit.ts",
-    "vendor:hooks:latest": "bun run scripts/vendor-hook-kit.ts --update",
+    "install:plugin": "bun install --cwd plugin --frozen-lockfile",
     "warmup": "bun run scripts/warmup.ts",
     "postinstall": "bun run scripts/warmup.ts",
     "prepublishOnly": "bunx tsc --noEmit",
-    "version": "bun scripts/sync-version.ts && git add .claude-plugin plugin/hooks/scripts/vendor bun.lock"
+    "version": "bun scripts/sync-version.ts && git add .claude-plugin plugin/.claude-plugin plugin/package.json plugin/bun.lock"
   },
   "keywords": [
     "mcp",
@@ -59,7 +58,6 @@
     "onnxruntime-node": "^1.21.0"
   },
   "devDependencies": {
-    "@aeriondyseti/hook-kit": "^1.1.0",
     "@types/bun": "latest",
     "typescript": "^5.0.0"
   },
