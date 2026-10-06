@@ -835,11 +835,15 @@ export const mergeDuplicatesTool: Tool = {
 export const cleanupDuplicatesTool: Tool = {
   name: "cleanup_duplicates",
   description:
-    "Automatically merge every near-duplicate cluster at a safe threshold (keeps the newest of each). Use find_duplicates first to preview.",
+    "Merge near-duplicate memories automatically (keeping the newest), but only clear cases: same project, matching the survivor directly in both meaning and wording, and not pinned or critical. Everything else is listed for review with the reason, never merged on a guess. Use dry_run: true to preview.",
   inputSchema: {
     type: "object",
     properties: {
-      similarity_threshold: { type: "number", description: "Cosine similarity threshold (default 0.92)." },
+      similarity_threshold: { type: "number", description: "Cosine similarity threshold (default 0.95)." },
+      dry_run: {
+        type: "boolean",
+        description: "List what would be merged and what needs review, without changing anything.",
+      },
     },
   },
 };
@@ -847,7 +851,7 @@ export const cleanupDuplicatesTool: Tool = {
 export const consolidateMemoriesTool: Tool = {
   name: "consolidate_memories",
   description:
-    "Periodic maintenance that prevents quality drift: rescore (decay), cluster + merge near-duplicates (compress), and archive low-quality unprotected memories (forget). action: 'recommend' (default, preview), 'status' (counts), or 'run' (perform).",
+    "Periodic maintenance that prevents quality drift: rescore (decay), merge clear near-duplicates (compress — same rule as cleanup_duplicates; unclear ones are counted for review, not merged), and archive low-quality unprotected memories (forget). action: 'recommend' (default, preview), 'status' (counts), or 'run' (perform).",
   inputSchema: {
     type: "object",
     properties: {

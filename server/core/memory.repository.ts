@@ -7,6 +7,7 @@ import {
   hybridRRFWithSignals,
   topByRRF,
   knnSearch,
+  cosineSimilarity,
   batchedQuery,
   SQLITE_BATCH_SIZE,
 } from "./sqlite-utils";
@@ -368,6 +369,22 @@ export class MemoryRepository {
       count: r.count,
       lastCreatedAt: new Date(r.last),
     }));
+  }
+
+  /**
+   * Cosine similarity of each of `otherIds` to memory `id`, from the stored
+   * vectors; an id without a vector is left out.
+   */
+  similaritiesTo(id: string, otherIds: string[]): Map<string, number> {
+    const base = this.getEmbedding(id);
+    const result = new Map<string, number>();
+    if (base.length === 0) return result;
+    const bv = new Float32Array(base);
+    for (const other of otherIds) {
+      const v = this.getEmbedding(other);
+      if (v.length > 0) result.set(other, cosineSimilarity(bv, new Float32Array(v)));
+    }
+    return result;
   }
 
   /**

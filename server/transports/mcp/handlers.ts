@@ -1,5 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { MemoryService } from "../../core/memory.service";
+import { type MemoryService, WRITE_DUPLICATE_SIMILARITY } from "../../core/memory.service";
 import type { ConversationHistoryService } from "../../core/conversation.service";
 import type {
   SearchIntent,
@@ -1122,11 +1122,30 @@ export async function handleCleanupDuplicates(
   const threshold =
     typeof args?.similarity_threshold === "number"
       ? Math.max(0.5, Math.min(1, args.similarity_threshold))
-      : 0.92;
-  const r = await service.cleanupDuplicates(threshold);
-  return textResult(
-    `Cleaned up ${r.clusters} clusters, removed ${r.deleted} duplicate memories.`,
-  );
+      : WRITE_DUPLICATE_SIMILARITY;
+  const dryRun = args?.dry_run === true;
+  const r = await service.cleanupDuplicates(threshold, dryRun);
+
+  const lines = [
+    dryRun
+      ? `Would merge ${r.deleted} duplicate memories in ${r.clusters} clusters (dry run, threshold ${threshold}).`
+      : `Cleaned up ${r.clusters} clusters, removed ${r.deleted} duplicate memories.`,
+  ];
+  if (dryRun) {
+    for (const p of r.plans.filter((p) => p.mergeIds.length > 0)) {
+      lines.push(`- keep ${p.keepId}, merge: ${p.mergeIds.join(", ")}`);
+    }
+  }
+  if (r.review > 0) {
+    lines.push(
+      "",
+      `${r.review} near-duplicates left for review (merge them with merge_duplicates if they really are the same):`,
+    );
+    for (const p of r.plans) {
+      for (const item of p.review) lines.push(`- ${item.id} vs ${p.keepId}: ${item.reason}`);
+    }
+  }
+  return textResult(lines.join("\n"));
 }
 
 // ── Memory consolidation (Feature 18) ─────────────────────────────────
@@ -1147,6 +1166,11 @@ export async function handleConsolidateMemories(
     `- Live memories: ${r.total} | Avg quality: ${r.averageQuality.toFixed(3)}`,
     `- Duplicate clusters: ${r.duplicateClusters} | Forget candidates: ${r.forgetCandidates}`,
   ];
+  if (r.duplicatesForReview > 0) {
+    lines.push(
+      `- Near-duplicates left for review (not merged automatically): ${r.duplicatesForReview} — see cleanup_duplicates with dry_run: true`,
+    );
+  }
   if (r.action === "run") {
     lines.push(
       `- Rescored: ${r.rescored} | Compressed (merged): ${r.compressed} | Forgotten (archived): ${r.forgotten}`,

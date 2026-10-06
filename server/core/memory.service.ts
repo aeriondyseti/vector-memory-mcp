@@ -108,6 +108,16 @@ export function tokenJaccard(a: string, b: string): number {
   return shared / (ta.size + tb.size - shared);
 }
 
+/**
+ * One near-duplicate cluster as cleanup sees it: the members safe to merge
+ * into `keepId` automatically, and the rest with why they need review.
+ */
+export type DuplicatePlan = {
+  keepId: string;
+  mergeIds: string[];
+  review: Array<{ id: string; reason: string }>;
+};
+
 /** What a checked write did: stored (maybe flagged), or skipped as a duplicate. */
 export type StoreOutcome =
   | { status: "stored"; memory: Memory; possibleDuplicateOf: string[] }
@@ -818,6 +828,7 @@ export class MemoryService {
     timeHorizon: string;
     total: number;
     duplicateClusters: number;
+    duplicatesForReview: number;
     forgetCandidates: number;
     rescored?: number;
     compressed?: number;
@@ -827,7 +838,6 @@ export class MemoryService {
     // Longer horizons prune more aggressively.
     const forgetThreshold =
       timeHorizon === "daily" ? 0.15 : timeHorizon === "monthly" ? 0.3 : 0.22;
-    const dupThreshold = 0.93;
     const now = new Date();
 
     const live = this.repository.queryMemories({ includeArchived: false });
@@ -837,14 +847,18 @@ export class MemoryService {
     const forgetCandidates = live.filter(
       (m, i) => scored[i] < forgetThreshold && !isProtected(m),
     );
-    const clusters = this.repository.findDuplicateClusters(dupThreshold);
+    // Compress merges only what the write-time rule calls a duplicate.
+    const dupPlans = await this.planDuplicateCleanup(WRITE_DUPLICATE_SIMILARITY);
+    const mergeable = dupPlans.filter((p) => p.mergeIds.length > 0);
+    const duplicatesForReview = dupPlans.reduce((n, p) => n + p.review.length, 0);
 
     if (action === "status" || action === "recommend") {
       return {
         action,
         timeHorizon,
         total: live.length,
-        duplicateClusters: clusters.length,
+        duplicateClusters: mergeable.length,
+        duplicatesForReview,
         forgetCandidates: forgetCandidates.length,
         averageQuality: avgQuality,
       };
@@ -853,9 +867,9 @@ export class MemoryService {
     // action === "run"
     const { scored: rescored } = await this.scoreMemories(now);
     let compressed = 0;
-    for (const c of clusters) {
-      await this.mergeDuplicates(c.keepId, c.duplicateIds, "keep_newest");
-      compressed += c.duplicateIds.length;
+    for (const p of mergeable) {
+      await this.mergeDuplicates(p.keepId, p.mergeIds, "keep_newest");
+      compressed += p.mergeIds.length;
     }
     const forgotten = await this.setArchived(
       forgetCandidates.map((m) => m.id),
@@ -866,7 +880,8 @@ export class MemoryService {
       action,
       timeHorizon,
       total: live.length,
-      duplicateClusters: clusters.length,
+      duplicateClusters: mergeable.length,
+      duplicatesForReview,
       forgetCandidates: forgetCandidates.length,
       rescored,
       compressed,
@@ -930,17 +945,64 @@ export class MemoryService {
     return merged;
   }
 
-  /** Auto-merge every near-duplicate cluster at a safe threshold (keep_newest). */
-  async cleanupDuplicates(
-    threshold = 0.92,
-  ): Promise<{ clusters: number; deleted: number }> {
-    const clusters = this.findDuplicates(threshold);
-    let deleted = 0;
-    for (const c of clusters) {
-      await this.mergeDuplicates(c.keepId, c.duplicateIds, "keep_newest");
-      deleted += c.duplicateIds.length;
+  /**
+   * Split each near-duplicate cluster into what is safe to merge automatically
+   * and what needs a person's review, by the write-time rule: a member merges
+   * into the survivor only when it is in the survivor's project, matches the
+   * survivor directly (cosine >= `threshold` — not merely through another
+   * member of the chain) AND in wording (Jaccard >= WRITE_DUPLICATE_JACCARD),
+   * and is not protected (pinned / critical).
+   */
+  async planDuplicateCleanup(threshold = WRITE_DUPLICATE_SIMILARITY): Promise<DuplicatePlan[]> {
+    const plans: DuplicatePlan[] = [];
+    for (const c of this.repository.findDuplicateClusters(threshold)) {
+      const members = await this.repository.findByIds([c.keepId, ...c.duplicateIds]);
+      const keep = members.find((m) => m.id === c.keepId);
+      if (!keep) continue;
+      const similarity = this.repository.similaritiesTo(c.keepId, c.duplicateIds);
+
+      const plan: DuplicatePlan = { keepId: c.keepId, mergeIds: [], review: [] };
+      for (const m of members) {
+        if (m.id === keep.id) continue;
+        const reason =
+          m.project !== keep.project
+            ? "different project"
+            : isProtected(m)
+              ? "pinned or critical"
+              : (similarity.get(m.id) ?? 0) < threshold
+                ? "similar only through other members"
+                : tokenJaccard(m.content, keep.content) < WRITE_DUPLICATE_JACCARD
+                  ? "worded differently"
+                  : null;
+        if (reason === null) plan.mergeIds.push(m.id);
+        else plan.review.push({ id: m.id, reason });
+      }
+      plans.push(plan);
     }
-    return { clusters: clusters.length, deleted };
+    return plans;
+  }
+
+  /**
+   * Merge what planDuplicateCleanup deems safe (keep_newest) and leave the
+   * rest for review; `dryRun` only plans. `clusters` counts clusters merged.
+   * Defaults to the write-time similarity (0.95); find_duplicates, being
+   * read-only, lists candidates from the lower 0.92.
+   */
+  async cleanupDuplicates(
+    threshold = WRITE_DUPLICATE_SIMILARITY,
+    dryRun = false,
+  ): Promise<{ clusters: number; deleted: number; review: number; plans: DuplicatePlan[] }> {
+    const plans = await this.planDuplicateCleanup(threshold);
+    let clusters = 0;
+    let deleted = 0;
+    for (const p of plans) {
+      if (p.mergeIds.length === 0) continue;
+      if (!dryRun) await this.mergeDuplicates(p.keepId, p.mergeIds, "keep_newest");
+      clusters++;
+      deleted += p.mergeIds.length;
+    }
+    const review = plans.reduce((n, p) => n + p.review.length, 0);
+    return { clusters, deleted, review, plans };
   }
 
   /**
