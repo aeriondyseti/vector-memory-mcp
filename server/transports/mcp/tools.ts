@@ -23,7 +23,9 @@ DON'T STORE: machine-specific paths, local env details, ephemeral states, pleasa
 GOOD: "Aerion chose libSQL over PostgreSQL for Resonance (Dec 2024) because of native vector support and simpler deployment."
 BAD: "Uses SQLite" (no context, no subject, no reasoning)
 
-For long content (>1000 chars), provide embedding_text with a searchable summary.`,
+For long content (>1000 chars), provide embedding_text with a searchable summary.
+
+A memory that near-exactly repeats an existing one in the same project is not stored again: the response names the existing memory instead (update it with update_memories if something changed).`,
   inputSchema: {
     type: "object",
     properties: {
@@ -98,6 +100,12 @@ For long content (>1000 chars), provide embedding_text with a searchable summary
           },
           required: ["content"],
         },
+      },
+      allow_duplicates: {
+        type: "boolean",
+        description:
+          "Store even when a memory is a near-exact duplicate of an existing one in the same project. " +
+          "By default such a write is skipped and the existing memory's ID is returned.",
       },
     },
     required: ["memories"],

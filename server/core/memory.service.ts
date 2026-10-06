@@ -79,6 +79,40 @@ function matchesAttributeFilters(
 // memories win ties without hiding cross-project results.
 const CURRENT_PROJECT_BOOST = 1.15;
 
+// ── Write-time duplicate check ──────────────────────────────────────
+// A new memory is a duplicate of an existing one only when both signals
+// agree: near-identical embeddings AND near-identical wording. Embeddings
+// alone conflate different facts on the same subject ("chose X" / "chose
+// Y"); requiring both keeps false positives — lost writes — rare.
+export const WRITE_DUPLICATE_SIMILARITY = 0.95;
+export const WRITE_DUPLICATE_JACCARD = 0.85;
+const WRITE_DUPLICATE_CANDIDATES = 5;
+
+/** Lowercased word tokens of 3+ characters, for lexical comparison. */
+export function lexicalTokens(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((t) => t.length >= 3),
+  );
+}
+
+/** Jaccard similarity of two texts' token sets (1 when both are empty). */
+export function tokenJaccard(a: string, b: string): number {
+  const ta = lexicalTokens(a);
+  const tb = lexicalTokens(b);
+  if (ta.size === 0 && tb.size === 0) return 1;
+  let shared = 0;
+  for (const t of ta) if (tb.has(t)) shared++;
+  return shared / (ta.size + tb.size - shared);
+}
+
+/** What a checked write did: stored (maybe flagged), or skipped as a duplicate. */
+export type StoreOutcome =
+  | { status: "stored"; memory: Memory; possibleDuplicateOf: string[] }
+  | { status: "duplicate"; existing: Memory; similarity: number };
+
 export class MemoryService {
   private conversationService: ConversationHistoryService | null = null;
 
@@ -115,10 +149,64 @@ export class MemoryService {
     project?: string,
     attributes?: MemoryAttributes
   ): Promise<Memory> {
+    const embedding = await this.embeddings.embed(embeddingText ?? content);
+    return this.insertNew(content, metadata, embedding, project, attributes);
+  }
+
+  /**
+   * Store a memory unless it duplicates a live one in the same project.
+   *
+   * Exactly one duplicate (similar embedding AND wording): nothing is stored
+   * and the existing memory comes back, so the caller can update it instead.
+   * Several: ambiguous — stored, with `metadata.possible_duplicate_of`
+   * naming them for review (find_duplicates), never merged on a guess.
+   */
+  async storeUnlessDuplicate(
+    content: string,
+    metadata: Record<string, unknown> = {},
+    embeddingText?: string,
+    project?: string,
+    attributes?: MemoryAttributes
+  ): Promise<StoreOutcome> {
+    const embedding = await this.embeddings.embed(embeddingText ?? content);
+    const targetProject = project !== undefined ? normalizeProject(project) : this.project;
+
+    const nearest = this.repository
+      .findNearestLive(embedding, targetProject, WRITE_DUPLICATE_CANDIDATES)
+      .filter((n) => n.similarity >= WRITE_DUPLICATE_SIMILARITY);
+    const candidates = await this.repository.findByIds(nearest.map((n) => n.id));
+    const similarityOf = new Map(nearest.map((n) => [n.id, n.similarity]));
+    const duplicates = candidates
+      .filter((m) => tokenJaccard(m.content, content) >= WRITE_DUPLICATE_JACCARD)
+      .sort((a, b) => (similarityOf.get(b.id) ?? 0) - (similarityOf.get(a.id) ?? 0));
+
+    if (duplicates.length === 1) {
+      const existing = duplicates[0];
+      return { status: "duplicate", existing, similarity: similarityOf.get(existing.id) ?? 0 };
+    }
+
+    const possibleDuplicateOf = duplicates.map((m) => m.id);
+    const memory = await this.insertNew(
+      content,
+      possibleDuplicateOf.length > 0
+        ? { ...metadata, possible_duplicate_of: possibleDuplicateOf }
+        : metadata,
+      embedding,
+      project,
+      attributes,
+    );
+    return { status: "stored", memory, possibleDuplicateOf };
+  }
+
+  private async insertNew(
+    content: string,
+    metadata: Record<string, unknown>,
+    embedding: number[],
+    project?: string,
+    attributes?: MemoryAttributes
+  ): Promise<Memory> {
     const id = randomUUID();
     const now = new Date();
-    const textToEmbed = embeddingText ?? content;
-    const embedding = await this.embeddings.embed(textToEmbed);
 
     const memory: Memory = {
       id,
@@ -641,7 +729,7 @@ export class MemoryService {
       .filter((r) => r.confidence >= threshold)
       .slice(0, maxResults);
     if (autoIngest) {
-      await this.store(context, { type: "observation", auto_ingested: true });
+      await this.storeUnlessDuplicate(context, { type: "observation", auto_ingested: true });
     }
     return filtered;
   }

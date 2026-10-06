@@ -182,33 +182,73 @@ export async function handleStoreMemories(
     return errorResult(errorText(e));
   }
 
+  const allowDuplicates = args?.allow_duplicates === true;
+
   const ids: string[] = [];
+  const notes: string[] = [];
   try {
     for (const item of memories) {
-      const memory = await service.store(
+      const project = typeof item.project === "string" ? item.project : undefined;
+      const attributes = parseAttributes(item as Record<string, unknown>);
+
+      if (allowDuplicates) {
+        const memory = await service.store(
+          item.content,
+          item.metadata ?? {},
+          item.embedding_text,
+          project,
+          attributes
+        );
+        ids.push(memory.id);
+        continue;
+      }
+
+      const outcome = await service.storeUnlessDuplicate(
         item.content,
         item.metadata ?? {},
         item.embedding_text,
-        typeof item.project === "string" ? item.project : undefined,
-        parseAttributes(item as Record<string, unknown>)
+        project,
+        attributes
       );
-      ids.push(memory.id);
+      if (outcome.status === "duplicate") {
+        notes.push(duplicateNote(outcome.existing.id, outcome.existing.content));
+        continue;
+      }
+      ids.push(outcome.memory.id);
+      if (outcome.possibleDuplicateOf.length > 0) {
+        notes.push(
+          `Stored ${outcome.memory.id}, but it closely matches ${outcome.possibleDuplicateOf.join(", ")}; ` +
+            "review with find_duplicates."
+        );
+      }
     }
   } catch (e) {
     return errorResult(errorText(e));
   }
 
-  return {
-    content: [
-      {
-        type: "text",
-        text:
+  const stored =
+    ids.length === 0
+      ? []
+      : [
           ids.length === 1
             ? `Memory stored with ID: ${ids[0]}`
             : `Stored ${ids.length} memories:\n${ids.map((id) => `- ${id}`).join("\n")}`,
-      },
-    ],
+        ];
+
+  return {
+    content: [{ type: "text", text: [...stored, ...notes].join("\n\n") }],
   };
+}
+
+/** The store_memories line for a write skipped as a duplicate. */
+function duplicateNote(existingId: string, existingContent: string): string {
+  const preview =
+    existingContent.length > 200 ? `${existingContent.slice(0, 200)}…` : existingContent;
+  return (
+    `Not stored: duplicate of existing memory ${existingId}:\n  "${preview}"\n` +
+    "To change that memory use update_memories; to store a separate copy anyway, " +
+    "call store_memories again with allow_duplicates: true."
+  );
 }
 
 export async function handleDeleteMemories(

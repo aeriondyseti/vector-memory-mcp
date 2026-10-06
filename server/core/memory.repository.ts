@@ -371,6 +371,25 @@ export class MemoryRepository {
   }
 
   /**
+   * The `k` live memories of `project` most similar to `embedding`, for the
+   * write-time duplicate check: not superseded or deleted, not archived, not
+   * waypoints. `project` null matches memories filed under no project.
+   */
+  findNearestLive(
+    embedding: number[],
+    project: string | null,
+    k: number,
+  ): Array<{ id: string; similarity: number }> {
+    return knnSearch(this.db, "memories_vec", embedding, k, {
+      sql: `SELECT v.id, v.vector FROM memories_vec v JOIN memories m ON v.id = m.id
+            WHERE ${project === null ? "m.project IS NULL" : "m.project = ?"}
+              AND m.superseded_by IS NULL AND m.archived = 0
+              AND json_extract(m.metadata, '$.type') IS NOT 'waypoint'`,
+      params: project === null ? [] : [project],
+    }).map((r) => ({ id: r.id, similarity: 1 - r.distance }));
+  }
+
+  /**
    * Find near-duplicate clusters via pairwise cosine similarity over the
    * vector table (Feature 14). Brute-force O(n²) — acceptable for a personal
    * store (<10K rows); larger stores should sample or use ANN. Returns groups
