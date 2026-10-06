@@ -5,13 +5,16 @@
  * retrieval quality metrics.
  */
 
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync } from "fs";
+import { removeDir } from "../utils/test-helpers";
 import { join } from "path";
 import { tmpdir } from "os";
 import { connectToDatabase } from "../../server/core/connection";
 import { MemoryRepository } from "../../server/core/memory.repository";
 import { EmbeddingsService } from "../../server/core/embeddings.service";
 import { MemoryService } from "../../server/core/memory.service";
+import { GraphRepository } from "../../server/core/graph.repository";
+import { randomUUID } from "crypto";
 import type {
   BenchmarkDataset,
   BenchmarkResults,
@@ -50,11 +53,26 @@ const CATEGORY_THRESHOLDS: Record<
   related_concept: { minRecall5: 0.4 },
   negative: { maxTopConfidence: 0.4 }, // Abstention: top result should have low confidence
   edge_case: { minMRR: 0.3 },
+  multi_hop: { minRecall5: 0.4 },
 };
+
+export interface RunOptions {
+  /** Rank in the knowledge-graph lane (default true, as search does). */
+  useGraph?: boolean;
+}
+
+/** Whole-word, case-insensitive mention of `name` in `text`. */
+function mentions(text: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, "iu").test(text);
+}
 
 export class BenchmarkRunner {
   private service: MemoryService | null = null;
+  private graph: GraphRepository | null = null;
+  private embeddings: EmbeddingsService | null = null;
   private tmpDir: string | null = null;
+  private db: ReturnType<typeof connectToDatabase> | null = null;
 
   /** Maps dataset memory IDs to actual stored memory IDs */
   private memoryIdMap: Map<string, string> = new Map();
@@ -67,20 +85,27 @@ export class BenchmarkRunner {
     this.tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-benchmark-"));
     const dbPath = join(this.tmpDir, "benchmark.db");
     const db = connectToDatabase(dbPath);
+    this.db = db;
     const repository = new MemoryRepository(db);
     const embeddings = new EmbeddingsService(MODEL_NAME, MODEL_DIMENSION);
     this.service = new MemoryService(repository, embeddings);
+    this.graph = new GraphRepository(db);
+    this.embeddings = embeddings;
   }
 
   /**
    * Clean up temporary files.
    */
   async teardown(): Promise<void> {
+    this.db?.close();
+    this.db = null;
     if (this.tmpDir) {
-      rmSync(this.tmpDir, { recursive: true, force: true });
+      removeDir(this.tmpDir);
       this.tmpDir = null;
     }
     this.service = null;
+    this.graph = null;
+    this.embeddings = null;
     this.memoryIdMap.clear();
   }
 
@@ -99,12 +124,80 @@ export class BenchmarkRunner {
       const stored = await this.service.store(mem.content, mem.metadata ?? {});
       this.memoryIdMap.set(mem.id, stored.id);
     }
+
+    if (dataset.graph) await this.loadGraph(dataset);
+  }
+
+  /**
+   * Build the dataset's knowledge graph as an auto-linker would: one entity
+   * per graph entity, a `mentions` edge from every memory whose text names
+   * it, and the stated entity↔entity relations.
+   */
+  private async loadGraph(dataset: BenchmarkDataset): Promise<void> {
+    const graph = this.graph!;
+    const now = new Date();
+    const entityIds = new Map<string, string>();
+    const edge = (
+      source: { ns: "memory" | "entity"; id: string },
+      target: { ns: "memory" | "entity"; id: string },
+      type: string,
+      category: string,
+    ) =>
+      graph.insertEdge({
+        id: randomUUID(),
+        sourceId: source.id,
+        sourceNs: source.ns,
+        targetId: target.id,
+        targetNs: target.ns,
+        edgeType: type,
+        category,
+        context: "",
+        embedding: new Array(MODEL_DIMENSION).fill(0),
+        sourceType: "inferred",
+        sourceRef: null,
+        credibility: 1,
+        provenance: "inferred",
+        strength: 1,
+        createdAt: now,
+      });
+
+    for (const e of dataset.graph!.entities) {
+      const id = randomUUID();
+      entityIds.set(e.id, id);
+      graph.insertEntity({
+        id,
+        type: e.type,
+        name: e.name,
+        properties: {},
+        embedding: await this.embeddings!.embed(e.name),
+        sourceType: "inferred",
+        sourceRef: null,
+        credibility: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const names = [e.name, ...(e.aliases ?? [])];
+      for (const mem of dataset.memories) {
+        if (names.some((n) => mentions(mem.content, n))) {
+          edge({ ns: "memory", id: this.memoryIdMap.get(mem.id)! }, { ns: "entity", id }, "mentions", "reference");
+        }
+      }
+    }
+
+    for (const r of dataset.graph!.relations) {
+      edge(
+        { ns: "entity", id: entityIds.get(r.from)! },
+        { ns: "entity", id: entityIds.get(r.to)! },
+        r.type,
+        "domain",
+      );
+    }
   }
 
   /**
    * Run the benchmark against all queries in the dataset.
    */
-  async runBenchmark(dataset: BenchmarkDataset): Promise<BenchmarkResults> {
+  async runBenchmark(dataset: BenchmarkDataset, options: RunOptions = {}): Promise<BenchmarkResults> {
     if (!this.service) {
       throw new Error("Call setup() first");
     }
@@ -116,7 +209,10 @@ export class BenchmarkRunner {
       // Run search - fetch more than needed to measure recall
       // Use "fact_check" intent for benchmarks as it emphasizes relevance
       const intent: SearchIntent = "fact_check";
-      const results = await this.service.search(query.query, intent, { limit: 10 });
+      const results = await this.service.search(query.query, intent, {
+        limit: 10,
+        useGraph: options.useGraph ?? true,
+      });
       const retrievedIds = results.map((m) => m.id);
       const confidences = results.map((m) => m.confidence);
 
@@ -237,7 +333,7 @@ export class BenchmarkRunner {
   /**
    * Aggregate metrics across multiple query results.
    */
-  private aggregateMetrics(results: QueryResult[]): CategoryMetrics {
+  aggregateMetrics(results: QueryResult[]): CategoryMetrics {
     const n = results.length;
     if (n === 0) {
       return {

@@ -33,6 +33,7 @@
     "test:coverage": "bun test --preload ./tests/preload.ts --coverage",
     "benchmark": "bun test tests/benchmark.test.ts --preload ./tests/preload.ts",
     "benchmark:update": "bun run scripts/update-benchmarks.ts",
+    "benchmark:graph": "bun run scripts/compare-graph-benchmark.ts",
     "test:preload": "bun run tests/preload.ts",
     "smoke": "bun run scripts/smoke-test.ts",
     "install:plugin": "bun install --cwd plugin --frozen-lockfile",

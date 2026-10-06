@@ -172,14 +172,13 @@ describe("search with the graph lane", () => {
     return { venue, catering, filler, gala };
   }
 
-  test("ranks a memory linked to the best match above unrelated ones", async () => {
-    const { venue, catering, filler } = await eventMemories();
+  test("does not boost mere neighbours of the best match (GRAPH_NEIGHBOR_WEIGHT is 0)", async () => {
+    const { venue } = await eventMemories();
 
     const out = await search("venue contract");
 
-    expect(positionOf(out, venue.id)).toBeLessThan(positionOf(out, catering.id));
-    for (const f of filler) expect(positionOf(out, catering.id)).toBeLessThan(positionOf(out, f.id));
-    expect(out).toContain("via graph (2 links)");
+    expect(positionOf(out, venue.id)).toBe(out.indexOf("ID: "));
+    expect(out).not.toContain("via graph");
   });
 
   test("finds memories about an entity the query names", async () => {

@@ -27,7 +27,28 @@ export type QueryCategory =
   | "semantic" // Paraphrased/synonymous queries
   | "related_concept" // Related domain concepts
   | "negative" // Should NOT match corpus (out-of-domain)
-  | "edge_case"; // Special chars, very short/long, etc.
+  | "edge_case" // Special chars, very short/long, etc.
+  | "multi_hop"; // Answer is linked to what the query names, not worded like it
+
+/**
+ * A knowledge-graph layer over a dataset's memories, built the way an
+ * auto-linker would: an entity is linked to every memory whose text
+ * mentions one of its names (whole word, case-insensitive), and
+ * relations record facts the memories themselves state.
+ */
+export interface BenchmarkGraph {
+  entities: Array<{
+    /** Stable ID for relations (e.g. "ent-aeloria") */
+    id: string;
+    /** Canonical name — what a query naming the entity says */
+    name: string;
+    type: string;
+    /** Other surface forms that count as a mention (the name always does) */
+    aliases?: string[];
+  }>;
+  /** Entity↔entity relations, by entity id */
+  relations: Array<{ from: string; to: string; type: string }>;
+}
 
 /**
  * A query with expected relevant results for benchmarking.
@@ -57,6 +78,8 @@ export interface BenchmarkDataset {
   memories: GroundTruthMemory[];
   /** Queries with expected results */
   queries: GroundTruthQuery[];
+  /** Optional knowledge graph over the memories */
+  graph?: BenchmarkGraph;
 }
 
 /**

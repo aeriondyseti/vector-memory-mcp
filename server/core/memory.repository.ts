@@ -12,18 +12,25 @@ import {
   SQLITE_BATCH_SIZE,
   RRF_K,
 } from "./sqlite-utils";
-import { entitiesNamedIn, graphRecall } from "./graph-recall";
+import { entitiesNamedIn, type GraphHit, graphRecall } from "./graph-recall";
 
 /** Top text matches the graph lane starts from. */
 const GRAPH_SEEDS = 5;
 /** A vector-only candidate seeds the graph lane only at this cosine or above. */
 const GRAPH_SEED_MIN_SIMILARITY = 0.5;
 /**
- * The graph lane's weight in the fusion, against 1 for vector and keyword:
- * a memory found only through the graph supplements direct matches rather
- * than outranking a strong one.
+ * Fusion weight, against 1 for vector and keyword, of memories linked to an
+ * entity the query names — high-precision evidence.
  */
 export const GRAPH_WEIGHT = 0.5;
+/**
+ * Fusion weight of neighbours of the top text matches — topic siblings.
+ * Off by default: with RRF_K = 10 adjacent ranks differ by under 0.01, so
+ * even a small vote lifts siblings over the true top match. Measured on the
+ * general+graph benchmark (original-query MRR / multi-hop R@5, vs off):
+ * 0.5 → −0.116 / +0.26, 0.1 → −0.056 / +0.31, 0 → ±0 / +0.25.
+ */
+export const GRAPH_NEIGHBOR_WEIGHT = 0;
 import {
   type Memory,
   type HybridRow,
@@ -699,35 +706,56 @@ export class MemoryRepository {
           ([, sig]) => sig.ftsMatch || (sig.cosineSimilarity ?? 0) >= GRAPH_SEED_MIN_SIMILARITY,
         ).map(([id, sig]) => [id, sig.rrfScore]),
       );
-      const hits = graphRecall(
-        this.db,
-        { memoryIds: topByRRF(matched, GRAPH_SEEDS), entityIds: entitiesNamedIn(this.db, query) },
-        candidateLimit,
-      );
+      const seedIds = topByRRF(matched, GRAPH_SEEDS);
+      const seedSet = new Set(seedIds);
+      const named = entitiesNamedIn(this.db, query);
+
+      // Two graph lanes, weighted by how strong their evidence is: memories
+      // linked to an entity the query names, and neighbours of the top text
+      // matches. Seeds take no neighbour boost — linked top matches boosting
+      // each other rewards centrality, not relevance (see BENCHMARKS.md).
+      const lanes: Array<{ hits: GraphHit[]; weight: number }> = [
+        {
+          hits: named.length > 0 ? graphRecall(this.db, { memoryIds: [], entityIds: named }, candidateLimit) : [],
+          weight: GRAPH_WEIGHT,
+        },
+        {
+          hits:
+            GRAPH_NEIGHBOR_WEIGHT > 0
+              ? graphRecall(this.db, { memoryIds: seedIds, entityIds: [] }, candidateLimit).filter(
+                  (h) => !seedSet.has(h.id),
+                )
+              : [],
+          weight: GRAPH_NEIGHBOR_WEIGHT,
+        },
+      ];
+      const reached = lanes.flatMap((l) => l.hits.map((h) => h.id));
       const inProject =
-        project === undefined ? null : new Set(this.idsInProject(hits.map((h) => h.id), project));
+        project === undefined ? null : new Set(this.idsInProject(reached, project));
       const qv = new Float32Array(embedding);
-      let rank = 0;
-      for (const hit of hits) {
-        if (inProject && !inProject.has(hit.id)) continue;
-        rank++;
-        const boost = GRAPH_WEIGHT / (RRF_K + rank);
-        const existing = signalsMap.get(hit.id);
-        if (existing) {
-          existing.rrfScore += boost;
-          existing.graphDistance = hit.distance;
-        } else {
-          const vec = this.getEmbedding(hit.id);
-          signalsMap.set(hit.id, {
-            rrfScore: boost,
-            cosineSimilarity: vec.length > 0 ? cosineSimilarity(qv, new Float32Array(vec)) : null,
-            ftsMatch: false,
-            knnRank: null,
-            ftsRank: null,
-            graphDistance: hit.distance,
-          });
+      for (const lane of lanes) {
+        let rank = 0;
+        for (const hit of lane.hits) {
+          if (inProject && !inProject.has(hit.id)) continue;
+          rank++;
+          const boost = lane.weight / (RRF_K + rank);
+          const existing = signalsMap.get(hit.id);
+          if (existing) {
+            existing.rrfScore += boost;
+            existing.graphDistance = Math.min(existing.graphDistance ?? hit.distance, hit.distance);
+          } else {
+            const vec = this.getEmbedding(hit.id);
+            signalsMap.set(hit.id, {
+              rrfScore: boost,
+              cosineSimilarity: vec.length > 0 ? cosineSimilarity(qv, new Float32Array(vec)) : null,
+              ftsMatch: false,
+              knnRank: null,
+              ftsRank: null,
+              graphDistance: hit.distance,
+            });
+          }
+          rrfScores.set(hit.id, signalsMap.get(hit.id)!.rrfScore);
         }
-        rrfScores.set(hit.id, signalsMap.get(hit.id)!.rrfScore);
       }
     }
 
