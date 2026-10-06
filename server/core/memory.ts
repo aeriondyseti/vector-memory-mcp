@@ -279,6 +279,8 @@ export interface SearchSignals {
   ftsMatch: boolean;
   knnRank: number | null;
   ftsRank: number | null;
+  /** Links from the graph lane's nearest seed, when the graph reached it. */
+  graphDistance?: number | null;
 }
 
 /** Augments any entity type with an RRF score from hybrid search. */

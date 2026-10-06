@@ -455,6 +455,7 @@ export class MemoryService {
       includeExpired: options?.includeExpired ?? false,
       now: now.getTime(),
       mode,
+      useGraph: options?.useGraph ?? true,
     };
 
     // Merge top-level date filters into history filters so after/before
@@ -506,6 +507,7 @@ export class MemoryService {
                   lastAccessed: candidate.lastAccessed,
                   pinned: candidate.pinned ?? false,
                   importance: candidate.importance ?? null,
+                  graphDistance: candidate.signals.graphDistance ?? null,
                 }))
             )
         : Promise.resolve([] as SearchResult[]);

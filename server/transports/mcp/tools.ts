@@ -375,6 +375,11 @@ SCOPE: Memories are stored globally across all projects. By default, search cove
         type: "boolean",
         description: "Include tasks, next steps and blockers already resolved (default: false).",
       },
+      include_graph: {
+        type: "boolean",
+        description:
+          "Also rank in memories linked through the knowledge graph to the best matches or to entities named in the query (default: true; never in exact mode). Such results are marked 'via graph'.",
+      },
       min_confidence: {
         type: "string",
         enum: ["uncertain", "likely", "confirmed", "verified"],

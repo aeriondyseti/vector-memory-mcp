@@ -458,6 +458,7 @@ export async function handleSearchMemories(
     includeExpired: asBool(args?.include_expired, false),
     includeSuperseded: asBool(args?.include_superseded, false),
     includeResolved: asBool(args?.include_resolved, false),
+    useGraph: asBool(args?.include_graph, true),
     minConfidence: asStringLevel<MemoryConfidence>(args?.min_confidence, MEMORY_CONFIDENCE_LEVELS),
     minImportance: asStringLevel<MemoryImportance>(args?.min_importance, MEMORY_IMPORTANCE_LEVELS),
     type: asOptionalString(args?.type),
@@ -536,6 +537,9 @@ function formatSearchResult(r: SearchResult): string {
   let result = `[${r.source}] ID: ${r.id}\nConfidence: ${r.confidence.toFixed(2)}`;
   if (r.pinned) result += ` | 📌 pinned`;
   if (r.importance && r.importance !== "normal") result += ` | importance: ${r.importance}`;
+  if (r.graphDistance != null) {
+    result += ` | via graph (${r.graphDistance} ${r.graphDistance === 1 ? "link" : "links"})`;
+  }
   if (r.project) {
     result += `\nProject: ${r.project}`;
   }

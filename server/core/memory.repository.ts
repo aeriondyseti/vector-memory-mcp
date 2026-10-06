@@ -10,7 +10,20 @@ import {
   cosineSimilarity,
   batchedQuery,
   SQLITE_BATCH_SIZE,
+  RRF_K,
 } from "./sqlite-utils";
+import { entitiesNamedIn, graphRecall } from "./graph-recall";
+
+/** Top text matches the graph lane starts from. */
+const GRAPH_SEEDS = 5;
+/** A vector-only candidate seeds the graph lane only at this cosine or above. */
+const GRAPH_SEED_MIN_SIMILARITY = 0.5;
+/**
+ * The graph lane's weight in the fusion, against 1 for vector and keyword:
+ * a memory found only through the graph supplements direct matches rather
+ * than outranking a strong one.
+ */
+export const GRAPH_WEIGHT = 0.5;
 import {
   type Memory,
   type HybridRow,
@@ -371,6 +384,16 @@ export class MemoryRepository {
     }));
   }
 
+  /** Which of `ids` belong to `project`. */
+  private idsInProject(ids: string[], project: string): string[] {
+    if (ids.length === 0) return [];
+    return (
+      this.db
+        .prepare(`SELECT id FROM memories WHERE project = ? AND id IN (${ids.map(() => "?").join(", ")})`)
+        .all(project, ...ids) as Array<{ id: string }>
+    ).map((r) => r.id);
+  }
+
   /**
    * Cosine similarity of each of `otherIds` to memory `id`, from the stored
    * vectors; an id without a vector is left out.
@@ -617,6 +640,8 @@ export class MemoryRepository {
       now?: number;
       /** "semantic" (default) / "hybrid" use vector+FTS; "exact" uses FTS only. */
       mode?: "semantic" | "exact" | "hybrid";
+      /** Fuse in the graph lane (default true; never in "exact" mode). */
+      useGraph?: boolean;
     },
   ): Promise<HybridRow[]> {
     const candidateLimit = limit * 5;
@@ -663,6 +688,49 @@ export class MemoryRepository {
     const signalsMap = hybridRRFWithSignals(vectorResults, ftsResults);
     const rrfScores = new Map<string, number>();
     for (const [id, s] of signalsMap) rrfScores.set(id, s.rrfScore);
+
+    // Graph lane: memories linked to the best text matches, or to entities
+    // the query names, join the fusion at GRAPH_WEIGHT. Off in "exact" mode.
+    if (filters?.mode !== "exact" && filters?.useGraph !== false) {
+      // Seeds are real matches — a keyword hit or a close embedding — not
+      // merely the best-ranked of the vector lane's every-memory candidates.
+      const matched = new Map(
+        [...signalsMap].filter(
+          ([, sig]) => sig.ftsMatch || (sig.cosineSimilarity ?? 0) >= GRAPH_SEED_MIN_SIMILARITY,
+        ).map(([id, sig]) => [id, sig.rrfScore]),
+      );
+      const hits = graphRecall(
+        this.db,
+        { memoryIds: topByRRF(matched, GRAPH_SEEDS), entityIds: entitiesNamedIn(this.db, query) },
+        candidateLimit,
+      );
+      const inProject =
+        project === undefined ? null : new Set(this.idsInProject(hits.map((h) => h.id), project));
+      const qv = new Float32Array(embedding);
+      let rank = 0;
+      for (const hit of hits) {
+        if (inProject && !inProject.has(hit.id)) continue;
+        rank++;
+        const boost = GRAPH_WEIGHT / (RRF_K + rank);
+        const existing = signalsMap.get(hit.id);
+        if (existing) {
+          existing.rrfScore += boost;
+          existing.graphDistance = hit.distance;
+        } else {
+          const vec = this.getEmbedding(hit.id);
+          signalsMap.set(hit.id, {
+            rrfScore: boost,
+            cosineSimilarity: vec.length > 0 ? cosineSimilarity(qv, new Float32Array(vec)) : null,
+            ftsMatch: false,
+            knnRank: null,
+            ftsRank: null,
+            graphDistance: hit.distance,
+          });
+        }
+        rrfScores.set(hit.id, signalsMap.get(hit.id)!.rrfScore);
+      }
+    }
+
     const topIds = topByRRF(rrfScores, limit);
 
     if (topIds.length === 0) return [];
@@ -720,6 +788,7 @@ export class MemoryRepository {
           ftsMatch: signals.ftsMatch,
           knnRank: signals.knnRank,
           ftsRank: signals.ftsRank,
+          graphDistance: signals.graphDistance ?? null,
         },
       });
     }

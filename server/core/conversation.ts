@@ -79,6 +79,8 @@ export interface SearchResult {
   lastAccessed?: Date | null;
   pinned?: boolean;
   importance?: import("./memory").MemoryImportance | null;
+  /** Links from a top match or named entity, when the graph lane reached it. */
+  graphDistance?: number | null;
   // History-specific fields
   sessionId?: string;
   role?: string;
@@ -141,6 +143,8 @@ export interface SearchOptions {
   includeSuperseded?: boolean;
   /** Include open-until-resolved memories already resolved (default false). */
   includeResolved?: boolean;
+  /** Rank in memories linked through the knowledge graph (default true). */
+  useGraph?: boolean;
   /** Include expired (TTL-passed) memories in results (default false). */
   includeExpired?: boolean;
   /** Minimum confidence level to include (memories below this rank are dropped). */

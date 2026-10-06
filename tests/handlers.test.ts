@@ -72,6 +72,7 @@ describe("handleSearchMemories", () => {
       includeExpired: false,
       includeSuperseded: false,
       includeResolved: false,
+      useGraph: true,
       tagMatch: "any",
       mode: "semantic",
     });
@@ -109,6 +110,7 @@ describe("handleSearchMemories", () => {
       includeExpired: false,
       includeSuperseded: false,
       includeResolved: false,
+      useGraph: true,
       tagMatch: "any",
       mode: "semantic",
     });
