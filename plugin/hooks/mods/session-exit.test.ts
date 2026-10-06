@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "claude-code/testing";
 import type { CommandRunInput, On } from "claude-code";
-import { ANSWER, checkpointPrompt, exitDecision, exitMode } from "./checkpoint.ts";
+import { ANSWER, checkpointPrompt, exitDecision, checkpointMode } from "./checkpoint.ts";
 
 const SERVER = "plugin:vector-memory:vector-memory";
 
@@ -92,10 +92,10 @@ describe("exit checkpoint helpers", () => {
   });
 
   test("falls back to ask for an unknown mode", async () => {
-    expect(exitMode("always")).toBe("always");
-    expect(exitMode("never")).toBe("never");
-    expect(exitMode("sometimes")).toBe("ask");
-    expect(exitMode(undefined)).toBe("ask");
+    expect(checkpointMode("always")).toBe("always");
+    expect(checkpointMode("never")).toBe("never");
+    expect(checkpointMode("sometimes")).toBe("ask");
+    expect(checkpointMode(undefined)).toBe("ask");
   });
 
   test("puts the person's notes in the drafting prompt", async () => {

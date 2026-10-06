@@ -9,11 +9,15 @@
  * runs (`session.end` is too short-lived to draft one), per the
  * `exitCheckpoint` option: `ask` puts the choice to the person (save, skip,
  * cancel the command, or type notes under "Other" that steer the waypoint),
- * `always` saves without asking, `never` does nothing. Loading needs no hook
- * here: the classic SessionStart hooks (clear, startup) load the waypoint
- * this has just saved.
+ * `always` saves without asking, `never` does nothing.
  *
- * Every failure degrades to the command or compaction running as usual.
+ * Session start and after /clear — the classic SessionStart hooks load the
+ * latest waypoint as context; this wraps them, per the `loadCheckpoint`
+ * option: `ask` puts loading it to the person (and drops it on "Start
+ * fresh"), `always` keeps it, `never` drops it. A waypoint the person chose
+ * to save at the /clear just run is loaded without asking again.
+ *
+ * Every failure degrades to the command, compaction or start running as usual.
  * Loaded by Claude Code builds with the mod system (via `modules` in
  * hooks.json); older builds ignore it and keep the classic command hooks.
  */
@@ -21,13 +25,15 @@
 import type { EngineInterface, Hook, Register, SessionMessage } from "claude-code";
 import {
   ANSWER,
+  type CheckpointMode,
   type CheckpointSource,
+  checkpointMode,
   checkpointPrompt,
   errorMessage,
-  type ExitCheckpointMode,
   type ExitDecision,
   exitDecision,
-  exitMode,
+  findWaypointContext,
+  loadQuestion,
   parseWaypointDraft,
   resultText,
   waypointArgs,
@@ -121,8 +127,46 @@ async function proceedWithoutWaypoint($: EngineInterface, command: string): Prom
   }
 }
 
-/** The `exitCheckpoint` option, set by `register` (each reload runs it again). */
-let exitCheckpointMode: ExitCheckpointMode = "ask";
+/** Asks whether to load the waypoint; keeps it when dismissed, as before this asked. */
+async function askToLoad($: EngineInterface, waypointContext: string): Promise<boolean> {
+  try {
+    const answer = await $.ui.ask(loadQuestion(waypointContext, Date.now()), {
+      header: "Waypoint",
+      options: [ANSWER.load, ANSWER.fresh],
+    });
+    return answer !== ANSWER.fresh;
+  } catch {
+    return true;
+  }
+}
+
+/** The `exitCheckpoint` and `loadCheckpoint` options, set by `register` (each reload runs it again). */
+let exitCheckpointMode: CheckpointMode = "ask";
+let loadCheckpointMode: CheckpointMode = "ask";
+
+/** A waypoint was saved at the /clear now running: the session it starts loads it unasked. */
+let isSavedAtClear = false;
+
+/** After the classic SessionStart hooks: keep or drop the waypoint they loaded. */
+const askBeforeLoad: Hook<"classic.SessionStart"> = async ($, e, next) => {
+  const started = await next(e);
+  const wasSavedAtClear = isSavedAtClear;
+  isSavedAtClear = false;
+
+  if (e.source !== "startup" && e.source !== "clear") return started;
+  const context = started.additionalContext ?? [];
+  const at = findWaypointContext(context);
+  if (at < 0 || loadCheckpointMode === "always" || wasSavedAtClear) return started;
+
+  // Nobody to ask (-p, SDK): load it, as before this asked.
+  if (loadCheckpointMode === "ask") {
+    const hasPerson = (await $.session.surfaces()).length > 0;
+    if (!hasPerson || (await askToLoad($, context[at] ?? ""))) return started;
+  }
+
+  $.ui.toast("Vector Memory: waypoint not loaded — starting fresh");
+  return { ...started, additionalContext: context.filter((_, i) => i !== at) };
+};
 
 /** Before /clear or /exit runs: checkpoint per `exitCheckpointMode`. */
 const checkpointBeforeExit: Hook<"command.run"> = async ($, e, next) => {
@@ -148,6 +192,7 @@ const checkpointBeforeExit: Hook<"command.run"> = async ($, e, next) => {
   );
 
   if (saved) {
+    isSavedAtClear = command === "clear";
     $.ui.toast("Vector Memory: waypoint saved");
   } else if (isInteractive) {
     if (!(await proceedWithoutWaypoint($, command))) return { text: `/${command} cancelled.` };
@@ -184,11 +229,18 @@ export const register: Register = (on, options) => {
     return compacted;
   }).catch(($, e, next) => next(e)); // replay-safe: never compacts twice
 
-  // ── /clear and /exit ──────────────────────────────────────────────
-  exitCheckpointMode = exitMode(options.exitCheckpoint);
-  if (exitCheckpointMode === "never") return;
+  // ── Session start and after /clear ────────────────────────────────
+  loadCheckpointMode = checkpointMode(options.loadCheckpoint);
+  if (loadCheckpointMode !== "always") {
+    // On failure, the start goes on as the classic hooks left it.
+    on("classic.SessionStart", askBeforeLoad).catch(($, e, next) => next(e));
+  }
 
-  // Never strand the person in a session they asked to leave.
-  on("command.run", { command: "clear" }, checkpointBeforeExit).catch(($, e, next) => next(e));
-  on("command.run", { command: "exit" }, checkpointBeforeExit).catch(($, e, next) => next(e));
+  // ── /clear and /exit ──────────────────────────────────────────────
+  exitCheckpointMode = checkpointMode(options.exitCheckpoint);
+  if (exitCheckpointMode !== "never") {
+    // Never strand the person in a session they asked to leave.
+    on("command.run", { command: "clear" }, checkpointBeforeExit).catch(($, e, next) => next(e));
+    on("command.run", { command: "exit" }, checkpointBeforeExit).catch(($, e, next) => next(e));
+  }
 };

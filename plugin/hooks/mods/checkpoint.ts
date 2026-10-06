@@ -105,9 +105,10 @@ export function errorMessage(err: unknown): string {
 
 // ── /clear and /exit ────────────────────────────────────────────────
 
-export type ExitCheckpointMode = "ask" | "always" | "never";
+/** An `exitCheckpoint` / `loadCheckpoint` option value. */
+export type CheckpointMode = "ask" | "always" | "never";
 
-export function exitMode(value: unknown): ExitCheckpointMode {
+export function checkpointMode(value: unknown): CheckpointMode {
   return value === "always" || value === "never" ? value : "ask";
 }
 
@@ -116,6 +117,8 @@ export const ANSWER = {
   skip: "Skip",
   cancel: "Cancel",
   proceed: "Continue anyway",
+  load: "Load waypoint",
+  fresh: "Start fresh",
 } as const;
 
 export type ExitDecision = { kind: "save"; notes?: string } | { kind: "skip" } | { kind: "cancel" };
@@ -126,4 +129,41 @@ export function exitDecision(answer: string): ExitDecision {
   if (answer === ANSWER.skip) return { kind: "skip" };
   if (answer === ANSWER.cancel) return { kind: "cancel" };
   return { kind: "save", notes: answer };
+}
+
+// ── Session start ───────────────────────────────────────────────────
+
+/** How the classic SessionStart hooks (hooks-lib.ts) open a waypoint's context. */
+const WAYPOINT_HEADING = "## Session Waypoint (";
+
+/** Index of the waypoint among the SessionStart hooks' context entries; -1 when none. */
+export function findWaypointContext(context: readonly string[] | undefined): number {
+  return context?.findIndex((c) => c.startsWith(WAYPOINT_HEADING)) ?? -1;
+}
+
+function age(iso: string, now: number): string | null {
+  const seconds = Math.floor((now - new Date(iso).getTime()) / 1000);
+  if (Number.isNaN(seconds)) return null;
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/** "Load the waypoint saved 2h ago (feat/x) into this session?" from its heading. */
+export function loadQuestion(waypointContext: string, now: number): string {
+  const heading = waypointContext.slice(WAYPOINT_HEADING.length, waypointContext.indexOf(")\n"));
+  const field = (name: string) =>
+    heading
+      .split(" | ")
+      .find((part) => part.startsWith(`${name}: `))
+      ?.slice(name.length + 2);
+
+  const updated = field("Updated");
+  const when = updated ? age(updated, now) : null;
+  const branch = field("Branch");
+  const saved = when === null ? "last saved" : when === "just now" ? "saved just now" : `saved ${when}`;
+  return `Load the waypoint ${saved}${branch ? ` (${branch})` : ""} into this session?`;
 }

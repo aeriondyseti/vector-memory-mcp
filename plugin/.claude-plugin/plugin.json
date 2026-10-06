@@ -26,6 +26,13 @@
       "description": "Save a waypoint before /clear and /exit: ask each time, always save, or never.",
       "options": ["ask", "always", "never"],
       "default": "ask"
+    },
+    "loadCheckpoint": {
+      "type": "string",
+      "title": "Load waypoint at start and after /clear",
+      "description": "Load the latest waypoint into a new session: ask each time, always load, or never.",
+      "options": ["ask", "always", "never"],
+      "default": "ask"
     }
   }
 }

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Automatic waypoint checkpoints** (Claude Code mod, `plugin/hooks/mods/`, registered under `modules` in `hooks.json`); tests run with `claude plugin test plugin`.
   - **Compaction**: a `session.compact` hook saves a model-drafted waypoint (`set_waypoint`) before every main-conversation compaction and appends it (`get_waypoint`) to the compacted conversation. `/compact <text>` steers the draft. Falls back to a plain compaction on any failure; skips `precompute` and subagent compactions.
   - **`/clear` and `/exit`**: a `command.run` hook asks before the command runs — save, skip, or cancel — and free text typed under "Other" becomes guidance for the waypoint (recorded as `metadata.user_notes`). On a failed save it asks whether to continue. New `exitCheckpoint` option (`ask` | `always` | `never`, default `ask`).
+  - **Session start and after `/clear`**: a `classic.SessionStart` hook wraps the existing waypoint loader and asks whether to load the waypoint it found (with its age and branch); "Start fresh" drops it from the session's context. A waypoint just saved at `/clear` loads unasked; runs with nobody to ask (`-p`, SDK) load as before. New `loadCheckpoint` option (`ask` | `always` | `never`, default `ask`).
 
 ### Changed
 - **Plugin root is `plugin/`**: the marketplace entry's source is now `./plugin` and the manifest lives at `plugin/.claude-plugin/plugin.json`, so installs copy only the plugin, not the whole repo.

@@ -119,8 +119,13 @@ conversation) and saves it at the moments context would otherwise be lost:
 - **`/clear` and `/exit`** (and `/new`, `/reset`, `/quit`): you're asked first:
   *Save waypoint*, *Skip*, or *Cancel* (Esc also cancels). Anything typed under
   *Other* is used as guidance for the waypoint ("focus on the migration plan").
-  The fresh waypoint is loaded by the next session's start hook. Set
-  `exitCheckpoint` in `/config` to `always` (save without asking) or `never`.
+  Set `exitCheckpoint` in `/config` to `always` (save without asking) or
+  `never`.
+- **Session start and after `/clear`**: when a waypoint exists, you're asked
+  *"Load the waypoint saved 2h ago (feat/x) into this session?"*: *Load
+  waypoint* or *Start fresh*. Dismissing the question loads it. A waypoint you
+  just chose to save at `/clear` loads without asking again. Set
+  `loadCheckpoint` to `always` or `never` to skip the question.
 
 If drafting or saving fails, compaction proceeds unchanged and `/clear` asks
 whether to continue anyway. Exits that bypass the command (ctrl+c, ctrl+d) are
