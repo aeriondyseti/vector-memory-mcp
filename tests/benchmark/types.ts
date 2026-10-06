@@ -28,7 +28,8 @@ export type QueryCategory =
   | "related_concept" // Related domain concepts
   | "negative" // Should NOT match corpus (out-of-domain)
   | "edge_case" // Special chars, very short/long, etc.
-  | "multi_hop"; // Answer is linked to what the query names, not worded like it
+  | "multi_hop" // Answer is linked to what the query names, not worded like it
+  | "bespoke"; // Hand-written questions of the kind people ask a memory (see `kind`)
 
 /**
  * A knowledge-graph layer over a dataset's memories, built the way an
@@ -48,6 +49,11 @@ export interface BenchmarkGraph {
   }>;
   /** Entity↔entity relations, by entity id */
   relations: Array<{ from: string; to: string; type: string }>;
+  /**
+   * Explicit memory→entity links (dataset memory id, entity id). When given,
+   * they replace linking by mention — e.g. a vault's [[wikilinks]].
+   */
+  memoryLinks?: Array<{ memoryId: string; entityId: string }>;
 }
 
 /**
@@ -64,6 +70,8 @@ export interface GroundTruthQuery {
   partiallyRelevantIds?: string[];
   /** Test category for grouping results */
   category: QueryCategory;
+  /** Finer kind within a category, e.g. a bespoke question's "relational" or "open_thread" */
+  kind?: string;
 }
 
 /**
@@ -92,6 +100,8 @@ export interface QueryResult {
   query: string;
   /** Query category */
   category: QueryCategory;
+  /** The query's kind, when it has one */
+  kind?: string;
   /** IDs of memories retrieved (in ranked order) */
   retrievedIds: string[];
   /** Expected relevant memory IDs */
@@ -114,6 +124,10 @@ export interface QueryResult {
   firstRelevantConfidence: number | null;
   /** Whether this query met its category threshold */
   passed: boolean;
+  /** Search wall-clock time in milliseconds */
+  latencyMs?: number;
+  /** Results (of up to 10) the graph lane reached */
+  graphResults?: number;
 }
 
 /**

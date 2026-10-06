@@ -52,7 +52,7 @@ Same memories and graph in both columns; only `include_graph` differs (off → o
 
 With `RRF_K = 10`, adjacent ranks in one lane differ by under 0.01. Any neighbour vote large enough to matter therefore lifts topic siblings over the true top answer. The default keeps only the named-entity part (`GRAPH_NEIGHBOR_WEIGHT = 0` in `server/core/memory.repository.ts`).
 
-Reproduce with `bun run benchmark:graph` (add `--write` to record a new section here).
+Reproduce with `bun run benchmark:graph` (add `--write` to record a new section here). For a much larger, real-world test, point it at a local Obsidian vault: `bun run benchmark:graph --vault <path>` (see `tests/benchmark/datasets/obsidian.ts`; only aggregate numbers are reported).
 
 ## v2.4.0 (2026-03-27)
 

@@ -54,11 +54,18 @@ const CATEGORY_THRESHOLDS: Record<
   negative: { maxTopConfidence: 0.4 }, // Abstention: top result should have low confidence
   edge_case: { minMRR: 0.3 },
   multi_hop: { minRecall5: 0.4 },
+  bespoke: {}, // Informational
 };
 
 export interface RunOptions {
   /** Rank in the knowledge-graph lane (default true, as search does). */
   useGraph?: boolean;
+  /** Search mode (default "semantic"). */
+  mode?: "semantic" | "exact" | "hybrid";
+  /** Search intent (default "fact_check"). */
+  intent?: SearchIntent;
+  /** Graph lane weights (default: the server's). */
+  graphWeights?: { named?: number; neighbor?: number };
 }
 
 /** Whole-word, case-insensitive mention of `name` in `text`. */
@@ -76,21 +83,56 @@ export class BenchmarkRunner {
 
   /** Maps dataset memory IDs to actual stored memory IDs */
   private memoryIdMap: Map<string, string> = new Map();
+  /** Maps dataset entity IDs to stored entity IDs */
+  private entityIdMap: Map<string, string> = new Map();
+  private dbPath: string | null = null;
 
   /**
    * Initialize the benchmark environment.
-   * Creates a temporary database and initializes services.
+   * Creates a temporary database and initializes services. Pass `embeddings`
+   * to share one (e.g. a CachedEmbeddings) across runners.
    */
-  async setup(): Promise<void> {
+  async setup(options: { embeddings?: EmbeddingsService } = {}): Promise<void> {
     this.tmpDir = mkdtempSync(join(tmpdir(), "vector-memory-benchmark-"));
     const dbPath = join(this.tmpDir, "benchmark.db");
+    this.dbPath = dbPath;
     const db = connectToDatabase(dbPath);
     this.db = db;
     const repository = new MemoryRepository(db);
-    const embeddings = new EmbeddingsService(MODEL_NAME, MODEL_DIMENSION);
+    const embeddings = options.embeddings ?? new EmbeddingsService(MODEL_NAME, MODEL_DIMENSION);
     this.service = new MemoryService(repository, embeddings);
     this.graph = new GraphRepository(db);
     this.embeddings = embeddings;
+  }
+
+  /** The service under test (after setup). */
+  getService(): MemoryService {
+    if (!this.service) throw new Error("Call setup() first");
+    return this.service;
+  }
+
+  /** The database file (after setup). */
+  getDbPath(): string {
+    if (!this.dbPath) throw new Error("Call setup() first");
+    return this.dbPath;
+  }
+
+  /** The stored id of a dataset memory. */
+  storedId(datasetMemoryId: string): string | undefined {
+    return this.memoryIdMap.get(datasetMemoryId);
+  }
+
+  /** Add memory→entity links to a loaded graph (dataset ids). Returns how many were added. */
+  linkMemories(links: Array<{ memoryId: string; entityId: string }>): number {
+    let added = 0;
+    for (const link of links) {
+      const memoryId = this.memoryIdMap.get(link.memoryId);
+      const entityId = this.entityIdMap.get(link.entityId);
+      if (!memoryId || !entityId) continue;
+      this.insertEdge({ ns: "memory", id: memoryId }, { ns: "entity", id: entityId }, "mentions", "reference");
+      added++;
+    }
+    return added;
   }
 
   /**
@@ -107,6 +149,8 @@ export class BenchmarkRunner {
     this.graph = null;
     this.embeddings = null;
     this.memoryIdMap.clear();
+    this.entityIdMap.clear();
+    this.dbPath = null;
   }
 
   /**
@@ -133,33 +177,37 @@ export class BenchmarkRunner {
    * per graph entity, a `mentions` edge from every memory whose text names
    * it, and the stated entity↔entity relations.
    */
+  private insertEdge(
+    source: { ns: "memory" | "entity"; id: string },
+    target: { ns: "memory" | "entity"; id: string },
+    type: string,
+    category: string,
+  ): void {
+    this.graph!.insertEdge({
+      id: randomUUID(),
+      sourceId: source.id,
+      sourceNs: source.ns,
+      targetId: target.id,
+      targetNs: target.ns,
+      edgeType: type,
+      category,
+      context: "",
+      embedding: new Array(MODEL_DIMENSION).fill(0),
+      sourceType: "inferred",
+      sourceRef: null,
+      credibility: 1,
+      provenance: "inferred",
+      strength: 1,
+      createdAt: new Date(),
+    });
+  }
+
   private async loadGraph(dataset: BenchmarkDataset): Promise<void> {
     const graph = this.graph!;
     const now = new Date();
-    const entityIds = new Map<string, string>();
-    const edge = (
-      source: { ns: "memory" | "entity"; id: string },
-      target: { ns: "memory" | "entity"; id: string },
-      type: string,
-      category: string,
-    ) =>
-      graph.insertEdge({
-        id: randomUUID(),
-        sourceId: source.id,
-        sourceNs: source.ns,
-        targetId: target.id,
-        targetNs: target.ns,
-        edgeType: type,
-        category,
-        context: "",
-        embedding: new Array(MODEL_DIMENSION).fill(0),
-        sourceType: "inferred",
-        sourceRef: null,
-        credibility: 1,
-        provenance: "inferred",
-        strength: 1,
-        createdAt: now,
-      });
+    const entityIds = this.entityIdMap;
+    entityIds.clear();
+    const edge = this.insertEdge.bind(this);
 
     for (const e of dataset.graph!.entities) {
       const id = randomUUID();
@@ -176,11 +224,20 @@ export class BenchmarkRunner {
         createdAt: now,
         updatedAt: now,
       });
+      if (dataset.graph!.memoryLinks) continue; // linked explicitly below
       const names = [e.name, ...(e.aliases ?? [])];
       for (const mem of dataset.memories) {
         if (names.some((n) => mentions(mem.content, n))) {
           edge({ ns: "memory", id: this.memoryIdMap.get(mem.id)! }, { ns: "entity", id }, "mentions", "reference");
         }
+      }
+    }
+
+    for (const link of dataset.graph!.memoryLinks ?? []) {
+      const memoryId = this.memoryIdMap.get(link.memoryId);
+      const entityId = entityIds.get(link.entityId);
+      if (memoryId && entityId) {
+        edge({ ns: "memory", id: memoryId }, { ns: "entity", id: entityId }, "mentions", "reference");
       }
     }
 
@@ -208,11 +265,15 @@ export class BenchmarkRunner {
     for (const query of dataset.queries) {
       // Run search - fetch more than needed to measure recall
       // Use "fact_check" intent for benchmarks as it emphasizes relevance
-      const intent: SearchIntent = "fact_check";
+      const intent: SearchIntent = options.intent ?? "fact_check";
+      const started = performance.now();
       const results = await this.service.search(query.query, intent, {
         limit: 10,
         useGraph: options.useGraph ?? true,
+        mode: options.mode,
+        graphWeights: options.graphWeights,
       });
+      const latencyMs = performance.now() - started;
       const retrievedIds = results.map((m) => m.id);
       const confidences = results.map((m) => m.confidence);
 
@@ -243,6 +304,7 @@ export class BenchmarkRunner {
 
       const result: QueryResult = {
         queryId: query.id,
+        kind: query.kind,
         query: query.query,
         category: query.category,
         retrievedIds,
@@ -256,6 +318,8 @@ export class BenchmarkRunner {
         topConfidence: confidences[0] ?? 0,
         firstRelevantConfidence,
         passed: false, // Set by threshold check
+        latencyMs,
+        graphResults: results.filter((r) => r.graphDistance != null).length,
       };
 
       result.passed = this.meetsThreshold(result);

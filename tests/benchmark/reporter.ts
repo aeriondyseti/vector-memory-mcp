@@ -55,6 +55,7 @@ export const defaultThresholds: ThresholdConfig = {
     negative: {}, // Informational only
     edge_case: { minMRR: 0.3 },
     multi_hop: {}, // Informational: graph-aware search comparison
+    bespoke: {}, // Informational: hand-written questions
   },
 };
 
