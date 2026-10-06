@@ -35,6 +35,7 @@ import {
   findWaypointContext,
   loadQuestion,
   parseWaypointDraft,
+  RECALLED_CONTEXT_NOTE,
   resultText,
   waypointArgs,
 } from "./checkpoint.ts";
@@ -98,7 +99,7 @@ async function loadCheckpoint($: EngineInterface, server: string): Promise<Sessi
 
   return {
     role: "user",
-    text: `## Session Waypoint (checkpoint saved automatically before compaction)\n\n${text}`,
+    text: `## Session Waypoint (checkpoint saved automatically before compaction)\n\n${RECALLED_CONTEXT_NOTE}\n\n${text}`,
     toolUses: [],
   };
 }
