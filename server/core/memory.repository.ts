@@ -401,9 +401,35 @@ export class MemoryRepository {
       sql: `SELECT v.id, v.vector FROM memories_vec v JOIN memories m ON v.id = m.id
             WHERE ${project === null ? "m.project IS NULL" : "m.project = ?"}
               AND m.superseded_by IS NULL AND m.archived = 0
-              AND json_extract(m.metadata, '$.type') IS NOT 'waypoint'`,
+              AND json_extract(m.metadata, '$.type') IS NOT 'waypoint'
+              AND json_extract(m.metadata, '$.status') IS NOT 'resolved'`,
       params: project === null ? [] : [project],
     }).map((r) => ({ id: r.id, similarity: 1 - r.distance }));
+  }
+
+  /**
+   * Mark every live memory of `project` carrying superseding `key` — other
+   * than `newId` — as superseded by `newId`. Returns the ids replaced.
+   */
+  supersedeByKey(project: string | null, key: string, newId: string): string[] {
+    const projectCondition = project === null ? "project IS NULL" : "project = ?";
+    const params = project === null ? [key, newId] : [project, key, newId];
+    const ids = (
+      this.db
+        .prepare(
+          `SELECT id FROM memories
+           WHERE ${projectCondition} AND json_extract(metadata, '$.key') = ?
+             AND superseded_by IS NULL AND id != ?`,
+        )
+        .all(...params) as Array<{ id: string }>
+    ).map((r) => r.id);
+
+    const stmt = this.db.prepare(
+      "UPDATE memories SET superseded_by = ?, updated_at = ? WHERE id = ?",
+    );
+    const now = Date.now();
+    for (const id of ids) stmt.run(newId, now, id);
+    return ids;
   }
 
   /**
@@ -411,17 +437,18 @@ export class MemoryRepository {
    * vector table (Feature 14). Brute-force O(n²) — acceptable for a personal
    * store (<10K rows); larger stores should sample or use ANN. Returns groups
    * of ≥2 memory ids whose vectors exceed `threshold`, keeping the newest as
-   * the suggested survivor.
+   * the suggested survivor. Live memories only: superseded versions are
+   * history, not duplicates.
    */
   findDuplicateClusters(threshold: number): Array<{ keepId: string; duplicateIds: string[] }> {
     const rows = this.db
       .prepare(
         `SELECT v.id AS id, v.vector AS vector, m.created_at AS created_at
          FROM memories_vec v JOIN memories m ON v.id = m.id
-         WHERE m.superseded_by IS NOT ? AND m.archived = 0
+         WHERE m.superseded_by IS NULL AND m.archived = 0
            AND json_extract(m.metadata, '$.type') IS NOT 'waypoint'`,
       )
-      .all(DELETED_TOMBSTONE) as Array<{
+      .all() as Array<{
       id: string;
       vector: Buffer;
       created_at: number;

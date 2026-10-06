@@ -7,10 +7,16 @@ import type {
   HybridRow,
   MemoryAttributes,
   MemoryImportance,
+  MemoryStatus,
 } from "./memory";
 import {
   isDeleted,
   isProtected,
+  isResolved,
+  isSuperseded,
+  memoryKey,
+  memoryStatus,
+  withLifecycleDefaults,
   computeConfidence,
   computeQualityScore,
   CONFIDENCE_RANK,
@@ -120,7 +126,7 @@ export type DuplicatePlan = {
 
 /** What a checked write did: stored (maybe flagged), or skipped as a duplicate. */
 export type StoreOutcome =
-  | { status: "stored"; memory: Memory; possibleDuplicateOf: string[] }
+  | { status: "stored"; memory: Memory; possibleDuplicateOf: string[]; superseded: string[] }
   | { status: "duplicate"; existing: Memory; similarity: number };
 
 export class MemoryService {
@@ -160,7 +166,7 @@ export class MemoryService {
     attributes?: MemoryAttributes
   ): Promise<Memory> {
     const embedding = await this.embeddings.embed(embeddingText ?? content);
-    return this.insertNew(content, metadata, embedding, project, attributes);
+    return (await this.insertNew(content, metadata, embedding, project, attributes)).memory;
   }
 
   /**
@@ -170,20 +176,24 @@ export class MemoryService {
    * and the existing memory comes back, so the caller can update it instead.
    * Several: ambiguous — stored, with `metadata.possible_duplicate_of`
    * naming them for review (find_duplicates), never merged on a guess.
+   * `checkDuplicates: false` skips the check (store_memories' allow_duplicates).
    */
   async storeUnlessDuplicate(
     content: string,
     metadata: Record<string, unknown> = {},
     embeddingText?: string,
     project?: string,
-    attributes?: MemoryAttributes
+    attributes?: MemoryAttributes,
+    { checkDuplicates = true }: { checkDuplicates?: boolean } = {}
   ): Promise<StoreOutcome> {
     const embedding = await this.embeddings.embed(embeddingText ?? content);
     const targetProject = project !== undefined ? normalizeProject(project) : this.project;
 
-    const nearest = this.repository
-      .findNearestLive(embedding, targetProject, WRITE_DUPLICATE_CANDIDATES)
-      .filter((n) => n.similarity >= WRITE_DUPLICATE_SIMILARITY);
+    const nearest = !checkDuplicates
+      ? []
+      : this.repository
+          .findNearestLive(embedding, targetProject, WRITE_DUPLICATE_CANDIDATES)
+          .filter((n) => n.similarity >= WRITE_DUPLICATE_SIMILARITY);
     const candidates = await this.repository.findByIds(nearest.map((n) => n.id));
     const similarityOf = new Map(nearest.map((n) => [n.id, n.similarity]));
     const duplicates = candidates
@@ -196,7 +206,7 @@ export class MemoryService {
     }
 
     const possibleDuplicateOf = duplicates.map((m) => m.id);
-    const memory = await this.insertNew(
+    const { memory, superseded } = await this.insertNew(
       content,
       possibleDuplicateOf.length > 0
         ? { ...metadata, possible_duplicate_of: possibleDuplicateOf }
@@ -205,16 +215,21 @@ export class MemoryService {
       project,
       attributes,
     );
-    return { status: "stored", memory, possibleDuplicateOf };
+    return { status: "stored", memory, possibleDuplicateOf, superseded };
   }
 
+  /**
+   * Insert a new memory under its kind's lifecycle (withLifecycleDefaults):
+   * a superseding `key` replaces the live memory with that key in the same
+   * project, whose ids come back as `superseded`.
+   */
   private async insertNew(
     content: string,
     metadata: Record<string, unknown>,
     embedding: number[],
     project?: string,
     attributes?: MemoryAttributes
-  ): Promise<Memory> {
+  ): Promise<{ memory: Memory; superseded: string[] }> {
     const id = randomUUID();
     const now = new Date();
 
@@ -222,7 +237,7 @@ export class MemoryService {
       id,
       content,
       embedding,
-      metadata,
+      metadata: withLifecycleDefaults(metadata),
       createdAt: now,
       updatedAt: now,
       supersededBy: null,
@@ -242,7 +257,9 @@ export class MemoryService {
     memory.qualityScore = computeQualityScore(memory, now);
 
     await this.repository.insert(memory);
-    return memory;
+    const key = memoryKey(memory.metadata);
+    const superseded = key === null ? [] : this.repository.supersedeByKey(memory.project, key, id);
+    return { memory, superseded };
   }
 
   async get(id: string): Promise<Memory | null> {
@@ -282,6 +299,8 @@ export class MemoryService {
       embeddingText?: string;
       metadata?: Record<string, unknown>;
       attributes?: MemoryAttributes;
+      /** Open or resolve the memory (merged into its metadata). */
+      status?: MemoryStatus;
     }
   ): Promise<Memory | null> {
     const existing = await this.repository.findById(id);
@@ -290,7 +309,12 @@ export class MemoryService {
     }
 
     const newContent = updates.content ?? existing.content;
-    const newMetadata = updates.metadata ?? existing.metadata;
+    let newMetadata = withLifecycleDefaults(updates.metadata ?? existing.metadata);
+    if (updates.status !== undefined) {
+      newMetadata = { ...newMetadata, status: updates.status };
+      if (updates.status === "resolved") newMetadata.resolved_at = new Date().toISOString();
+      else delete newMetadata.resolved_at;
+    }
 
     // Regenerate embedding if content or embeddingText changed
     let newEmbedding = existing.embedding;
@@ -325,6 +349,12 @@ export class MemoryService {
     };
 
     await this.repository.upsert(updatedMemory);
+
+    // A live memory given a new superseding key replaces the holder of that key.
+    const key = memoryKey(newMetadata);
+    if (key !== null && key !== memoryKey(existing.metadata) && existing.supersededBy === null) {
+      this.repository.supersedeByKey(updatedMemory.project, key, id);
+    }
     return updatedMemory;
   }
 
@@ -455,6 +485,8 @@ export class MemoryService {
             .then((candidates) =>
               candidates
                 .filter((m) => includeDeleted || !isDeleted(m))
+                .filter((m) => includeDeleted || options?.includeSuperseded || !isSuperseded(m))
+                .filter((m) => options?.includeResolved || !isResolved(m))
                 .filter((m) => matchesAttributeFilters(m, options))
                 .map((candidate) => ({
                   id: candidate.id,
@@ -969,6 +1001,8 @@ export class MemoryService {
             ? "different project"
             : isProtected(m)
               ? "pinned or critical"
+              : memoryStatus(m.metadata) !== memoryStatus(keep.metadata)
+                ? "different status"
               : (similarity.get(m.id) ?? 0) < threshold
                 ? "similar only through other members"
                 : tokenJaccard(m.content, keep.content) < WRITE_DUPLICATE_JACCARD
@@ -1023,9 +1057,12 @@ export class MemoryService {
           ? normalizeProject(opts.project)
           : (this.project ?? undefined);
 
-    const rows = this.repository
-      .queryMemories({ project })
-      .filter((m) => isProtected(m));
+    const live = this.repository.queryMemories({ project }).filter((m) => !isSuperseded(m));
+    const rows = live.filter((m) => isProtected(m));
+    // Open items (tasks, next steps, blockers) follow, newest first.
+    const open = live
+      .filter((m) => !isProtected(m) && memoryStatus(m.metadata) === "open")
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
     rows.sort((a, b) => {
       const ra = a.importance ? IMPORTANCE_RANK[a.importance] : 1;
@@ -1040,8 +1077,12 @@ export class MemoryService {
     const parts: string[] = [];
     let used = 0;
     let truncated = false;
-    for (const m of rows) {
-      const label = m.importance === "critical" ? "critical" : "pinned";
+    for (const m of [...rows, ...open]) {
+      const label = isProtected(m)
+        ? m.importance === "critical"
+          ? "critical"
+          : "pinned"
+        : `open ${(m.metadata.type as string | undefined) ?? "item"}`;
       const block = `- [${label}] ${m.content}`;
       if (used + block.length + 1 > maxChars && included.length > 0) {
         truncated = true;

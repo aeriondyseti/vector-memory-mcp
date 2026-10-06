@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Write-time duplicate check**: `store_memories` (and `proactive_context`'s auto-ingest) no longer stores a near-exact repeat of a live memory in the same project — both cosine ≥ 0.95 and word-overlap (Jaccard) ≥ 0.85 must agree. With exactly one match the write is skipped and the response names the existing memory (update it with `update_memories`); with several, the memory is stored and flagged in `metadata.possible_duplicate_of` for review rather than merged on a guess. `allow_duplicates: true` opts out. Archived, deleted, superseded and waypoint memories are never matched.
+- **Per-kind update rules (memory lifecycles)**: memories now update according to what they are.
+  - *Cumulative* (default): every entry is kept.
+  - *Superseding*: a memory given a `key` (e.g. `current-goal`, `preferred-editor`) replaces the live memory with the same key in the same project; the old one stays as history (`superseded_by`) and leaves default search (`include_superseded: true` shows it, labelled `[SUPERSEDED by …]`). `store_memories` reports what it replaced; `update_memories` can assign a key.
+  - *Open until resolved*: `task`, `next-step` and `blocker` memories start `status: open`; `update_memories` with `status: "resolved"` (stamped `resolved_at`) drops them from default search and proactive context (`include_resolved: true` shows them). `get_session_context` lists open items after pinned ones.
+  - Duplicate handling respects lifecycles: resolved memories are not write-time duplicate candidates, superseded versions are never clustered, and an open and a resolved copy are left for review (`different status`).
 
 ### Changed
 - **`cleanup_duplicates` and `consolidate_memories` merge only clear duplicates**: a cluster member is merged into the survivor only when it is in the same project, matches the survivor directly (not merely through a chain of similar members) in both embedding (cosine ≥ 0.95, now the default for both) and wording (Jaccard ≥ 0.85), and is not pinned or critical. Everything else is left in place and reported for review with its reason. `cleanup_duplicates` gains `dry_run: true`; consolidation reports `duplicatesForReview`. `find_duplicates` is unchanged: read-only, listing all candidates from 0.92.

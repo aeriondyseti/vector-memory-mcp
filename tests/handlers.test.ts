@@ -70,6 +70,8 @@ describe("handleSearchMemories", () => {
       before: undefined,
       includeArchived: false,
       includeExpired: false,
+      includeSuperseded: false,
+      includeResolved: false,
       tagMatch: "any",
       mode: "semantic",
     });
@@ -105,6 +107,8 @@ describe("handleSearchMemories", () => {
       before: undefined,
       includeArchived: false,
       includeExpired: false,
+      includeSuperseded: false,
+      includeResolved: false,
       tagMatch: "any",
       mode: "semantic",
     });

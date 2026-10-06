@@ -137,6 +137,10 @@ export interface SearchOptions {
   before?: Date;
   /** Include archived memories in results (default false). */
   includeArchived?: boolean;
+  /** Include memories replaced by a newer one with the same key (default false). */
+  includeSuperseded?: boolean;
+  /** Include open-until-resolved memories already resolved (default false). */
+  includeResolved?: boolean;
   /** Include expired (TTL-passed) memories in results (default false). */
   includeExpired?: boolean;
   /** Minimum confidence level to include (memories below this rank are dropped). */
