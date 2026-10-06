@@ -649,6 +649,8 @@ export class MemoryRepository {
       mode?: "semantic" | "exact" | "hybrid";
       /** Fuse in the graph lane (default true; never in "exact" mode). */
       useGraph?: boolean;
+      /** Graph lane weights (tuning and benchmarks); default GRAPH_WEIGHT / GRAPH_NEIGHBOR_WEIGHT. */
+      graphWeights?: { named?: number; neighbor?: number };
     },
   ): Promise<HybridRow[]> {
     const candidateLimit = limit * 5;
@@ -714,19 +716,21 @@ export class MemoryRepository {
       // linked to an entity the query names, and neighbours of the top text
       // matches. Seeds take no neighbour boost — linked top matches boosting
       // each other rewards centrality, not relevance (see BENCHMARKS.md).
+      const namedWeight = filters?.graphWeights?.named ?? GRAPH_WEIGHT;
+      const neighborWeight = filters?.graphWeights?.neighbor ?? GRAPH_NEIGHBOR_WEIGHT;
       const lanes: Array<{ hits: GraphHit[]; weight: number }> = [
         {
           hits: named.length > 0 ? graphRecall(this.db, { memoryIds: [], entityIds: named }, candidateLimit) : [],
-          weight: GRAPH_WEIGHT,
+          weight: namedWeight,
         },
         {
           hits:
-            GRAPH_NEIGHBOR_WEIGHT > 0
+            neighborWeight > 0
               ? graphRecall(this.db, { memoryIds: seedIds, entityIds: [] }, candidateLimit).filter(
                   (h) => !seedSet.has(h.id),
                 )
               : [],
-          weight: GRAPH_NEIGHBOR_WEIGHT,
+          weight: neighborWeight,
         },
       ];
       const reached = lanes.flatMap((l) => l.hits.map((h) => h.id));

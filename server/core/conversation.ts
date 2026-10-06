@@ -145,6 +145,8 @@ export interface SearchOptions {
   includeResolved?: boolean;
   /** Rank in memories linked through the knowledge graph (default true). */
   useGraph?: boolean;
+  /** Graph lane weights — a tuning knob for benchmarks, not exposed by the MCP tools. */
+  graphWeights?: { named?: number; neighbor?: number };
   /** Include expired (TTL-passed) memories in results (default false). */
   includeExpired?: boolean;
   /** Minimum confidence level to include (memories below this rank are dropped). */

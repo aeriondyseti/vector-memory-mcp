@@ -456,6 +456,7 @@ export class MemoryService {
       now: now.getTime(),
       mode,
       useGraph: options?.useGraph ?? true,
+      graphWeights: options?.graphWeights,
     };
 
     // Merge top-level date filters into history filters so after/before
