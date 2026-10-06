@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "claude-code/testing";
 import type { SessionMessage } from "claude-code";
-import { parseWaypointDraft } from "./compaction-checkpoint.ts";
+import { parseWaypointDraft } from "./checkpoint.ts";
 
 const SERVER = "plugin:vector-memory:vector-memory";
 

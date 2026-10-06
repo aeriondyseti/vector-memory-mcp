@@ -109,13 +109,23 @@ You: "Save context for next session"
 Assistant: [calls set_waypoint with summary, completed items, next steps]
 ```
 
-**Automatic compaction checkpoints** (plugin, on Claude Code builds with the
-mod system): whenever the conversation compacts — `/compact` or auto-compaction —
-the plugin first drafts a waypoint from the session (a prompt-cached fork of the
-conversation) and saves it, then appends that waypoint to the compacted
-conversation so work resumes with it in context. If drafting or saving fails,
-compaction proceeds unchanged. Older Claude Code builds ignore the mod and keep
-the classic hooks.
+**Automatic checkpoints** (plugin, on Claude Code builds with the mod system).
+The plugin drafts a waypoint from the session (a prompt-cached fork of the
+conversation) and saves it at the moments context would otherwise be lost:
+
+- **Compaction** (`/compact` or auto-compaction): saved first, then appended to
+  the compacted conversation so work resumes with it in context. Text after
+  `/compact` also steers the waypoint.
+- **`/clear` and `/exit`** (and `/new`, `/reset`, `/quit`): you're asked first:
+  *Save waypoint*, *Skip*, or *Cancel* (Esc also cancels). Anything typed under
+  *Other* is used as guidance for the waypoint ("focus on the migration plan").
+  The fresh waypoint is loaded by the next session's start hook. Set
+  `exitCheckpoint` in `/config` to `always` (save without asking) or `never`.
+
+If drafting or saving fails, compaction proceeds unchanged and `/clear` asks
+whether to continue anyway. Exits that bypass the command (ctrl+c, ctrl+d) are
+not checkpointed. Older Claude Code builds ignore the mod and keep the classic
+hooks.
 
 **Conversation history** (requires `--enable-history`):
 ```
