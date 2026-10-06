@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Automatic compaction checkpoints** (Claude Code mod): a `session.compact` function hook (`plugin/hooks/mods/compaction-checkpoint.ts`, registered under `modules` in `hooks.json`) saves a model-drafted waypoint via `set_waypoint` before every main-conversation compaction and appends it (`get_waypoint`) to the compacted conversation. Falls back to a plain compaction on any failure; skips `precompute` and subagent compactions. Tests run with `claude plugin test plugin`.
+
 ### Changed
 - **Plugin root is `plugin/`**: the marketplace entry's source is now `./plugin` and the manifest lives at `plugin/.claude-plugin/plugin.json`, so installs copy only the plugin, not the whole repo.
 - **hook-kit is a real dependency, no longer vendored**: hooks import `@aeriondyseti/hook-kit` from `plugin/package.json` + `plugin/bun.lock`, which Claude Code installs automatically into each cached plugin version. Removed the committed bundle, `scripts/vendor-hook-kit.ts`, the `vendor:hooks` scripts, and the CI drift guard.

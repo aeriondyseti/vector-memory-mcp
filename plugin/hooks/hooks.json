@@ -1,5 +1,6 @@
 {
-  "description": "Vector memory lifecycle hooks: session context loading and context monitoring",
+  "description": "Vector memory lifecycle hooks: session context loading, context monitoring, and compaction checkpoints",
+  "modules": ["./mods/compaction-checkpoint.ts"],
   "hooks": {
     "SessionStart": [
       {

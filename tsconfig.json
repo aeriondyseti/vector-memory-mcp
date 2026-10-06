@@ -13,5 +13,5 @@
     "noEmit": true
   },
   "include": ["server/**/*", "scripts/**/*", "plugin/**/*"],
-  "exclude": ["node_modules", "dist", "scripts/vector-benchmark.ts", "scripts/lancedb-extract.ts"]
+  "exclude": ["node_modules", "dist", "plugin/hooks/mods", "scripts/vector-benchmark.ts", "scripts/lancedb-extract.ts"]
 }

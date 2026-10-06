@@ -109,6 +109,14 @@ You: "Save context for next session"
 Assistant: [calls set_waypoint with summary, completed items, next steps]
 ```
 
+**Automatic compaction checkpoints** (plugin, on Claude Code builds with the
+mod system): whenever the conversation compacts — `/compact` or auto-compaction —
+the plugin first drafts a waypoint from the session (a prompt-cached fork of the
+conversation) and saves it, then appends that waypoint to the compacted
+conversation so work resumes with it in context. If drafting or saving fails,
+compaction proceeds unchanged. Older Claude Code builds ignore the mod and keep
+the classic hooks.
+
 **Conversation history** (requires `--enable-history`):
 ```
 You: "What did we discuss about the API design last week?"
