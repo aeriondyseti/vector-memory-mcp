@@ -151,6 +151,11 @@ export interface SearchOptions {
   rerank?: boolean;
   /** Only memories with this status (task, next-step and blocker memories, or any given one). */
   status?: import("./memory").MemoryStatus;
+  /**
+   * The period the search is about ("last week", "March", "2023-05-01..2023-05-31"):
+   * memories from it are ranked up, not filtered. Default: a period named in the query.
+   */
+  during?: string;
   /** Rank in memories linked through the knowledge graph (opt-in, default false). */
   useGraph?: boolean;
   /** Graph lane weights — a tuning knob for benchmarks, not exposed by the MCP tools. */

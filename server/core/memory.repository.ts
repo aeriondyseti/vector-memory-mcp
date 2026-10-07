@@ -14,6 +14,7 @@ import {
   RRF_K,
 } from "./sqlite-utils";
 import { entitiesNamedIn, type GraphHit, graphRecall } from "./graph-recall";
+import type { TimeRange } from "./time-range";
 
 /** Top text matches the graph lane starts from. */
 const GRAPH_SEEDS = 5;
@@ -39,6 +40,10 @@ export const GRAPH_NEIGHBOR_WEIGHT = 0;
  * on hand-written questions and overall.
  */
 export const FTS_CONTEXT_WEIGHT = 4;
+/** Fusion weight, against 1 for vector and keyword, of memories from the search's time range. */
+export const TEMPORAL_WEIGHT = process.env.BENCH_TEMPORAL_WEIGHT ? Number(process.env.BENCH_TEMPORAL_WEIGHT) : 1; // TEMP benchmark switch — do not commit
+/** The temporal lane runs only when its range holds at most this share of the searched memories. */
+export const TEMPORAL_MAX_SHARE = 0.5;
 import {
   type Memory,
   type HybridRow,
@@ -687,6 +692,8 @@ export class MemoryRepository {
       mode?: "semantic" | "exact" | "hybrid";
       /** Fuse in the graph lane (opt-in, default off; never in "exact" mode). */
       useGraph?: boolean;
+      /** The period the search is about: memories from it get the temporal lane's vote. */
+      timeRange?: TimeRange | null;
       /** Graph lane weights (tuning and benchmarks); default GRAPH_WEIGHT / GRAPH_NEIGHBOR_WEIGHT. */
       graphWeights?: { named?: number; neighbor?: number };
     },
@@ -739,6 +746,51 @@ export class MemoryRepository {
     const signalsMap = hybridRRFWithSignals(vectorResults, ftsResults, similarity);
     const rrfScores = new Map<string, number>();
     for (const [id, s] of signalsMap) rrfScores.set(id, s.rrfScore);
+
+    // Temporal lane: memories from the time range the search is about,
+    // ranked by similarity, join the fusion — a focus, not a filter. Only
+    // when the range picks out a minority of the store: a range covering
+    // most of it would just repeat the vector lane.
+    const range = filters?.timeRange;
+    if (range && filters?.mode !== "exact" && TEMPORAL_WEIGHT > 0) {
+      const projectClause = project !== undefined ? " AND m.project = ?" : "";
+      const params = project !== undefined ? [project] : [];
+      const total = (
+        this.db.prepare(`SELECT COUNT(*) AS n FROM memories m WHERE 1 = 1${projectClause}`).get(...params) as { n: number }
+      ).n;
+      const inRange = this.db
+        .prepare(
+          `SELECT v.id, v.vector FROM memories m JOIN memories_vec v ON v.id = m.id
+           WHERE m.created_at >= ? AND m.created_at < ?${projectClause}`,
+        )
+        .all(range.start.getTime(), range.end.getTime(), ...params) as Array<{ id: string; vector: Buffer }>;
+      if (inRange.length > 0 && inRange.length <= total * TEMPORAL_MAX_SHARE) {
+        const qv = new Float32Array(embedding);
+        const ranked = inRange
+          .map((r) => ({
+            id: r.id,
+            sim: cosineSimilarity(qv, new Float32Array(r.vector.buffer, r.vector.byteOffset, r.vector.byteLength / 4)),
+          }))
+          .sort((a, b) => b.sim - a.sim)
+          .slice(0, candidateLimit);
+        ranked.forEach(({ id, sim }, i) => {
+          const vote = TEMPORAL_WEIGHT / (RRF_K + i + 1);
+          const existing = signalsMap.get(id);
+          if (existing) existing.rrfScore += vote;
+          else {
+            signalsMap.set(id, {
+              rrfScore: vote,
+              cosineSimilarity: sim,
+              ftsMatch: false,
+              knnRank: null,
+              ftsRank: null,
+              similarity,
+            });
+          }
+          rrfScores.set(id, signalsMap.get(id)!.rrfScore);
+        });
+      }
+    }
 
     // Graph lane: memories linked to the best text matches, or to entities
     // the query names, join the fusion at GRAPH_WEIGHT. Off in "exact" mode.
