@@ -173,3 +173,6 @@ package-lock.json
 # Local reference material (cloned repos for study, not part of the project)
 reference/
 references/
+
+# Claude Code mod types (laid down by the engine when it loads plugin/ as a mod)
+plugin/.claude-plugin/types/

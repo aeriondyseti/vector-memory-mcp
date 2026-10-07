@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Automatic waypoint checkpoints** (Claude Code mod, `plugin/hooks/mods/`, registered under `modules` in `hooks.json`); tests run with `claude plugin test plugin`.
+  - **Compaction**: a `session.compact` hook saves a model-drafted waypoint (`set_waypoint`) before every main-conversation compaction and appends it (`get_waypoint`) to the compacted conversation. `/compact <text>` steers the draft. Falls back to a plain compaction on any failure; skips `precompute` and subagent compactions.
+  - **`/clear` and `/exit`**: a `command.run` hook asks before the command runs — save, skip, or cancel — and free text typed under "Other" becomes guidance for the waypoint (recorded as `metadata.user_notes`). On a failed save it asks whether to continue. New `exitCheckpoint` option (`ask` | `always` | `never`, default `ask`).
+  - **Session start and after `/clear`**: a `classic.SessionStart` hook wraps the existing waypoint loader and asks whether to load the waypoint it found (with its age and branch); "Start fresh" drops it from the session's context. A waypoint just saved at `/clear` loads unasked; runs with nobody to ask (`-p`, SDK) load as before. New `loadCheckpoint` option (`ask` | `always` | `never`, default `ask`).
 - **Write-time duplicate check**: `store_memories` (and `proactive_context`'s auto-ingest) no longer stores a near-exact repeat of a live memory in the same project — both cosine ≥ 0.95 and word-overlap (Jaccard) ≥ 0.85 must agree. With exactly one match the write is skipped and the response names the existing memory (update it with `update_memories`); with several, the memory is stored and flagged in `metadata.possible_duplicate_of` for review rather than merged on a guess. `allow_duplicates: true` opts out. Archived, deleted, superseded and waypoint memories are never matched.
 - **Per-kind update rules (memory lifecycles)**: memories now update according to what they are.
   - *Cumulative* (default): every entry is kept.
@@ -19,8 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **`cleanup_duplicates` and `consolidate_memories` merge only clear duplicates**: a cluster member is merged into the survivor only when it is in the same project, matches the survivor directly (not merely through a chain of similar members) in both embedding (cosine ≥ 0.95, now the default for both) and wording (Jaccard ≥ 0.85), and is not pinned or critical. Everything else is left in place and reported for review with its reason. `cleanup_duplicates` gains `dry_run: true`; consolidation reports `duplicatesForReview`. `find_duplicates` is unchanged: read-only, listing all candidates from 0.92.
-
-### Changed
 - **Plugin root is `plugin/`**: the marketplace entry's source is now `./plugin` and the manifest lives at `plugin/.claude-plugin/plugin.json`, so installs copy only the plugin, not the whole repo.
 - **hook-kit is a real dependency, no longer vendored**: hooks import `@aeriondyseti/hook-kit` from `plugin/package.json` + `plugin/bun.lock`, which Claude Code installs automatically into each cached plugin version. Removed the committed bundle, `scripts/vendor-hook-kit.ts`, the `vendor:hooks` scripts, and the CI drift guard.
 
