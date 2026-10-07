@@ -10,7 +10,7 @@ import {
   buildFtsQuery,
   hybridRRFWithSignals,
   topByRRF,
-  knnSearch,
+  knnSearchWithStats,
 } from "./sqlite-utils";
 
 export class ConversationRepository {
@@ -278,7 +278,7 @@ export class ConversationRepository {
 
     // Vector KNN search (brute-force cosine similarity in JS), pre-filtered
     // by project when scoped
-    const vecResults = knnSearch(
+    const { results: vecResults, stats: similarity } = knnSearchWithStats(
       this.db,
       "conversation_history_vec",
       embedding,
@@ -319,7 +319,7 @@ export class ConversationRepository {
     ) as Array<{ id: string }>;
 
     // Compute RRF scores with search signals for confidence scoring
-    const signalsMap = hybridRRFWithSignals(vecResults, ftsResults);
+    const signalsMap = hybridRRFWithSignals(vecResults, ftsResults, similarity);
     const rrfScores = new Map<string, number>();
     for (const [id, s] of signalsMap) rrfScores.set(id, s.rrfScore);
     const topIds = topByRRF(rrfScores, limit);
@@ -392,6 +392,7 @@ export class ConversationRepository {
             ftsMatch: signals.ftsMatch,
             knnRank: signals.knnRank,
             ftsRank: signals.ftsRank,
+            similarity: signals.similarity ?? null,
           },
         };
       })

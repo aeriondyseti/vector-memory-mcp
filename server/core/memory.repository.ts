@@ -7,6 +7,7 @@ import {
   hybridRRFWithSignals,
   topByRRF,
   knnSearch,
+  knnSearchWithStats,
   cosineSimilarity,
   batchedQuery,
   SQLITE_BATCH_SIZE,
@@ -667,10 +668,10 @@ export class MemoryRepository {
 
     // Vector KNN search (brute-force cosine similarity in JS), pre-filtered
     // by project when scoped. Skipped entirely in "exact" mode (FTS-only).
-    const vectorResults =
+    const { results: vectorResults, stats: similarity } =
       filters?.mode === "exact"
-        ? []
-        : knnSearch(
+        ? { results: [], stats: null }
+        : knnSearchWithStats(
             this.db,
             "memories_vec",
             embedding,
@@ -707,7 +708,7 @@ export class MemoryRepository {
       : [];
 
     // Compute RRF scores with search signals for confidence scoring
-    const signalsMap = hybridRRFWithSignals(vectorResults, ftsResults);
+    const signalsMap = hybridRRFWithSignals(vectorResults, ftsResults, similarity);
     const rrfScores = new Map<string, number>();
     for (const [id, s] of signalsMap) rrfScores.set(id, s.rrfScore);
 
@@ -769,6 +770,7 @@ export class MemoryRepository {
               knnRank: null,
               ftsRank: null,
               graphDistance: hit.distance,
+              similarity,
             });
           }
           rrfScores.set(hit.id, signalsMap.get(hit.id)!.rrfScore);
@@ -834,6 +836,7 @@ export class MemoryRepository {
           knnRank: signals.knnRank,
           ftsRank: signals.ftsRank,
           graphDistance: signals.graphDistance ?? null,
+          similarity: signals.similarity ?? null,
         },
       });
     }

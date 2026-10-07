@@ -794,7 +794,11 @@ export const proactiveContextTool: Tool = {
     properties: {
       context: { type: "string", description: "The current message / task description." },
       max_results: { type: "integer", description: "Max memories to surface (default 5)." },
-      threshold: { type: "number", description: "Minimum confidence 0–1 (default 0.65)." },
+      threshold: {
+        type: "number",
+        description:
+          "Minimum confidence 0–1 (default 0.5). Confidence estimates how likely a memory is relevant: raise it to surface fewer, surer memories.",
+      },
       auto_ingest: {
         type: "boolean",
         description: "Also store the context string as an observation memory (default false).",
