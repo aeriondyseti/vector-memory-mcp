@@ -448,7 +448,7 @@ export class MemoryService {
     scored: Array<{ candidate: HybridRow; score: number }>,
     depth: number,
     rescore: (candidate: HybridRow, relevance: number) => number,
-  ): Promise<Array<{ candidate: HybridRow; score: number }>> {
+  ): Promise<Array<{ candidate: HybridRow; score: number; rerankScore?: number }>> {
     const sorted = [...scored].sort((a, b) => b.score - a.score);
     const head = sorted.slice(0, depth);
     if (head.length === 0) return sorted;
@@ -468,6 +468,7 @@ export class MemoryService {
     const reranked = head.map(({ candidate }, i) => ({
       candidate,
       score: rescore(candidate, RERANK_BLEND * ce[i]! + (1 - RERANK_BLEND) * fused[i]!),
+      rerankScore: logits[i]!,
     }));
     const floor = Math.min(...reranked.map((r) => r.score));
     const below = sorted.slice(depth).map(({ candidate, score }, i) => ({
@@ -606,12 +607,13 @@ export class MemoryService {
                 candidate,
                 score: this.computeMemoryScore(candidate, profile, now, mode, relevanceOf[i]!) * boost(candidate.project),
               }));
-              const scored = rerank
+              const scored: Array<{ candidate: HybridRow; score: number; rerankScore?: number }> = rerank
                 ? await this.rerankCandidates(query, kept, Math.max(RERANK_DEPTH, effectiveLimit), (c, relevance) =>
                     this.computeMemoryScore(c, profile, now, mode, relevance) * boost(c.project),
                   )
                 : kept;
-              return scored.map(({ candidate, score }) => ({
+              return scored.map(({ candidate, score, rerankScore }) => ({
+                  rerankScore,
                   id: candidate.id,
                   content: candidate.content,
                   metadata: candidate.metadata,
