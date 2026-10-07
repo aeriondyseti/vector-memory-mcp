@@ -1,7 +1,7 @@
 {
   "$schema": "../../.claude-plugin/schemas/plugin.schema.json",
   "name": "vector-memory",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "RAG-powered session memory with waypoints for Claude Code",
   "author": {
     "name": "AerionDyseti",
