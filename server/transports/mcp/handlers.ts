@@ -8,6 +8,7 @@ import type { ConversationHistoryService } from "../../core/conversation.service
 import type {
   SearchIntent,
   MemoryAttributes,
+  MemoryStatus,
   MemoryConfidence,
   MemoryImportance,
 } from "../../core/memory";
@@ -451,6 +452,13 @@ export async function handleSearchMemories(
     }
   }
 
+  let status: MemoryStatus | undefined;
+  try {
+    status = coerceStatus(args?.status);
+  } catch (e) {
+    return errorResult(errorText(e));
+  }
+
   const results = await service.search(query, intent, {
     limit,
     scope: asOptionalString(args?.scope),
@@ -466,6 +474,7 @@ export async function handleSearchMemories(
     includeSuperseded: asBool(args?.include_superseded, false),
     includeResolved: asBool(args?.include_resolved, false),
     rerank: asBool(args?.rerank, true),
+    ...(status ? { status } : {}),
     useGraph: asBool(args?.include_graph, false),
     minConfidence: asStringLevel<MemoryConfidence>(args?.min_confidence, MEMORY_CONFIDENCE_LEVELS),
     minImportance: asStringLevel<MemoryImportance>(args?.min_importance, MEMORY_IMPORTANCE_LEVELS),
@@ -557,6 +566,14 @@ function formatSearchResult(r: SearchResult): string {
     result += `\nContext: ${r.context}`;
   }
   result += `\nContent: ${r.content}`;
+  if (r.history?.length) {
+    const day = (d: Date) => d.toISOString().slice(0, 10);
+    result += `\nPreviously (newest first):`;
+    for (const h of r.history) {
+      const text = h.content.length > 200 ? `${h.content.slice(0, 200)}…` : h.content;
+      result += `\n- ${text} (${day(h.createdAt)} – ${day(h.replacedAt)})`;
+    }
+  }
   if (r.metadata && Object.keys(r.metadata).length > 0) {
     result += `\nMetadata: ${JSON.stringify(r.metadata)}`;
   }
@@ -1173,7 +1190,7 @@ export async function handleCleanupDuplicates(
   const lines = [
     dryRun
       ? `Would merge ${r.deleted} duplicate memories in ${r.clusters} clusters (dry run, threshold ${threshold}).`
-      : `Cleaned up ${r.clusters} clusters, removed ${r.deleted} duplicate memories.`,
+      : `Cleaned up ${r.clusters} clusters: merged ${r.deleted} duplicate memories into their survivors (kept as history; search with include_superseded to see them).`,
   ];
   if (dryRun) {
     for (const p of r.plans.filter((p) => p.mergeIds.length > 0)) {

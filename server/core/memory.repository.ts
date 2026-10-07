@@ -451,6 +451,34 @@ export class MemoryRepository {
    * Mark every live memory of `project` carrying superseding `key` — other
    * than `newId` — as superseded by `newId`. Returns the ids replaced.
    */
+  /** Mark `ids` as replaced by `newId` (kept as its history, out of default search). */
+  supersede(ids: string[], newId: string): void {
+    const stmt = this.db.prepare("UPDATE memories SET superseded_by = ?, updated_at = ? WHERE id = ?");
+    const now = Date.now();
+    this.db.transaction(() => {
+      for (const id of ids) if (id !== newId) stmt.run(newId, now, id);
+    })();
+  }
+
+  /** The memories each of `ids` directly replaced (superseded_by = it), newest first. */
+  findSupersededBy(ids: string[]): Map<string, Memory[]> {
+    const rows = batchedQuery(this.db, ids, (batch) =>
+      this.db
+        .prepare(
+          `SELECT * FROM memories WHERE superseded_by IN (${batch.map(() => "?").join(", ")})
+           ORDER BY created_at DESC`,
+        )
+        .all(...batch) as Array<Record<string, unknown>>,
+    );
+    const byReplacement = new Map<string, Memory[]>();
+    for (const row of rows) {
+      const replacement = row.superseded_by as string;
+      if (!byReplacement.has(replacement)) byReplacement.set(replacement, []);
+      byReplacement.get(replacement)!.push(this.rowToMemory(row));
+    }
+    return byReplacement;
+  }
+
   supersedeByKey(project: string | null, key: string, newId: string): string[] {
     const projectCondition = project === null ? "project IS NULL" : "project = ?";
     const params = project === null ? [key, newId] : [project, key, newId];

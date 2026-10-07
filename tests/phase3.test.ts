@@ -257,7 +257,7 @@ describe("Phase 3 — quality, episodes, proactive context, tags, duplicates, co
       expect(clusterIds.has(distinct.id)).toBe(false);
     });
 
-    test("mergeDuplicates soft-deletes the merged-away memories", async () => {
+    test("mergeDuplicates keeps the merged-away memories as the survivor's history", async () => {
       const dupA = await service.store("duplicate content A");
       const dupB = await service.store("duplicate content B");
       setUnitVector(dupA.id, 0);
@@ -267,9 +267,9 @@ describe("Phase 3 — quality, episodes, proactive context, tags, duplicates, co
       expect(merged).not.toBeNull();
 
       const survivor = await repository.findById(dupA.id);
-      const gone = await repository.findById(dupB.id);
+      const merged_away = await repository.findById(dupB.id);
       expect(survivor!.supersededBy).toBeNull();
-      expect(gone!.supersededBy).toBe("DELETED");
+      expect(merged_away!.supersededBy).toBe(dupA.id);
     });
 
     test("cleanupDuplicates auto-merges clusters and reports counts", async () => {
@@ -284,10 +284,11 @@ describe("Phase 3 — quality, episodes, proactive context, tags, duplicates, co
       expect(result.clusters).toBe(1);
       expect(result.deleted).toBe(1);
 
-      const liveIds = repository.queryMemories({}).map((m) => m.id);
-      const goneCount = [dupA.id, dupB.id].filter((id) => !liveIds.includes(id)).length;
-      expect(goneCount).toBe(1);
-      expect(liveIds).toContain(distinct.id);
+      const pair = await repository.findByIds([dupA.id, dupB.id]);
+      const survivor = pair.find((m) => m.supersededBy === null)!;
+      const mergedAway = pair.filter((m) => m.supersededBy === survivor.id);
+      expect(mergedAway.length).toBe(1);
+      expect((await repository.findById(distinct.id))!.supersededBy).toBeNull();
     });
   });
 
@@ -321,9 +322,9 @@ describe("Phase 3 — quality, episodes, proactive context, tags, duplicates, co
 
       const a = await repository.findById(dupA.id);
       const b = await repository.findById(dupB.id);
-      // Exactly one of the pair should have been merged away as a duplicate.
-      const deletedCount = [a, b].filter((m) => m!.supersededBy === "DELETED").length;
-      expect(deletedCount).toBe(1);
+      // Exactly one of the pair should have been merged into the other, kept as its history.
+      const mergedAway = [a, b].filter((m) => m!.supersededBy !== null && m!.supersededBy !== "DELETED");
+      expect(mergedAway.length).toBe(1);
     });
   });
 
