@@ -5,12 +5,12 @@
     "": {
       "name": "vector-memory-plugin",
       "dependencies": {
-        "@aeriondyseti/hook-kit": "^1.1.0",
+        "@aeriondyseti/hook-kit": "^1.2.1",
       },
     },
   },
   "packages": {
-    "@aeriondyseti/hook-kit": ["@aeriondyseti/hook-kit@1.1.0", "", { "dependencies": { "string-width": "^7.2.0" } }, "sha512-OmeDqcPtkAlG+KmZSvlW46v6KlRT/4d84M6zkrmBEKpNJ49pPFxVOV04HvOVsYfpTO79CnAYzCuaKjvDer+jYA=="],
+    "@aeriondyseti/hook-kit": ["@aeriondyseti/hook-kit@1.2.1", "", { "dependencies": { "string-width": "^7.2.0" }, "bin": { "hook-kit": "dist/cli.js" } }, "sha512-BqadJxyD329fc+StDGqu38Daj3NI+Fs0MC87ffdKEDKOldrgIaw9CVAi9aW2Bz1efbZzJhZoA79rdYtgNxuusQ=="],
 
     "ansi-regex": ["ansi-regex@6.4.0", "", {}, "sha512-KzTVk2tCWAHtYrvvvaP8bJKJq2pVinhLcGEQdtLIYPbmNGNyYe8QwNaTUYQp2J7/vIsUKt5QCqAfUkYyG9DkOw=="],
 
