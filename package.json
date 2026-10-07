@@ -1,6 +1,6 @@
 {
   "name": "@aeriondyseti/vector-memory-mcp",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "A zero-configuration RAG memory server for MCP clients",
   "type": "module",
   "main": "server/index.ts",
@@ -40,7 +40,7 @@
     "warmup": "bun run scripts/warmup.ts",
     "postinstall": "bun run scripts/warmup.ts",
     "prepublishOnly": "bunx tsc --noEmit",
-    "version": "bun scripts/sync-version.ts && git add .claude-plugin plugin/.claude-plugin plugin/package.json plugin/bun.lock"
+    "version": "bun scripts/sync-version.ts && git add plugin/.claude-plugin plugin/package.json plugin/bun.lock"
   },
   "keywords": [
     "mcp",

@@ -40,7 +40,7 @@ When pivoting to a different area of work, set the current state first. This pre
 
 ### At Regular Intervals in Long Sessions
 
-Long sessions accumulate context that becomes expensive to reconstruct. Set waypoints periodically to create recovery points. The plugin's context monitor warns at 50% and 75% context usage — treat these as waypoint prompts.
+Long sessions accumulate context that becomes expensive to reconstruct. Set waypoints periodically to create recovery points. If a context monitor is installed (such as the separate `context-monitor` plugin), treat its context-usage warnings as waypoint prompts.
 
 ## When to Load a Waypoint
 
@@ -92,7 +92,7 @@ This two-step process ensures individual insights persist as searchable memories
 - **Skipping next_steps** — the most valuable part for resumption; always include them
 - **Vague summaries** — "worked on stuff" provides no value
 - **Setting without memories** — extract important decisions/insights as individual memories via `mcp__vector-memory__store_memories` first, then reference their IDs in the waypoint
-- **Ignoring context warnings** — when the context monitor warns, take action
+- **Ignoring context warnings** — when a context monitor warns, take action
 
 ## Example Waypoint
 
@@ -134,7 +134,7 @@ The recommended workflow for each work session:
 ```text
 1. Session starts → Load waypoint (/waypoint:get)
 2. Work on tasks
-3. Context monitor warns at 50% → Consider setting a waypoint soon
+3. Context passes half the window → Consider setting a waypoint soon
 4. Complete discrete task → Set waypoint (/waypoint:set)
 5. Clear context (/clear) → Fresh context for next task
 6. Repeat from step 1

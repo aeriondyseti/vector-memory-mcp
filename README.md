@@ -26,17 +26,19 @@ There are two ways to install Vector Memory, depending on how much integration y
 
 ### Option A: Claude Code Plugin (recommended)
 
-Install as a plugin to get the full experience: MCP server, session lifecycle hooks, waypoint skills, and context monitoring — all managed automatically.
+Install as a plugin to get the full experience: MCP server, session lifecycle hooks, automatic waypoint checkpoints, and waypoint skills — all managed automatically.
 
 ```bash
 # Add the marketplace
-claude plugin marketplace add AerionDyseti/vector-memory-mcp
+claude plugin marketplace add AerionDyseti/aeriondyseti-plugins
 
 # Install the plugin
-claude plugin install vector-memory@vector-memory-mcp
+claude plugin install vector-memory@aeriondyseti-plugins
 ```
 
-This clones the repo and runs the MCP server directly from source. Hooks handle session start/clear/compact events, and skills provide `/waypoint:set`, `/waypoint:get`, and memory usage guidance.
+The plugin runs the MCP server from npm (`bunx @aeriondyseti/vector-memory-mcp@latest`). Hooks load your waypoint at session start and after `/clear`, checkpoints save one before compaction, `/clear` and `/exit`, and skills provide `/waypoint:set`, `/waypoint:get`, and memory usage guidance.
+
+> **Installed from the old `vector-memory-mcp` marketplace?** As of 3.1.0 the plugin lives in `aeriondyseti-plugins`. Switch with `claude plugin uninstall vector-memory@vector-memory-mcp`, `claude plugin marketplace remove vector-memory-mcp`, then the two commands above. Your memories are untouched (they live in `~/.vector-memory/`).
 
 ### Option B: MCP Server Only
 

@@ -1,15 +1,18 @@
 #!/usr/bin/env bun
 /**
- * Sync the package version into the plugin manifests and refresh the
- * plugin's hook-kit dependency. Runs as npm's `version` lifecycle hook, so
- * everything it writes is staged into the release commit that `npm version`
- * creates.
+ * Sync the package version into the plugin manifest and refresh the
+ * plugin's hook-kit dependency. Runs as npm's `version` lifecycle hook (pre-
+ * releases), so everything it writes is staged into the commit that
+ * `npm version` creates; before a stable release, run it on its own to
+ * refresh hook-kit, then release with plugin-kit (see CLAUDE.md).
  *
  * Usage:
  *   bun scripts/sync-version.ts              # reads version from package.json
  *   bun scripts/sync-version.ts 3.0.0        # uses explicit version
  *
- * plugin/.mcp.json is not stamped: it always runs `@latest`.
+ * plugin/.mcp.json is not stamped: it always runs `@latest`. The plugin's
+ * marketplace entry lives in aeriondyseti-plugins and is pinned by
+ * `plugin-kit release`.
  */
 
 import { readFileSync, writeFileSync } from "fs";
@@ -20,7 +23,6 @@ const ROOT = join(import.meta.dir, "..");
 const PKG_PATH = join(ROOT, "package.json");
 const PLUGIN_DIR = join(ROOT, "plugin");
 const PLUGIN_PATH = join(PLUGIN_DIR, ".claude-plugin", "plugin.json");
-const MARKETPLACE_PATH = join(ROOT, ".claude-plugin", "marketplace.json");
 
 const explicit = process.argv[2];
 const pkg = JSON.parse(readFileSync(PKG_PATH, "utf-8"));
@@ -32,16 +34,7 @@ const plugin = JSON.parse(readFileSync(PLUGIN_PATH, "utf-8"));
 plugin.version = version;
 writeFileSync(PLUGIN_PATH, JSON.stringify(plugin, null, 2) + "\n");
 
-// ── Stamp marketplace.json ──────────────────────────────────────────
-
-const marketplace = JSON.parse(readFileSync(MARKETPLACE_PATH, "utf-8"));
-marketplace.metadata.version = version;
-for (const p of marketplace.plugins) {
-  p.version = version;
-}
-writeFileSync(MARKETPLACE_PATH, JSON.stringify(marketplace, null, 2) + "\n");
-
-console.error(`Synced version ${version} → plugin.json, marketplace.json`);
+console.error(`Synced version ${version} → plugin.json`);
 
 // ── Refresh hook-kit to the latest in-range (1.x) release ───────────
 //
