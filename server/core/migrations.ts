@@ -5,6 +5,7 @@ import type { EmbeddingsService } from "./embeddings.service";
 import { normalizeProject } from "./project";
 import { serializeVector } from "./sqlite-utils";
 import { ensureGraphSchema } from "./graph.repository";
+import { indexedText } from "./memory";
 
 /**
  * FTS5 tokenizer for keyword search: Porter stemming over unicode61, so
@@ -83,7 +84,8 @@ export function runMigrations(db: Database): void {
       quality_score REAL,
       episode_id    TEXT,
       sequence_number INTEGER,
-      preceding_memory_id TEXT
+      preceding_memory_id TEXT,
+      context       TEXT
     )
   `);
 
@@ -98,6 +100,7 @@ export function runMigrations(db: Database): void {
     CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
       id UNINDEXED,
       content,
+      context,
       tokenize = ${FTS_TOKENIZER}
     )
   `);
@@ -165,7 +168,7 @@ export function runMigrations(db: Database): void {
 }
 
 /** Current schema version. Bump when adding a versioned migration below. */
-const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /**
  * Recreate an FTS5 table with FTS_TOKENIZER and refill it from its source
@@ -265,6 +268,25 @@ function runVersionedMigrations(db: Database): void {
 
       db.exec("PRAGMA user_version = 3");
       version = 3;
+    }
+
+    if (version < 4) {
+      // v4: memory context — a column, and a second indexed column in the
+      // keyword index (rebuilt from the rows; existing memories have none).
+      addColumnIfMissing(db, "context", "context TEXT");
+      const fts = db
+        .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memories_fts'")
+        .get() as { sql: string } | null;
+      if (!fts?.sql.includes("context")) {
+        db.exec("DROP TABLE IF EXISTS memories_fts");
+        db.exec(
+          `CREATE VIRTUAL TABLE memories_fts USING fts5(id UNINDEXED, content, context, tokenize = ${FTS_TOKENIZER})`,
+        );
+        db.exec("INSERT INTO memories_fts (id, content, context) SELECT id, content, context FROM memories");
+      }
+
+      db.exec("PRAGMA user_version = 4");
+      version = 4;
     }
 
     db.exec("COMMIT");
@@ -406,12 +428,12 @@ export async function backfillVectors(
   // ── Memories ──────────────────────────────────────────────────────
   const missingMemories = db
     .prepare(
-      `SELECT m.id, m.content, json_extract(m.metadata, '$.type') AS type
+      `SELECT m.id, m.content, m.context, json_extract(m.metadata, '$.type') AS type
        FROM memories m
        LEFT JOIN memories_vec v ON m.id = v.id
        WHERE v.id IS NULL OR length(v.vector) = 0`,
     )
-    .all() as Array<{ id: string; content: string; type: string | null }>;
+    .all() as Array<{ id: string; content: string; context: string | null; type: string | null }>;
 
   if (missingMemories.length > 0) {
     console.error(
@@ -432,7 +454,7 @@ export async function backfillVectors(
 
     // Batch embed all non-waypoint content
     const vectors = toEmbed.length > 0
-      ? await embeddings.embedBatch(toEmbed.map((r) => r.content))
+      ? await embeddings.embedBatch(toEmbed.map((r) => indexedText(r.content, r.context)))
       : [];
 
     db.exec("BEGIN");

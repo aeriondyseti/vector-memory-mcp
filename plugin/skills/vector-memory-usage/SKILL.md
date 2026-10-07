@@ -105,6 +105,19 @@ When memory content exceeds ~1,000 characters, provide an `embedding_text` field
 }
 ```
 
+### Naming Where a Memory Belongs (context)
+
+When a memory comes from a larger source — a document, a note, a long discussion — give its `context`: a short path from the source to the section. It is searched with the memory (and weighted above its words), so the memory is found by what it belongs to even when its own text doesn't name it:
+
+```json
+{
+  "content": "Refresh tokens rotate on every use; a reused token revokes the whole family.",
+  "context": "Atlas design doc > Auth flow > Refresh tokens"
+}
+```
+
+Use the same names the source uses (document title, section headings, a character's or project's name) so lookups by those names find it.
+
 ### What to Store
 
 Call `mcp__vector-memory__store_memories` with appropriate metadata type tags:

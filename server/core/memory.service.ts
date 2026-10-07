@@ -10,6 +10,8 @@ import type {
   MemoryStatus,
 } from "./memory";
 import {
+  indexedText,
+  normalizeContext,
   isDeleted,
   isProtected,
   isResolved,
@@ -165,7 +167,8 @@ export class MemoryService {
     project?: string,
     attributes?: MemoryAttributes
   ): Promise<Memory> {
-    const embedding = await this.embeddings.embed(embeddingText ?? content);
+    const context = normalizeContext(attributes?.context);
+    const embedding = await this.embeddings.embed(indexedText(embeddingText ?? content, context));
     return (await this.insertNew(content, metadata, embedding, project, attributes)).memory;
   }
 
@@ -186,7 +189,8 @@ export class MemoryService {
     attributes?: MemoryAttributes,
     { checkDuplicates = true }: { checkDuplicates?: boolean } = {}
   ): Promise<StoreOutcome> {
-    const embedding = await this.embeddings.embed(embeddingText ?? content);
+    const context = normalizeContext(attributes?.context);
+    const embedding = await this.embeddings.embed(indexedText(embeddingText ?? content, context));
     const targetProject = project !== undefined ? normalizeProject(project) : this.project;
 
     const nearest = !checkDuplicates
@@ -253,6 +257,7 @@ export class MemoryService {
       episodeId: attributes?.episodeId ?? null,
       sequenceNumber: attributes?.sequenceNumber ?? null,
       precedingMemoryId: attributes?.precedingMemoryId ?? null,
+      context: normalizeContext(attributes?.context),
     };
     memory.qualityScore = computeQualityScore(memory, now);
 
@@ -316,18 +321,24 @@ export class MemoryService {
       else delete newMetadata.resolved_at;
     }
 
-    // Regenerate embedding if content or embeddingText changed
-    let newEmbedding = existing.embedding;
-    if (updates.content !== undefined || updates.embeddingText !== undefined) {
-      const textToEmbed = updates.embeddingText ?? newContent;
-      newEmbedding = await this.embeddings.embed(textToEmbed);
-    }
-
     // Merge attributes: an omitted (undefined) field keeps the existing value;
     // an explicit null clears a nullable attribute.
     const attrs = updates.attributes ?? {};
     const pick = <T>(next: T | undefined, prev: T): T =>
       next !== undefined ? next : prev;
+    const newContext =
+      attrs.context !== undefined ? normalizeContext(attrs.context) : (existing.context ?? null);
+
+    // Regenerate embedding if content, embeddingText or context changed
+    let newEmbedding = existing.embedding;
+    if (
+      updates.content !== undefined ||
+      updates.embeddingText !== undefined ||
+      newContext !== (existing.context ?? null)
+    ) {
+      const textToEmbed = updates.embeddingText ?? newContent;
+      newEmbedding = await this.embeddings.embed(indexedText(textToEmbed, newContext));
+    }
 
     const updatedMemory: Memory = {
       ...existing,
@@ -346,6 +357,7 @@ export class MemoryService {
         attrs.precedingMemoryId,
         existing.precedingMemoryId ?? null,
       ),
+      context: newContext,
     };
 
     await this.repository.upsert(updatedMemory);
@@ -508,6 +520,7 @@ export class MemoryService {
                   lastAccessed: candidate.lastAccessed,
                   pinned: candidate.pinned ?? false,
                   importance: candidate.importance ?? null,
+                  context: candidate.context ?? null,
                   graphDistance: candidate.signals.graphDistance ?? null,
                 }))
             )
