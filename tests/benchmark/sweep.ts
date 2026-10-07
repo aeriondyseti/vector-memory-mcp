@@ -104,7 +104,7 @@ function findHybridParameterized(
   const vectorResults = knnSearch(db, "memories_vec", embedding, candidateLimit);
 
   // FTS5
-  const ftsQuery = buildFtsQuery(query, "half");
+  const ftsQuery = buildFtsQuery(query, "any");
   const ftsResults: Array<{ id: string }> = ftsQuery
     ? (db
         .prepare("SELECT id FROM memories_fts WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?")

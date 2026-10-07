@@ -301,7 +301,7 @@ const CONFIDENCE_MIDPOINT = 0.35;
 const CONFIDENCE_AGREEMENT_BONUS = 0.08;
 /**
  * A keyword hit counts as strong evidence only among the top BM25 ranks: the
- * keyword lane needs only half of a question's content words, so a low-ranked
+ * keyword lane matches any of a question's content words, so a low-ranked
  * hit may share little with the query and must not raise confidence like a
  * real match.
  */

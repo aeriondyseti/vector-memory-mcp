@@ -31,24 +31,9 @@ function orthogonalEmbeddings(): EmbeddingsService {
   } as unknown as EmbeddingsService;
 }
 
-/** The terms of each AND-group of a "half" query, sorted, for order-free comparison. */
-const groups = (q: string | null) =>
-  (q ?? "")
-    .split(" OR ")
-    .map((g) => g.replace(/[()]/g, "").split(" ").sort().join(" "))
-    .sort();
-
 describe("buildFtsQuery", () => {
-  test("drops question and function words, then requires half of what is left", () => {
-    // 3 content words → any 2 of them
-    expect(groups(buildFtsQuery("Who leads the Scarlet Covenant?"))).toEqual([
-      '"covenant" "leads"',
-      '"covenant" "scarlet"',
-      '"leads" "scarlet"',
-    ]);
-  });
-
-  test("ORs one or two content words", () => {
+  test("drops question and function words, then matches any of what is left", () => {
+    expect(buildFtsQuery("Who leads the Scarlet Covenant?")).toBe('"leads" OR "scarlet" OR "covenant"');
     expect(buildFtsQuery("What do we know about Valerica's faction")).toBe('"valerica" OR "faction"');
     expect(buildFtsQuery("Treaty of 1899, the 1899 treaty")).toBe('"treaty" OR "1899"'); // numbers kept, duplicates dropped
   });
@@ -57,23 +42,14 @@ describe("buildFtsQuery", () => {
     expect(buildFtsQuery("Scarlet Covenant rules", "all")).toBe('"scarlet" "covenant" "rules"');
   });
 
-  test("keeps a long question's query bounded and valid", () => {
-    const long = buildFtsQuery(
-      "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar",
-    );
-    const g = groups(long);
-    expect(g.length).toBe(1); // 15 words: all 7 longest required, one group
-    expect(g[0]?.split(" ").length).toBe(7);
-  });
-
   test("falls back to the words of a query made only of stop words, and skips an empty one", () => {
-    expect(groups(buildFtsQuery("what is it"))).toEqual(['"is" "what"', '"it" "what"', '"is" "it"'].sort());
+    expect(buildFtsQuery("what is it")).toBe('"what" OR "is" OR "it"');
     expect(buildFtsQuery("  ?! ")).toBeNull();
   });
 
   test("lets no FTS5 syntax through", () => {
     const q = buildFtsQuery('NEAR(a b) AND "quoted" OR star* col:value') ?? "";
-    expect(q.replace(/"[a-z0-9]+"/g, "").replace(/[()]|\bOR\b/g, "").trim()).toBe("");
+    expect(q.replace(/"[a-z0-9]+"/g, "").replace(/\bOR\b/g, "").trim()).toBe("");
     expect(q).not.toMatch(/near\(|\*|:/i);
   });
 });
@@ -109,17 +85,19 @@ describe("keyword lane", () => {
     expect(hit?.signals.ftsRank).toBe(1);
   });
 
-  test("ranks keyword hits by BM25 and leaves out memories sharing under half the words", async () => {
+  test("ranks keyword hits by BM25, so memories sharing more of the words come first", async () => {
     const one = await service.store("The covenant met on Tuesday.");
     const three = await service.store("The Scarlet Covenant has strict rules.");
     const five = await service.store("The Scarlet Covenant rules forbid holding political office.");
+    const none = await service.store("The Lupine clans of the North are at war.");
 
     const rows = await query("Scarlet Covenant rules on political office");
     const rank = (id: string) => rows.find((r) => r.id === id)?.signals.ftsRank ?? null;
 
     expect(rank(five.id)).toBe(1);
     expect(rank(three.id)).toBe(2);
-    expect(rank(one.id)).toBeNull(); // 1 of 5 words: not a keyword hit
+    expect(rank(one.id)).toBe(3); // 1 of 5 words: still a hit, ranked last
+    expect(rank(none.id)).toBeNull();
   });
 
   test("stems words, so a form of a word matches another", async () => {

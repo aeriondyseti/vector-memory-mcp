@@ -677,8 +677,8 @@ export class MemoryRepository {
 
     // Full-text search, BM25-ranked (its order is the lane's rank in the
     // fusion), pre-filtered by project when scoped. Exact mode requires every
-    // content word; the other modes need at least half of them.
-    const ftsQuery = buildFtsQuery(query, filters?.mode === "exact" ? "all" : "half");
+    // content word; the other modes match any of them.
+    const ftsQuery = buildFtsQuery(query, filters?.mode === "exact" ? "all" : "any");
     const ftsResults: Array<{ id: string }> = ftsQuery
       ? project !== undefined
         ? (this.db

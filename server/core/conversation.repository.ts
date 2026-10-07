@@ -292,9 +292,9 @@ export class ConversationRepository {
         : undefined,
     );
 
-    // FTS5 search (at least half the content words, BM25-ranked), pre-filtered by project
+    // FTS5 search (any content word, BM25-ranked), pre-filtered by project
     // when scoped; skipped when the query has no word to search for
-    const ftsQuery = buildFtsQuery(query, "half");
+    const ftsQuery = buildFtsQuery(query, "any");
     const ftsResults = (
       ftsQuery === null
         ? []

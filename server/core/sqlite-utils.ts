@@ -108,20 +108,19 @@ const FTS_STOP_WORDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * How a keyword query combines its terms: "half" — at least half of the
- * content words, ranked by BM25 (the search lanes) — or "all" — every
- * content word (exact mode).
+ * How a keyword query combines its terms: "any" — any content word, ranked
+ * by BM25 so memories sharing more (and rarer) words come first (the search
+ * lanes) — or "all" — every content word (exact mode).
  *
- * Why half: AND over every word (the old behaviour) matched almost no
- * natural-language question; plain OR let a memory sharing one common word
- * cast a full keyword vote (general benchmark MRR 0.818 → 0.750). Requiring
- * half improved the general benchmark (0.818 → 0.840) and a larger
- * real-world corpus alike.
+ * Why any: AND over every word (the old behaviour) matched almost no
+ * natural-language question. Requiring at least half the words was measured
+ * too: it won only on the 45-memory general benchmark, where an OR query
+ * matches most of the store, and lost on ConvoMem (900 memories, MRR 0.694
+ * vs 0.731) and a larger real-world corpus — it drops exactly the memories
+ * that paraphrase a question and share only a word or two with it. Search
+ * engines default natural-language queries to OR for the same reason.
  */
-export type FtsMatch = "half" | "all";
-
-/** "half" spells out every combination of its terms; this bounds them (C(7,4) = 35). */
-const MAX_HALF_MATCH_TERMS = 7;
+export type FtsMatch = "any" | "all";
 
 /**
  * Build an FTS5 query from natural language: lowercase words (split on
@@ -129,35 +128,15 @@ const MAX_HALF_MATCH_TERMS = 7;
  * stop words and duplicates dropped, each term quoted as a literal (no FTS5
  * syntax gets through). A query of only stop words keeps its words rather
  * than matching nothing. Returns null when no term is left: skip the lane.
- *
- * "half" is written as an OR of AND-groups — FTS5 has no "at least k of n":
- * the longest (most specific) MAX_HALF_MATCH_TERMS terms are kept, and each
- * group holds ceil(n / 2) of them (n = all content words, capped at the
- * terms kept). One or two terms simply OR.
  */
-export function buildFtsQuery(query: string, match: FtsMatch = "half"): string | null {
+export function buildFtsQuery(query: string, match: FtsMatch = "any"): string | null {
   const words = [...new Set(query.toLowerCase().split(/[^\p{L}\p{N}]+/u))].filter(
     (w) => w.length > 1 || /\p{N}/u.test(w),
   );
   const content = words.filter((w) => !FTS_STOP_WORDS.has(w));
   const terms = content.length > 0 ? content : words;
   if (terms.length === 0) return null;
-  const quote = (t: string) => `"${t}"`;
-  if (match === "all") return terms.map(quote).join(" ");
-  if (terms.length <= 2) return terms.map(quote).join(" OR ");
-
-  const kept = [...terms].sort((a, b) => b.length - a.length).slice(0, MAX_HALF_MATCH_TERMS);
-  const need = Math.min(Math.ceil(terms.length / 2), kept.length);
-  const groups: string[] = [];
-  const choose = (start: number, chosen: string[]) => {
-    if (chosen.length === need) {
-      groups.push(`(${chosen.map(quote).join(" ")})`);
-      return;
-    }
-    for (let i = start; i < kept.length; i++) choose(i + 1, [...chosen, kept[i]]);
-  };
-  choose(0, []);
-  return groups.join(" OR ");
+  return terms.map((t) => `"${t}"`).join(match === "all" ? " " : " OR ");
 }
 
 /**
