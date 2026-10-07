@@ -40,7 +40,7 @@
     "warmup": "bun run scripts/warmup.ts",
     "postinstall": "bun run scripts/warmup.ts",
     "prepublishOnly": "bunx tsc --noEmit",
-    "version": "bun scripts/sync-version.ts && git add .claude-plugin plugin/.claude-plugin plugin/package.json plugin/bun.lock"
+    "version": "bun scripts/sync-version.ts && git add plugin/.claude-plugin plugin/package.json plugin/bun.lock"
   },
   "keywords": [
     "mcp",

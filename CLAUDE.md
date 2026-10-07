@@ -77,17 +77,25 @@ Trunk-based: `feat/*` / `fix/*` → PR → `main`. There are no long-lived `dev`
 
 Pushing a `v*` tag triggers `.github/workflows/publish.yml`. Nothing publishes on branch pushes.
 
-```sh
-# stable → npm @latest (must be on main); add a CHANGELOG section for X.Y.Z first
-npm version <patch|minor|major|X.Y.Z> && git push --follow-tags
+**Stable → npm `@latest` + the `aeriondyseti-plugins` marketplace.** Release with [plugin-kit](https://github.com/aeriondyseti/plugin-kit), with [aeriondyseti-plugins](https://github.com/AerionDyseti/aeriondyseti-plugins) cloned alongside this repo. Put the release's notes under `## [Unreleased]` in `CHANGELOG.md` first; then, on a `release/X.Y.Z` branch:
 
-# pre-release → npm @next (any branch)
-npm version 3.0.0-beta.1 && git push --follow-tags
+```sh
+bun scripts/sync-version.ts          # refresh hook-kit in plugin/bun.lock; commit it if it changed
+npx @aeriondyseti/plugin-kit release <patch|minor|major> --plugin plugin \
+  --marketplace ../aeriondyseti-plugins/.claude-plugin/marketplace.json
 ```
 
-`main` requires a PR + passing `test` check; admins bypass this, so the one-liner works for the repo owner. Otherwise run `npm version` on a `release/X.Y.Z` branch, merge its PR with a **merge commit** (not squash, so the tagged commit is on `main`), then `git push origin vX.Y.Z`. A stable tag fails fast if `CHANGELOG.md` has no `## [X.Y.Z]` section.
+`plugin-kit release` bumps `package.json` and `plugin/.claude-plugin/plugin.json` by the same kind (use `patch|minor|major`, not an explicit version, so both move together), cuts `[Unreleased]` into `## [X.Y.Z] - <date>`, commits `Release X.Y.Z`, tags `vX.Y.Z`, and pins the `vector-memory` entry's `ref`, `sha` and `version` in the marketplace. It never pushes. Then: push the branch, merge its PR with a **merge commit** (not squash, so the tagged commit is on `main`), `git push origin vX.Y.Z` (publishes to npm), and only then commit and push the pinned `marketplace.json` in aeriondyseti-plugins. A stable tag fails fast if `CHANGELOG.md` has no `## [X.Y.Z]` section.
 
-`npm version` bumps `package.json`, runs `scripts/sync-version.ts` as the `version` lifecycle hook (stamps `plugin/.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json`, runs `bun update @aeriondyseti/hook-kit` in `plugin/`, stages them), then commits and tags. The workflow checks the tag equals `package.json`'s version, requires stable tags to be on `main`, runs tests, publishes with provenance, and creates a GitHub Release (marked pre-release for `@next`).
+**Pre-release → npm `@next`** (any branch; not added to the marketplace):
+
+```sh
+npm version 3.1.0-beta.1 && git push --follow-tags
+```
+
+`npm version` bumps `package.json`, runs `scripts/sync-version.ts` as the `version` lifecycle hook (stamps `plugin/.claude-plugin/plugin.json`, runs `bun update @aeriondyseti/hook-kit` in `plugin/`, stages them), then commits and tags.
+
+The workflow checks the tag equals `package.json`'s version, requires stable tags to be on `main`, runs tests, publishes with provenance, and creates a GitHub Release (marked pre-release for `@next`).
 
 ### Version Source of Truth
 
@@ -96,26 +104,25 @@ npm version 3.0.0-beta.1 && git push --follow-tags
 ### Two Installation Paths
 
 - **npm** (`bunx @aeriondyseti/vector-memory-mcp`) — standalone MCP server, no hooks/skills
-- **Plugin/marketplace** (install from GitHub) — lightweight shell with hooks + skills; MCP server runs via `bunx @aeriondyseti/vector-memory-mcp@latest`
+- **Plugin** (from the `aeriondyseti-plugins` marketplace) — lightweight shell with hooks + skills; MCP server runs via `bunx @aeriondyseti/vector-memory-mcp@latest`
 
 ### Plugin & Marketplace
 
 This repo ships two independent artifacts from one codebase:
 
 - **npm package** — `server/` only, published to npm. Consumers run via `bunx`.
-- **Plugin** — `plugin/` directory, self-contained. Installed via marketplace; only `plugin/` is copied to the user's machine. The MCP server runs via `bunx @aeriondyseti/vector-memory-mcp@latest`.
+- **Plugin** — `plugin/` directory, self-contained. Listed in the [aeriondyseti-plugins](https://github.com/AerionDyseti/aeriondyseti-plugins) marketplace as a `git-subdir` source (path `plugin`, pinned to a release tag); only `plugin/` is copied to the user's machine. The MCP server runs via `bunx @aeriondyseti/vector-memory-mcp@latest`. This repo has no marketplace of its own (retired in 3.1.0).
 
 | File | Purpose |
 |------|---------|
-| `.claude-plugin/marketplace.json` | Marketplace manifest — single plugin, `"source": "./plugin"` |
-| `.claude-plugin/schemas/` | Local JSON Schema files for plugin.json and marketplace.json |
+| `.claude-plugin/schemas/` | Local JSON Schema for plugin.json |
 | `plugin/.claude-plugin/plugin.json` | Plugin manifest (paths relative to `plugin/`) |
 | `plugin/package.json` + `plugin/bun.lock` | Hook dependencies (`@aeriondyseti/hook-kit`). Claude Code runs `bun install --frozen-lockfile --ignore-scripts` in each cached plugin version |
 | `plugin/.mcp.json` | Runs MCP server via `bunx @aeriondyseti/vector-memory-mcp@latest` |
 | `plugin/hooks/` | Session lifecycle hooks (start, clear) and waypoint checkpoint mods (compaction, /clear, /exit). Context-usage warnings live in the separate `context-monitor` plugin |
 | `plugin/hooks/scripts/hooks-lib.ts` | Hook utilities (formatting, server discovery) — self-contained copy |
 | `plugin/skills/` | Skills: vector-memory-usage, waypoint-set, waypoint-get, waypoint-workflow |
-| `scripts/sync-version.ts` | `npm version` hook: stamps version into plugin/marketplace manifests |
+| `scripts/sync-version.ts` | `npm version` hook (pre-releases): stamps the version into plugin.json and refreshes hook-kit; run it alone before a stable `plugin-kit release` |
 
 **Important:** `plugin/` has no imports from `server/`. Shared utilities (ANSI codes, icons, message builders) are duplicated in `plugin/hooks/scripts/hooks-lib.ts` to keep the plugin self-contained. npm packages the hooks need go in `plugin/package.json`, never the root one. Keep `plugin/` free of `bunfig.toml` and of Yarn/pnpm lockfiles: either makes Claude Code skip the dependency install.
 

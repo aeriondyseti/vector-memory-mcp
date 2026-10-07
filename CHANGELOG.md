@@ -32,7 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Search confidence is a calibrated probability**: it was cosine similarity through a sigmoid, which saturates — right and wrong top results both scored ~1.0. It is now P(anything stored is relevant) — the query's best similarity over the store — × P(this result is the one), a logistic model over the result's similarity z-score against everything stored, its gap to the best match, and its keyword rank, fitted on the public benchmark sets. On held-out data it separates right from wrong top results far better, keeps off-topic queries near 0, and is calibrated (a result at 0.7 is relevant about 70% of the time). For a reranked result the second stage also weighs the cross-encoder's score (fitted on reranked searches, LongMemEval's long conversational memories included) — before that, `proactive_context`, which surfaces by confidence, ignored the reranker entirely. Ranking is unchanged. `exact` mode, which has no vector lane, keeps the old formula. `proactive_context`'s default threshold is now 0.6 (was 0.65), chosen on a RAG-injection evaluation: at equal precision it surfaces a relevant memory for far more messages than before (e.g. 38% vs 15–20% of LongMemEval questions at ~60% precision), and stays silent on 97–100% of chit-chat.
 - **Fusion constant RRF k = 5** (was 10): with the reranker on, it ranked best on a real-world notes corpus and was never worse beyond noise elsewhere, with or without the reranker.
 - **Embedding model profiles**: `EmbeddingsService` knows each supported model's pooling (mean or first-token) and search-query prefix (`MODEL_PROFILES`: all-MiniLM-L6-v2, snowflake-arctic-embed-xs/-s, bge-small-en-v1.5), and search embeds the query through `embedQuery`. Nothing changes for the default MiniLM model; the profiles make other models measurable. Evaluated as replacements (all 384-d): none clearly improved hand-written-question or ConvoMem accuracy, so the default stays — a switch would also need re-embedding every store and recalibrating the similarity thresholds.
-- **Plugin root is `plugin/`**: the marketplace entry's source is now `./plugin` and the manifest lives at `plugin/.claude-plugin/plugin.json`, so installs copy only the plugin, not the whole repo.
+- **The plugin moved to the `aeriondyseti-plugins` marketplace**: install with `claude plugin marketplace add AerionDyseti/aeriondyseti-plugins` and `claude plugin install vector-memory@aeriondyseti-plugins`. This repo's own marketplace (`vector-memory-mcp`) is retired; if you installed from it, uninstall `vector-memory@vector-memory-mcp`, remove that marketplace, and install from the new one (memories are untouched). Releases pin the catalog entry with `plugin-kit release`.
+- **Plugin root is `plugin/`**: the manifest lives at `plugin/.claude-plugin/plugin.json` and the marketplace installs `plugin/` alone (a `git-subdir` source), so installs copy only the plugin, not the whole repo.
 - **hook-kit is a real dependency, no longer vendored**: hooks import `@aeriondyseti/hook-kit` from `plugin/package.json` + `plugin/bun.lock`, which Claude Code installs automatically into each cached plugin version. Removed the committed bundle, `scripts/vendor-hook-kit.ts`, the `vendor:hooks` scripts, and the CI drift guard.
 
 ### Fixed
@@ -41,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Keyword hits are ranked**: memory keyword results were returned in insertion order and fed to the fusion as if ranked; they are now ordered by BM25 (`ORDER BY rank`), as conversation history already was.
 - **Keyword search stems words** (Porter): "migration" finds "migrating". Schema v3 rebuilds both FTS indexes with the stemming tokenizer from the rows they index, on first start after upgrading.
 - **Confidence counts only strong keyword hits**: the agreement bonus applies to keyword ranks ≤ 10, and a keyword-only result scores 0.40 when ranked that high, 0.20 otherwise.
+
+### Removed
+- **Context monitor**: the session-health alerts (context usage and compaction count, on `Stop` and `PostToolUse`) moved to their own `context-monitor` plugin (also in `aeriondyseti-plugins`); install it to keep them. With both plugins installed, every alert fired twice. Removed `context-monitor.ts`, the compaction-counter hook (`session-compact.ts`), and the monitor-state reset on `/clear`. The automatic waypoint checkpoints (compaction, `/clear`, `/exit`) are unchanged.
 
 ## [3.0.0] - 2026-09-27
 
@@ -308,6 +312,8 @@ LanceDB (`@lancedb/lancedb`, `apache-arrow`) ships as a production dependency in
 - Initial MCP server implementation
 - Basic project structure
 
+[Unreleased]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v2.4.0...v3.0.0
 [2.4.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v2.2.3...v2.4.0
 [2.0.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.0.2...v1.1.0
