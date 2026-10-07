@@ -23,7 +23,9 @@ DON'T STORE: machine-specific paths, local env details, ephemeral states, pleasa
 GOOD: "Aerion chose libSQL over PostgreSQL for Resonance (Dec 2024) because of native vector support and simpler deployment."
 BAD: "Uses SQLite" (no context, no subject, no reasoning)
 
-For long content (>1000 chars), provide embedding_text with a searchable summary.`,
+For long content (>1000 chars), provide embedding_text with a searchable summary.
+
+A memory that near-exactly repeats an existing one in the same project is not stored again: the response names the existing memory instead (update it with update_memories if something changed).`,
   inputSchema: {
     type: "object",
     properties: {
@@ -98,6 +100,12 @@ For long content (>1000 chars), provide embedding_text with a searchable summary
           },
           required: ["content"],
         },
+      },
+      allow_duplicates: {
+        type: "boolean",
+        description:
+          "Store even when a memory is a near-exact duplicate of an existing one in the same project. " +
+          "By default such a write is skipped and the existing memory's ID is returned.",
       },
     },
     required: ["memories"],
@@ -827,11 +835,15 @@ export const mergeDuplicatesTool: Tool = {
 export const cleanupDuplicatesTool: Tool = {
   name: "cleanup_duplicates",
   description:
-    "Automatically merge every near-duplicate cluster at a safe threshold (keeps the newest of each). Use find_duplicates first to preview.",
+    "Merge near-duplicate memories automatically (keeping the newest), but only clear cases: same project, matching the survivor directly in both meaning and wording, and not pinned or critical. Everything else is listed for review with the reason, never merged on a guess. Use dry_run: true to preview.",
   inputSchema: {
     type: "object",
     properties: {
-      similarity_threshold: { type: "number", description: "Cosine similarity threshold (default 0.92)." },
+      similarity_threshold: { type: "number", description: "Cosine similarity threshold (default 0.95)." },
+      dry_run: {
+        type: "boolean",
+        description: "List what would be merged and what needs review, without changing anything.",
+      },
     },
   },
 };
@@ -839,7 +851,7 @@ export const cleanupDuplicatesTool: Tool = {
 export const consolidateMemoriesTool: Tool = {
   name: "consolidate_memories",
   description:
-    "Periodic maintenance that prevents quality drift: rescore (decay), cluster + merge near-duplicates (compress), and archive low-quality unprotected memories (forget). action: 'recommend' (default, preview), 'status' (counts), or 'run' (perform).",
+    "Periodic maintenance that prevents quality drift: rescore (decay), merge clear near-duplicates (compress — same rule as cleanup_duplicates; unclear ones are counted for review, not merged), and archive low-quality unprotected memories (forget). action: 'recommend' (default, preview), 'status' (counts), or 'run' (perform).",
   inputSchema: {
     type: "object",
     properties: {

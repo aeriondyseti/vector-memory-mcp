@@ -7,6 +7,7 @@ import {
   hybridRRFWithSignals,
   topByRRF,
   knnSearch,
+  cosineSimilarity,
   batchedQuery,
   SQLITE_BATCH_SIZE,
 } from "./sqlite-utils";
@@ -368,6 +369,41 @@ export class MemoryRepository {
       count: r.count,
       lastCreatedAt: new Date(r.last),
     }));
+  }
+
+  /**
+   * Cosine similarity of each of `otherIds` to memory `id`, from the stored
+   * vectors; an id without a vector is left out.
+   */
+  similaritiesTo(id: string, otherIds: string[]): Map<string, number> {
+    const base = this.getEmbedding(id);
+    const result = new Map<string, number>();
+    if (base.length === 0) return result;
+    const bv = new Float32Array(base);
+    for (const other of otherIds) {
+      const v = this.getEmbedding(other);
+      if (v.length > 0) result.set(other, cosineSimilarity(bv, new Float32Array(v)));
+    }
+    return result;
+  }
+
+  /**
+   * The `k` live memories of `project` most similar to `embedding`, for the
+   * write-time duplicate check: not superseded or deleted, not archived, not
+   * waypoints. `project` null matches memories filed under no project.
+   */
+  findNearestLive(
+    embedding: number[],
+    project: string | null,
+    k: number,
+  ): Array<{ id: string; similarity: number }> {
+    return knnSearch(this.db, "memories_vec", embedding, k, {
+      sql: `SELECT v.id, v.vector FROM memories_vec v JOIN memories m ON v.id = m.id
+            WHERE ${project === null ? "m.project IS NULL" : "m.project = ?"}
+              AND m.superseded_by IS NULL AND m.archived = 0
+              AND json_extract(m.metadata, '$.type') IS NOT 'waypoint'`,
+      params: project === null ? [] : [project],
+    }).map((r) => ({ id: r.id, similarity: 1 - r.distance }));
   }
 
   /**

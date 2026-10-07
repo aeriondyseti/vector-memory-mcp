@@ -1,5 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { MemoryService } from "../../core/memory.service";
+import { type MemoryService, WRITE_DUPLICATE_SIMILARITY } from "../../core/memory.service";
 import type { ConversationHistoryService } from "../../core/conversation.service";
 import type {
   SearchIntent,
@@ -182,33 +182,73 @@ export async function handleStoreMemories(
     return errorResult(errorText(e));
   }
 
+  const allowDuplicates = args?.allow_duplicates === true;
+
   const ids: string[] = [];
+  const notes: string[] = [];
   try {
     for (const item of memories) {
-      const memory = await service.store(
+      const project = typeof item.project === "string" ? item.project : undefined;
+      const attributes = parseAttributes(item as Record<string, unknown>);
+
+      if (allowDuplicates) {
+        const memory = await service.store(
+          item.content,
+          item.metadata ?? {},
+          item.embedding_text,
+          project,
+          attributes
+        );
+        ids.push(memory.id);
+        continue;
+      }
+
+      const outcome = await service.storeUnlessDuplicate(
         item.content,
         item.metadata ?? {},
         item.embedding_text,
-        typeof item.project === "string" ? item.project : undefined,
-        parseAttributes(item as Record<string, unknown>)
+        project,
+        attributes
       );
-      ids.push(memory.id);
+      if (outcome.status === "duplicate") {
+        notes.push(duplicateNote(outcome.existing.id, outcome.existing.content));
+        continue;
+      }
+      ids.push(outcome.memory.id);
+      if (outcome.possibleDuplicateOf.length > 0) {
+        notes.push(
+          `Stored ${outcome.memory.id}, but it closely matches ${outcome.possibleDuplicateOf.join(", ")}; ` +
+            "review with find_duplicates."
+        );
+      }
     }
   } catch (e) {
     return errorResult(errorText(e));
   }
 
-  return {
-    content: [
-      {
-        type: "text",
-        text:
+  const stored =
+    ids.length === 0
+      ? []
+      : [
           ids.length === 1
             ? `Memory stored with ID: ${ids[0]}`
             : `Stored ${ids.length} memories:\n${ids.map((id) => `- ${id}`).join("\n")}`,
-      },
-    ],
+        ];
+
+  return {
+    content: [{ type: "text", text: [...stored, ...notes].join("\n\n") }],
   };
+}
+
+/** The store_memories line for a write skipped as a duplicate. */
+function duplicateNote(existingId: string, existingContent: string): string {
+  const preview =
+    existingContent.length > 200 ? `${existingContent.slice(0, 200)}…` : existingContent;
+  return (
+    `Not stored: duplicate of existing memory ${existingId}:\n  "${preview}"\n` +
+    "To change that memory use update_memories; to store a separate copy anyway, " +
+    "call store_memories again with allow_duplicates: true."
+  );
 }
 
 export async function handleDeleteMemories(
@@ -1082,11 +1122,30 @@ export async function handleCleanupDuplicates(
   const threshold =
     typeof args?.similarity_threshold === "number"
       ? Math.max(0.5, Math.min(1, args.similarity_threshold))
-      : 0.92;
-  const r = await service.cleanupDuplicates(threshold);
-  return textResult(
-    `Cleaned up ${r.clusters} clusters, removed ${r.deleted} duplicate memories.`,
-  );
+      : WRITE_DUPLICATE_SIMILARITY;
+  const dryRun = args?.dry_run === true;
+  const r = await service.cleanupDuplicates(threshold, dryRun);
+
+  const lines = [
+    dryRun
+      ? `Would merge ${r.deleted} duplicate memories in ${r.clusters} clusters (dry run, threshold ${threshold}).`
+      : `Cleaned up ${r.clusters} clusters, removed ${r.deleted} duplicate memories.`,
+  ];
+  if (dryRun) {
+    for (const p of r.plans.filter((p) => p.mergeIds.length > 0)) {
+      lines.push(`- keep ${p.keepId}, merge: ${p.mergeIds.join(", ")}`);
+    }
+  }
+  if (r.review > 0) {
+    lines.push(
+      "",
+      `${r.review} near-duplicates left for review (merge them with merge_duplicates if they really are the same):`,
+    );
+    for (const p of r.plans) {
+      for (const item of p.review) lines.push(`- ${item.id} vs ${p.keepId}: ${item.reason}`);
+    }
+  }
+  return textResult(lines.join("\n"));
 }
 
 // ── Memory consolidation (Feature 18) ─────────────────────────────────
@@ -1107,6 +1166,11 @@ export async function handleConsolidateMemories(
     `- Live memories: ${r.total} | Avg quality: ${r.averageQuality.toFixed(3)}`,
     `- Duplicate clusters: ${r.duplicateClusters} | Forget candidates: ${r.forgetCandidates}`,
   ];
+  if (r.duplicatesForReview > 0) {
+    lines.push(
+      `- Near-duplicates left for review (not merged automatically): ${r.duplicatesForReview} — see cleanup_duplicates with dry_run: true`,
+    );
+  }
   if (r.action === "run") {
     lines.push(
       `- Rescored: ${r.rescored} | Compressed (merged): ${r.compressed} | Forgotten (archived): ${r.forgotten}`,
