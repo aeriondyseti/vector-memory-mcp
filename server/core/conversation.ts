@@ -87,6 +87,8 @@ export interface SearchResult {
   history?: Array<{ content: string; createdAt: Date; replacedAt: Date }>;
   /** For a synthesis: the memories it cites, and how many have since been replaced or deleted. */
   sources?: { ids: string[]; outdated: number };
+  /** The cross-encoder's score (logit), when this result was reranked. */
+  rerankScore?: number;
   /** Links from a top match or named entity, when the graph lane reached it. */
   graphDistance?: number | null;
   // History-specific fields

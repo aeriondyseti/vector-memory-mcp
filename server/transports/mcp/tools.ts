@@ -831,7 +831,7 @@ export const proactiveContextTool: Tool = {
       threshold: {
         type: "number",
         description:
-          "Minimum confidence 0–1 (default 0.5). Confidence estimates how likely a memory is relevant: raise it to surface fewer, surer memories.",
+          "Minimum confidence 0–1 (default 0.6). Confidence estimates how likely a memory is relevant: raise it to surface fewer, surer memories.",
       },
       auto_ingest: {
         type: "boolean",

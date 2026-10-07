@@ -116,11 +116,13 @@ export const RERANK_DEPTH = 30;
 export const RERANK_BLEND = 0.5;
 
 /**
- * Default confidence proactive_context surfaces a memory at. Confidence is a
- * calibrated probability (computeConfidence): at 0.5 a surfaced memory is
- * more likely relevant than not, and off-topic context surfaces nothing.
+ * Default confidence proactive_context surfaces a memory at. Chosen on the
+ * RAG-injection evaluation (hit rate, precision, and silence on chit-chat and
+ * off-topic context across four datasets) with reranker-aware confidence:
+ * 0.6 balanced finding a relevant memory against injecting noise; chit-chat
+ * stayed silent 97–100% of the time.
  */
-export const PROACTIVE_CONFIDENCE_THRESHOLD = 0.5;
+export const PROACTIVE_CONFIDENCE_THRESHOLD = 0.6;
 
 // A new memory is a duplicate of an existing one only when both signals
 // agree: near-identical embeddings AND near-identical wording. Embeddings
@@ -448,7 +450,7 @@ export class MemoryService {
     scored: Array<{ candidate: HybridRow; score: number }>,
     depth: number,
     rescore: (candidate: HybridRow, relevance: number) => number,
-  ): Promise<Array<{ candidate: HybridRow; score: number }>> {
+  ): Promise<Array<{ candidate: HybridRow; score: number; rerankScore?: number }>> {
     const sorted = [...scored].sort((a, b) => b.score - a.score);
     const head = sorted.slice(0, depth);
     if (head.length === 0) return sorted;
@@ -468,6 +470,7 @@ export class MemoryService {
     const reranked = head.map(({ candidate }, i) => ({
       candidate,
       score: rescore(candidate, RERANK_BLEND * ce[i]! + (1 - RERANK_BLEND) * fused[i]!),
+      rerankScore: logits[i]!,
     }));
     const floor = Math.min(...reranked.map((r) => r.score));
     const below = sorted.slice(depth).map(({ candidate, score }, i) => ({
@@ -606,12 +609,13 @@ export class MemoryService {
                 candidate,
                 score: this.computeMemoryScore(candidate, profile, now, mode, relevanceOf[i]!) * boost(candidate.project),
               }));
-              const scored = rerank
+              const scored: Array<{ candidate: HybridRow; score: number; rerankScore?: number }> = rerank
                 ? await this.rerankCandidates(query, kept, Math.max(RERANK_DEPTH, effectiveLimit), (c, relevance) =>
                     this.computeMemoryScore(c, profile, now, mode, relevance) * boost(c.project),
                   )
                 : kept;
-              return scored.map(({ candidate, score }) => ({
+              return scored.map(({ candidate, score, rerankScore }) => ({
+                  rerankScore,
                   id: candidate.id,
                   content: candidate.content,
                   metadata: candidate.metadata,
@@ -619,7 +623,7 @@ export class MemoryService {
                   updatedAt: candidate.updatedAt,
                   source: "memory" as const,
                   score,
-                  confidence: computeConfidence(candidate.signals),
+                  confidence: computeConfidence(candidate.signals, rerankScore),
                   project: candidate.project,
                   supersededBy: candidate.supersededBy,
                   usefulness: candidate.usefulness,

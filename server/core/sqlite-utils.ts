@@ -1,7 +1,13 @@
 import type { Database } from "bun:sqlite";
 
-/** RRF constant — lower K gives sharper top-rank discrimination in the 1/(K+rank) formula */
-export const RRF_K = 10;
+/**
+ * RRF constant — lower K gives sharper top-rank discrimination in the
+ * 1/(K+rank) formula. Swept with the reranker on (5 / 10 / 20, aged stores):
+ * 5 ranked best on a real notes corpus and was never worse beyond noise on
+ * ConvoMem, LongMemEval or the general set, with or without the reranker;
+ * 20 lost on the general set; 60 (the textbook value) lost everywhere.
+ */
+export const RRF_K = 5;
 
 /**
  * Maximum parameters per SQLite query to stay within SQLITE_MAX_VARIABLE_NUMBER.

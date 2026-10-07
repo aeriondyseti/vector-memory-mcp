@@ -44,6 +44,16 @@ describe("two-stage confidence", () => {
     expect(computeConfidence(signals(null, 1, store(0.55)))).toBeLessThan(0.1);
   });
 
+  test("a reranked result's confidence follows the cross-encoder's verdict", () => {
+    const s = signals(0.55, null, store(0.6));
+    const doubted = computeConfidence(s, -8);
+    const endorsed = computeConfidence(s, 8);
+
+    expect(endorsed).toBeGreaterThan(doubted + 0.3);
+    // Still bounded by "is anything relevant at all": an off-topic store stays low.
+    expect(computeConfidence(signals(0.2, null, store(0.2)), 8)).toBeLessThan(0.1);
+  });
+
   test("stays within 0–1", () => {
     for (const s of [signals(1, 1, store(1)), signals(-1, null, { mean: 0, std: 0, best: -1 })]) {
       const c = computeConfidence(s);

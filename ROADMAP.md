@@ -526,7 +526,7 @@ Schema: two nullable `Utf8` columns + one nullable `Int32` — SQLite schema mig
 New tool `proactive_context(context, max_results, threshold)`:
 - `context` — the current user message or task description
 - `max_results` — number of memories to surface (default: 5)
-- `threshold` — minimum relevance confidence to surface (default: 0.5)
+- `threshold` — minimum relevance confidence to surface (default: 0.6)
 
 The tool embeds `context`, runs ANN search, and returns memories above threshold with their relevance scores. Designed to be called in a `UserPromptSubmit` hook as well as explicitly.
 
