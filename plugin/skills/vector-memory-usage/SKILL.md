@@ -118,6 +118,17 @@ When a memory comes from a larger source — a document, a note, a long discussi
 
 Use the same names the source uses (document title, section headings, a character's or project's name) so lookups by those names find it.
 
+### Storing Syntheses (sources)
+
+When you answer a broad question by pulling several memories together — a summary of how something developed, a pattern across sessions, a conclusion — store that answer as its own memory and list the memories it draws on in `sources`. The next broad question finds the synthesis directly instead of rebuilding it, and search flags it if a source is later replaced or deleted:
+
+```json
+{
+  "content": "Across the last five sessions the envoy has lied to the party three times, always about the treaty terms.",
+  "sources": ["<memory id>", "<memory id>", "<memory id>"]
+}
+```
+
 ### What to Store
 
 Call `mcp__vector-memory__store_memories` with appropriate metadata type tags:

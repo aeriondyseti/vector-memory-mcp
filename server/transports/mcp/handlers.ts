@@ -190,6 +190,7 @@ export async function handleStoreMemories(
     project?: string;
     key?: unknown;
     status?: unknown;
+    sources?: unknown;
   }>;
   try {
     memories = asArray(args?.memories, "memories");
@@ -206,9 +207,19 @@ export async function handleStoreMemories(
       const project = typeof item.project === "string" ? item.project : undefined;
       const attributes = parseAttributes(item as Record<string, unknown>);
 
+      // A synthesis cites the memories it draws on; unknown ids are dropped.
+      let metadata = lifecycleMetadata(item.metadata ?? {}, item.key, coerceStatus(item.status));
+      if (Array.isArray(item.sources)) {
+        const cited = [...new Set(item.sources.filter((s): s is string => typeof s === "string"))];
+        const known = new Set((await service.getRepository().findByIds(cited)).map((m) => m.id));
+        const unknown = cited.filter((id) => !known.has(id));
+        if (unknown.length > 0) notes.push(`Ignored unknown source ids: ${unknown.join(", ")}.`);
+        if (known.size > 0) metadata = { ...metadata, sources: cited.filter((id) => known.has(id)) };
+      }
+
       const outcome = await service.storeUnlessDuplicate(
         item.content,
-        lifecycleMetadata(item.metadata ?? {}, item.key, coerceStatus(item.status)),
+        metadata,
         item.embedding_text,
         project,
         attributes,
@@ -573,6 +584,10 @@ function formatSearchResult(r: SearchResult): string {
     result += `\nOccurred: ${r.occurredAt.toISOString().slice(0, 10)}`;
   }
   result += `\nContent: ${r.content}`;
+  if (r.sources) {
+    result += `\nSources: ${r.sources.ids.join(", ")}`;
+    if (r.sources.outdated > 0) result += ` (${r.sources.outdated} since replaced or deleted — the synthesis may be out of date)`;
+  }
   if (r.history?.length) {
     const day = (d: Date) => d.toISOString().slice(0, 10);
     result += `\nPreviously (newest first):`;
