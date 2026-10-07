@@ -29,6 +29,7 @@ import type { MemoryRepository } from "./memory.repository";
 import type { EmbeddingsService } from "./embeddings.service";
 import type { ConversationHistoryService } from "./conversation.service";
 import type { RerankerService } from "./reranker.service";
+import { findTimeRange, parseTimeFocus } from "./time-range";
 import { normalizeProject } from "./project";
 
 // Jitter values halved from original (0.02/0.05/0.15) because RRF_K=10 produces
@@ -301,6 +302,7 @@ export class MemoryService {
       sequenceNumber: attributes?.sequenceNumber ?? null,
       precedingMemoryId: attributes?.precedingMemoryId ?? null,
       context: normalizeContext(attributes?.context),
+      occurredAt: attributes?.occurredAt ?? null,
     };
     memory.qualityScore = computeQualityScore(memory, now);
 
@@ -401,6 +403,7 @@ export class MemoryService {
         existing.precedingMemoryId ?? null,
       ),
       context: newContext,
+      occurredAt: pick(attrs.occurredAt, existing.occurredAt ?? null),
     };
 
     await this.repository.upsert(updatedMemory);
@@ -547,6 +550,8 @@ export class MemoryService {
 
     const hasDateFilters = options?.after || options?.before;
     const mode = options?.mode ?? "semantic";
+    // The period the search is about: the caller's focus, else one named in the query.
+    const timeRange = options?.during ? parseTimeFocus(options.during, now) : findTimeRange(query, now);
     const memoryFilters = {
       after: options?.after,
       before: options?.before,
@@ -557,6 +562,7 @@ export class MemoryService {
       mode,
       useGraph: options?.useGraph ?? false,
       graphWeights: options?.graphWeights,
+      timeRange,
     };
 
     // Merge top-level date filters into history filters so after/before
@@ -622,6 +628,7 @@ export class MemoryService {
                   pinned: candidate.pinned ?? false,
                   importance: candidate.importance ?? null,
                   context: candidate.context ?? null,
+                  occurredAt: candidate.occurredAt ?? null,
                   graphDistance: candidate.signals.graphDistance ?? null,
                 }));
             })

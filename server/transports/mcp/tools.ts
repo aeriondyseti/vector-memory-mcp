@@ -58,6 +58,11 @@ HOW MEMORIES UPDATE:
                 "(e.g. 'Atlas design doc > Auth flow', 'Campaign notes > Valerica > Allies'). " +
                 "Searched along with the content; shown with the memory, not part of it.",
             },
+            occurred_at: {
+              type: "string",
+              description:
+                "ISO date when what this memory describes happened, if not now (a past event, a session recorded later). Searches about a period use it.",
+            },
             metadata: {
               type: "object",
               description: "Optional key-value metadata.",
@@ -215,6 +220,10 @@ Use to correct content, refine embedding text, or replace metadata without chang
               type: "string",
               description:
                 "New context — where the memory belongs, e.g. 'Atlas design doc > Auth flow' (triggers embedding regeneration). Empty string clears it.",
+            },
+            occurred_at: {
+              type: ["string", "null"],
+              description: "ISO date when what this memory describes happened; null clears it.",
             },
             status: {
               type: "string",
@@ -394,6 +403,11 @@ SCOPE: Memories are stored globally across all projects. By default, search cove
         enum: ["open", "resolved"],
         description:
           "Only memories with this status: 'open' for what is still to do or unresolved (tasks, next steps, blockers, or anything stored open), 'resolved' for what was done.",
+      },
+      during: {
+        type: "string",
+        description:
+          "The period the question is about — 'last week', 'March', 'two months ago', or a range '2026-03-01..2026-04-01' (either side may be empty). Memories from it are ranked up, not filtered. By default a period named in the query is used.",
       },
       rerank: {
         type: "boolean",

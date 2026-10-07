@@ -238,8 +238,13 @@ describeE2E("E2E: HTTP Transport", () => {
       stderr: "pipe",
     });
 
-    // Wait for server to start
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // Wait for the server to answer (startup takes seconds on a busy machine).
+    for (let i = 0; i < 60; i++) {
+      try {
+        if ((await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(1000) })).ok) break;
+      } catch {}
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
 
     // Initialize MCP session over HTTP
     const initRes = await fetch(`${baseUrl}/mcp`, {

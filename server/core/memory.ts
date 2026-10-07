@@ -42,6 +42,11 @@ export interface Memory {
    * `indexedText`) but not part of it. Null = none.
    */
   context?: string | null;
+  /**
+   * When what the memory describes happened, if not when it was stored
+   * (a past event, a note written later). Null = when it was stored.
+   */
+  occurredAt?: Date | null;
 }
 
 /** Longest context kept; a context is a short label, not content. */
@@ -188,6 +193,8 @@ export interface MemoryAttributes {
   precedingMemoryId?: string | null;
   /** Where the memory belongs (see Memory.context); null clears it. */
   context?: string | null;
+  /** When what it describes happened (see Memory.occurredAt); null clears it. */
+  occurredAt?: Date | null;
 }
 
 /**
@@ -290,6 +297,7 @@ export function memoryToDict(memory: Memory): Record<string, unknown> {
     sequenceNumber: memory.sequenceNumber ?? null,
     precedingMemoryId: memory.precedingMemoryId ?? null,
     context: memory.context ?? null,
+    occurredAt: memory.occurredAt?.toISOString() ?? null,
   };
 }
 

@@ -81,6 +81,8 @@ export interface SearchResult {
   importance?: import("./memory").MemoryImportance | null;
   /** Where the memory belongs (document, section), when it has a context. */
   context?: string | null;
+  /** When what the memory describes happened, if recorded apart from when it was stored. */
+  occurredAt?: Date | null;
   /** Versions this memory replaced (same key, or merged into it), newest first. */
   history?: Array<{ content: string; createdAt: Date; replacedAt: Date }>;
   /** Links from a top match or named entity, when the graph lane reached it. */
@@ -151,6 +153,11 @@ export interface SearchOptions {
   rerank?: boolean;
   /** Only memories with this status (task, next-step and blocker memories, or any given one). */
   status?: import("./memory").MemoryStatus;
+  /**
+   * The period the search is about ("last week", "March", "2023-05-01..2023-05-31"):
+   * memories from it are ranked up, not filtered. Default: a period named in the query.
+   */
+  during?: string;
   /** Rank in memories linked through the knowledge graph (opt-in, default false). */
   useGraph?: boolean;
   /** Graph lane weights — a tuning knob for benchmarks, not exposed by the MCP tools. */
