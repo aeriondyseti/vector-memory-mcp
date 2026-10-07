@@ -437,7 +437,11 @@ export class MemoryService {
   ): Promise<SearchResult[]> {
     const limit = options?.limit ?? 10;
     const includeDeleted = options?.includeDeleted ?? false;
-    const queryEmbedding = await this.embeddings.embed(query);
+    // A model trained for retrieval embeds queries with its query prefix;
+    // test doubles without embedQuery embed the query as plain text.
+    const queryEmbedding = this.embeddings.embedQuery
+      ? await this.embeddings.embedQuery(query)
+      : await this.embeddings.embed(query);
     const profile = INTENT_PROFILES[intent];
     const now = new Date();
     const offset = Math.min(options?.offset ?? 0, 500);
