@@ -299,20 +299,35 @@ export type HybridRow = WithRrfScore<Memory>;
 const CONFIDENCE_STEEPNESS = 14;
 const CONFIDENCE_MIDPOINT = 0.35;
 const CONFIDENCE_AGREEMENT_BONUS = 0.08;
+/**
+ * A keyword hit counts as strong evidence only among the top BM25 ranks: the
+ * keyword lane matches any of a question's content words, so a low-ranked
+ * hit may share little with the query and must not raise confidence like a
+ * real match.
+ */
+export const STRONG_FTS_RANK = 10;
+const FTS_ONLY_STRONG_CONFIDENCE = 0.4;
+const FTS_ONLY_WEAK_CONFIDENCE = 0.2;
+
+/** Whether the keyword lane ranked this result among its strong hits. */
+export function isStrongFtsMatch(signals: SearchSignals): boolean {
+  return signals.ftsMatch && signals.ftsRank !== null && signals.ftsRank <= STRONG_FTS_RANK;
+}
 
 export function computeConfidence(signals: SearchSignals): number {
   const sim = signals.cosineSimilarity;
 
   if (sim === null) {
     // FTS-only result — keyword match but no semantic confirmation
-    return signals.ftsMatch ? 0.40 : 0.0;
+    if (!signals.ftsMatch) return 0.0;
+    return isStrongFtsMatch(signals) ? FTS_ONLY_STRONG_CONFIDENCE : FTS_ONLY_WEAK_CONFIDENCE;
   }
 
   // Shifted sigmoid: maps cosine similarity to interpretable confidence
   let confidence = 1 / (1 + Math.exp(-CONFIDENCE_STEEPNESS * (sim - CONFIDENCE_MIDPOINT)));
 
-  // Dual-path agreement bonus: found by both KNN and FTS
-  if (signals.ftsMatch) {
+  // Dual-path agreement bonus: found by KNN and ranked high by FTS
+  if (isStrongFtsMatch(signals)) {
     confidence = Math.min(1.0, confidence + CONFIDENCE_AGREEMENT_BONUS);
   }
 

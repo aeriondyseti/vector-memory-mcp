@@ -7,6 +7,13 @@ import { serializeVector } from "./sqlite-utils";
 import { ensureGraphSchema } from "./graph.repository";
 
 /**
+ * FTS5 tokenizer for keyword search: Porter stemming over unicode61, so
+ * "migrating", "migration" and "migrated" share a term. Queries are stemmed
+ * by the same tokenizer. Existing databases are rebuilt by migration v3.
+ */
+const FTS_TOKENIZER = "'porter unicode61'";
+
+/**
  * Pre-migration step: remove vec0 virtual table entries from sqlite_master
  * and drop their shadow tables using the sqlite3 CLI.
  *
@@ -90,7 +97,8 @@ export function runMigrations(db: Database): void {
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
       id UNINDEXED,
-      content
+      content,
+      tokenize = ${FTS_TOKENIZER}
     )
   `);
 
@@ -119,7 +127,8 @@ export function runMigrations(db: Database): void {
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS conversation_history_fts USING fts5(
       id UNINDEXED,
-      content
+      content,
+      tokenize = ${FTS_TOKENIZER}
     )
   `);
 
@@ -156,7 +165,22 @@ export function runMigrations(db: Database): void {
 }
 
 /** Current schema version. Bump when adding a versioned migration below. */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
+
+/**
+ * Recreate an FTS5 table with FTS_TOKENIZER and refill it from its source
+ * table, unless it already uses that tokenizer (a database created at this
+ * version). Runs inside the versioned-migration transaction.
+ */
+function rebuildFtsWithStemming(db: Database, fts: string, source: string): void {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(fts) as { sql: string } | null;
+  if (row?.sql.includes("porter")) return;
+  db.exec(`DROP TABLE IF EXISTS ${fts}`);
+  db.exec(`CREATE VIRTUAL TABLE ${fts} USING fts5(id UNINDEXED, content, tokenize = ${FTS_TOKENIZER})`);
+  db.exec(`INSERT INTO ${fts} (id, content) SELECT id, content FROM ${source}`);
+}
 
 function getUserVersion(db: Database): number {
   const row = db.prepare("PRAGMA user_version").get() as
@@ -231,6 +255,16 @@ function runVersionedMigrations(db: Database): void {
 
       db.exec("PRAGMA user_version = 2");
       version = 2;
+    }
+
+    if (version < 3) {
+      // v3: stemmed keyword search — rebuild both FTS indexes with the Porter
+      // tokenizer from the rows they index (content is the source of truth).
+      rebuildFtsWithStemming(db, "memories_fts", "memories");
+      rebuildFtsWithStemming(db, "conversation_history_fts", "conversation_history");
+
+      db.exec("PRAGMA user_version = 3");
+      version = 3;
     }
 
     db.exec("COMMIT");

@@ -3,7 +3,7 @@ import {
   serializeVector,
   deserializeVector,
   safeParseJsonObject,
-  sanitizeFtsQuery,
+  buildFtsQuery,
   hybridRRFWithSignals,
   topByRRF,
   knnSearch,
@@ -675,20 +675,23 @@ export class MemoryRepository {
               : undefined,
           );
 
-    // Full-text search, pre-filtered by project when scoped
-    const ftsQuery = sanitizeFtsQuery(query);
+    // Full-text search, BM25-ranked (its order is the lane's rank in the
+    // fusion), pre-filtered by project when scoped. Exact mode requires every
+    // content word; the other modes match any of them.
+    const ftsQuery = buildFtsQuery(query, filters?.mode === "exact" ? "all" : "any");
     const ftsResults: Array<{ id: string }> = ftsQuery
       ? project !== undefined
         ? (this.db
             .prepare(
               `SELECT memories_fts.id FROM memories_fts
                JOIN memories m ON memories_fts.id = m.id
-               WHERE memories_fts MATCH ? AND m.project = ? LIMIT ?`,
+               WHERE memories_fts MATCH ? AND m.project = ?
+               ORDER BY rank LIMIT ?`,
             )
             .all(ftsQuery, project, candidateLimit) as Array<{ id: string }>)
         : (this.db
             .prepare(
-              "SELECT id FROM memories_fts WHERE memories_fts MATCH ? LIMIT ?",
+              "SELECT id FROM memories_fts WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?",
             )
             .all(ftsQuery, candidateLimit) as Array<{ id: string }>)
       : [];

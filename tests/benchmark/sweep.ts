@@ -23,7 +23,7 @@ import { MemoryRepository } from "../../server/core/memory.repository";
 import { EmbeddingsService } from "../../server/core/embeddings.service";
 import {
   knnSearch,
-  sanitizeFtsQuery,
+  buildFtsQuery,
   hybridRRF,
   topByRRF,
 } from "../../server/core/sqlite-utils";
@@ -104,10 +104,10 @@ function findHybridParameterized(
   const vectorResults = knnSearch(db, "memories_vec", embedding, candidateLimit);
 
   // FTS5
-  const ftsQuery = sanitizeFtsQuery(query);
+  const ftsQuery = buildFtsQuery(query, "any");
   const ftsResults: Array<{ id: string }> = ftsQuery
     ? (db
-        .prepare("SELECT id FROM memories_fts WHERE memories_fts MATCH ? LIMIT ?")
+        .prepare("SELECT id FROM memories_fts WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?")
         .all(ftsQuery, candidateLimit) as Array<{ id: string }>)
     : [];
 

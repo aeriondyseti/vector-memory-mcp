@@ -91,13 +91,52 @@ export function knnSearch(
 }
 
 /**
- * Sanitize a user query for FTS5 by quoting each token as a literal.
- * Prevents FTS5 syntax errors from special characters like AND, OR, *, etc.
+ * Function and question words dropped from keyword queries: they carry no
+ * topic, and as required terms they veto every memory that lacks them
+ * ("who", "what do we know about"). Domain-neutral on purpose.
  */
-export function sanitizeFtsQuery(query: string): string {
-  const tokens = query.trim().split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return '""';
-  return tokens.map(t => `"${t.replace(/"/g, '""')}"`).join(" ");
+const FTS_STOP_WORDS: ReadonlySet<string> = new Set([
+  "a", "an", "the", "and", "or", "but", "if", "then", "so", "of", "in", "on", "at", "to", "for",
+  "from", "by", "with", "about", "into", "onto", "over", "under", "after", "before", "as", "than",
+  "is", "are", "was", "were", "be", "been", "being", "am", "do", "does", "did", "done", "doing",
+  "have", "has", "had", "having", "i", "me", "my", "we", "us", "our", "you", "your", "he", "him",
+  "his", "she", "her", "it", "its", "they", "them", "their", "this", "that", "these", "those",
+  "there", "here", "what", "which", "who", "whom", "whose", "when", "where", "why", "how", "can",
+  "could", "would", "should", "will", "shall", "may", "might", "must", "not", "no", "any", "all",
+  "some", "just", "also", "very", "too", "more", "most", "again", "ever", "know", "tell",
+  "remind", "anything", "something", "get", "got",
+]);
+
+/**
+ * How a keyword query combines its terms: "any" — any content word, ranked
+ * by BM25 so memories sharing more (and rarer) words come first (the search
+ * lanes) — or "all" — every content word (exact mode).
+ *
+ * Why any: AND over every word (the old behaviour) matched almost no
+ * natural-language question. Requiring at least half the words was measured
+ * too: it won only on the 45-memory general benchmark, where an OR query
+ * matches most of the store, and lost on ConvoMem (900 memories, MRR 0.694
+ * vs 0.731) and a larger real-world corpus — it drops exactly the memories
+ * that paraphrase a question and share only a word or two with it. Search
+ * engines default natural-language queries to OR for the same reason.
+ */
+export type FtsMatch = "any" | "all";
+
+/**
+ * Build an FTS5 query from natural language: lowercase words (split on
+ * anything that isn't a letter or digit, so "Valerica's" → "valerica"),
+ * stop words and duplicates dropped, each term quoted as a literal (no FTS5
+ * syntax gets through). A query of only stop words keeps its words rather
+ * than matching nothing. Returns null when no term is left: skip the lane.
+ */
+export function buildFtsQuery(query: string, match: FtsMatch = "any"): string | null {
+  const words = [...new Set(query.toLowerCase().split(/[^\p{L}\p{N}]+/u))].filter(
+    (w) => w.length > 1 || /\p{N}/u.test(w),
+  );
+  const content = words.filter((w) => !FTS_STOP_WORDS.has(w));
+  const terms = content.length > 0 ? content : words;
+  if (terms.length === 0) return null;
+  return terms.map((t) => `"${t}"`).join(match === "all" ? " " : " OR ");
 }
 
 /**
