@@ -158,6 +158,9 @@ function parseAttributes(obj: Record<string, unknown>): MemoryAttributes {
   if (obj.context !== undefined) {
     a.context = typeof obj.context === "string" ? obj.context : null;
   }
+  if (obj.occurred_at !== undefined) {
+    a.occurredAt = obj.occurred_at === null ? null : parseDate(obj.occurred_at, "occurred_at") ?? null;
+  }
   return a;
 }
 
@@ -475,6 +478,7 @@ export async function handleSearchMemories(
     includeResolved: asBool(args?.include_resolved, false),
     rerank: asBool(args?.rerank, true),
     ...(status ? { status } : {}),
+    ...(typeof args?.during === "string" && args.during.trim() ? { during: args.during } : {}),
     useGraph: asBool(args?.include_graph, false),
     minConfidence: asStringLevel<MemoryConfidence>(args?.min_confidence, MEMORY_CONFIDENCE_LEVELS),
     minImportance: asStringLevel<MemoryImportance>(args?.min_importance, MEMORY_IMPORTANCE_LEVELS),
@@ -564,6 +568,9 @@ function formatSearchResult(r: SearchResult): string {
   }
   if (r.context) {
     result += `\nContext: ${r.context}`;
+  }
+  if (r.occurredAt) {
+    result += `\nOccurred: ${r.occurredAt.toISOString().slice(0, 10)}`;
   }
   result += `\nContent: ${r.content}`;
   if (r.history?.length) {

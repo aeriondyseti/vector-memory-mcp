@@ -41,7 +41,7 @@ export const GRAPH_NEIGHBOR_WEIGHT = 0;
  */
 export const FTS_CONTEXT_WEIGHT = 4;
 /** Fusion weight, against 1 for vector and keyword, of memories from the search's time range. */
-export const TEMPORAL_WEIGHT = process.env.BENCH_TEMPORAL_WEIGHT ? Number(process.env.BENCH_TEMPORAL_WEIGHT) : 1; // TEMP benchmark switch — do not commit
+export const TEMPORAL_WEIGHT = 1;
 /** The temporal lane runs only when its range holds at most this share of the searched memories. */
 export const TEMPORAL_MAX_SHARE = 0.5;
 import {
@@ -97,6 +97,7 @@ export class MemoryRepository {
         row.sequence_number != null ? (row.sequence_number as number) : null,
       precedingMemoryId: (row.preceding_memory_id as string) ?? null,
       context: (row.context as string) ?? null,
+      occurredAt: row.occurred_at != null ? new Date(row.occurred_at as number) : null,
     };
   }
 
@@ -119,7 +120,7 @@ export class MemoryRepository {
     "id, content, metadata, created_at, updated_at, superseded_by, usefulness, " +
     "access_count, last_accessed, project, pinned, archived, confidence, " +
     "importance, expires_at, quality_score, episode_id, sequence_number, " +
-    "preceding_memory_id, context";
+    "preceding_memory_id, context, occurred_at";
 
   private static readonly MEMORY_PLACEHOLDERS =
     MemoryRepository.MEMORY_COLUMNS.split(",").map(() => "?").join(", ");
@@ -147,6 +148,7 @@ export class MemoryRepository {
       memory.sequenceNumber ?? null,
       memory.precedingMemoryId ?? null,
       memory.context ?? null,
+      memory.occurredAt?.getTime() ?? null,
     ];
   }
 
@@ -761,7 +763,7 @@ export class MemoryRepository {
       const inRange = this.db
         .prepare(
           `SELECT v.id, v.vector FROM memories m JOIN memories_vec v ON v.id = m.id
-           WHERE m.created_at >= ? AND m.created_at < ?${projectClause}`,
+           WHERE COALESCE(m.occurred_at, m.created_at) >= ? AND COALESCE(m.occurred_at, m.created_at) < ?${projectClause}`,
         )
         .all(range.start.getTime(), range.end.getTime(), ...params) as Array<{ id: string; vector: Buffer }>;
       if (inRange.length > 0 && inRange.length <= total * TEMPORAL_MAX_SHARE) {

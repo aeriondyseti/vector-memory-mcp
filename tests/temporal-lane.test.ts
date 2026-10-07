@@ -64,6 +64,16 @@ describe("temporal lane", () => {
     expect(top!.id).toBe(marchId);
   });
 
+  test("a memory stored now about an earlier event counts from when the event happened", async () => {
+    const recalled = await service.store("We cooked paella for the guests.", {}, undefined, undefined, {
+      occurredAt: new Date(march.getFullYear(), 2, 20),
+    });
+    const results = await service.search("What did we cook for the guests in March?", "fact_check");
+    const top2 = results.slice(0, 2).map((r) => r.id);
+    expect(top2).toContain(recalled.id);
+    expect(top2).toContain(marchId);
+  });
+
   test("the focus ranks, it doesn't filter", async () => {
     const results = await service.search("What did we cook for the guests in March?", "fact_check");
     expect(results.length).toBe(4);

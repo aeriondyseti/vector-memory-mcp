@@ -71,6 +71,7 @@ describe("types/memory", () => {
         sequenceNumber: null,
         precedingMemoryId: null,
         context: null,
+        occurredAt: null,
       });
     });
 

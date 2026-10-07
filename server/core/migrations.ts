@@ -85,7 +85,8 @@ export function runMigrations(db: Database): void {
       episode_id    TEXT,
       sequence_number INTEGER,
       preceding_memory_id TEXT,
-      context       TEXT
+      context       TEXT,
+      occurred_at   INTEGER
     )
   `);
 
@@ -162,13 +163,15 @@ export function runMigrations(db: Database): void {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_expires_at ON memories(expires_at)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_episode_id ON memories(episode_id)`);
+  // When a memory's event happened (the temporal lane's range test).
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_event_time ON memories(COALESCE(occurred_at, created_at))`);
 
   // -- Knowledge graph subsystem (entity_types, edge_types, entities, graph_edges) --
   ensureGraphSchema(db);
 }
 
 /** Current schema version. Bump when adding a versioned migration below. */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /**
  * Recreate an FTS5 table with FTS_TOKENIZER and refill it from its source
@@ -287,6 +290,13 @@ function runVersionedMigrations(db: Database): void {
 
       db.exec("PRAGMA user_version = 4");
       version = 4;
+    }
+
+    if (version < 5) {
+      // v5: when what a memory describes happened, if not when it was stored.
+      addColumnIfMissing(db, "occurred_at", "occurred_at INTEGER");
+      db.exec("PRAGMA user_version = 5");
+      version = 5;
     }
 
     db.exec("COMMIT");

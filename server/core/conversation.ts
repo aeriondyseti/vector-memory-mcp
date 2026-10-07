@@ -81,6 +81,8 @@ export interface SearchResult {
   importance?: import("./memory").MemoryImportance | null;
   /** Where the memory belongs (document, section), when it has a context. */
   context?: string | null;
+  /** When what the memory describes happened, if recorded apart from when it was stored. */
+  occurredAt?: Date | null;
   /** Versions this memory replaced (same key, or merged into it), newest first. */
   history?: Array<{ content: string; createdAt: Date; replacedAt: Date }>;
   /** Links from a top match or named entity, when the graph lane reached it. */
