@@ -222,7 +222,8 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
         content,
         metadata,
         typeof embeddingText === "string" ? embeddingText : undefined,
-        typeof body.project === "string" ? body.project : undefined
+        typeof body.project === "string" ? body.project : undefined,
+        typeof body.context === "string" ? { context: body.context } : undefined
       );
 
       return c.json({

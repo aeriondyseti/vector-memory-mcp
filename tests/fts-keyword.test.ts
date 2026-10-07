@@ -4,7 +4,7 @@ import { mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { connectToDatabase } from "../server/core/connection";
-import { runMigrations } from "../server/core/migrations";
+import { runMigrations, SCHEMA_VERSION } from "../server/core/migrations";
 import { MemoryRepository } from "../server/core/memory.repository";
 import { ConversationRepository } from "../server/core/conversation.repository";
 import { MemoryService } from "../server/core/memory.service";
@@ -147,7 +147,7 @@ describe("migration v3: stemmed FTS", () => {
 
     expect(ftsSql(db, "memories_fts")).toContain("porter");
     expect(ftsSql(db, "conversation_history_fts")).toContain("porter");
-    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(3);
+    expect((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(SCHEMA_VERSION);
   });
 
   test("an existing database's FTS index is rebuilt with stemming and keeps its rows", () => {

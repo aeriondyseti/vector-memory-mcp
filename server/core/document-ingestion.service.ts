@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync } from "fs";
-import { extname, join, resolve } from "path";
+import { basename, extname, join, resolve } from "path";
 import type { MemoryService } from "./memory.service";
 
 const DEFAULT_EXTENSIONS = [".md", ".txt", ".json"];
@@ -72,6 +72,78 @@ export function chunkText(
   flush();
 
   return chunks;
+}
+
+/** A run of a document's text under one heading path ([] = before the first heading). */
+export interface DocumentSection {
+  headings: string[];
+  text: string;
+}
+
+/**
+ * Split Markdown into sections at its ATX headings ("# ", "## ", …), each
+ * carrying the path of headings above it; headings inside fenced code blocks
+ * don't count. Text before the first heading is a section with no headings.
+ */
+export function markdownSections(markdown: string): DocumentSection[] {
+  const sections: DocumentSection[] = [];
+  const path: Array<{ level: number; title: string }> = [];
+  let lines: string[] = [];
+  let fence: string | null = null;
+
+  const flush = () => {
+    const text = lines.join("\n").trim();
+    if (text.length > 0) sections.push({ headings: path.map((h) => h.title), text });
+    lines = [];
+  };
+
+  for (const line of markdown.split(/\r?\n/)) {
+    const fenceMark = line.match(/^\s*(```|~~~)/)?.[1];
+    if (fenceMark && (fence === null || fence === fenceMark)) fence = fence === null ? fenceMark : null;
+    const heading = fence === null && !fenceMark ? line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/) : null;
+    if (!heading) {
+      lines.push(line);
+      continue;
+    }
+    flush();
+    const level = heading[1]!.length;
+    while (path.length > 0 && path[path.length - 1]!.level >= level) path.pop();
+    path.push({ level, title: heading[2]! });
+  }
+  flush();
+  return sections;
+}
+
+/** A Markdown document's title: frontmatter `title:`, else its first level-1 heading. */
+function markdownTitle(markdown: string): string | null {
+  const frontmatter = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1];
+  const fromFrontmatter = frontmatter?.match(/^title:\s*["']?(.+?)["']?\s*$/m)?.[1];
+  return fromFrontmatter ?? markdown.match(/^#\s+(.+?)\s*#*\s*$/m)?.[1] ?? null;
+}
+
+/**
+ * A document's chunks, each with its context: "Title > Heading > Subheading"
+ * for Markdown (chunked section by section, the heading path naming each
+ * chunk), "Title" otherwise. The title is the file name without extension
+ * unless a Markdown document names its own.
+ */
+export function documentChunks(
+  text: string,
+  filePath: string,
+  chunkSize: number = DEFAULT_CHUNK_SIZE,
+  chunkOverlap: number = DEFAULT_CHUNK_OVERLAP,
+): Array<{ text: string; context: string }> {
+  const fileTitle = basename(filePath, extname(filePath));
+  if (extname(filePath).toLowerCase() !== ".md") {
+    return chunkText(text, chunkSize, chunkOverlap).map((t) => ({ text: t, context: fileTitle }));
+  }
+  const title = markdownTitle(text) ?? fileTitle;
+  return markdownSections(text).flatMap((s) => {
+    // The title heading is already the context's first step.
+    const headings = s.headings[0] === title ? s.headings.slice(1) : s.headings;
+    const context = [title, ...headings].join(" > ");
+    return chunkText(s.text, chunkSize, chunkOverlap).map((t) => ({ text: t, context }));
+  });
 }
 
 /** Best-effort pretty-print of JSON text; falls back to the raw text on parse failure. */
@@ -151,7 +223,7 @@ export interface DocumentIngestionOptions {
 }
 
 /**
- * Document ingestion (Feature 17): chunk Markdown/text/JSON files at sentence
+ * Document ingestion (Feature 17): chunk Markdown (section by section)/text/JSON files at sentence
  * boundaries and store each chunk as a memory via MemoryService. Dependency-free
  * — no PDF/office-document parsing, plain text files only.
  */
@@ -199,7 +271,7 @@ export class DocumentIngestionService {
       }
 
       const text = extname(filePath).toLowerCase() === ".json" ? prepareJsonText(raw) : raw;
-      const chunks = chunkText(text, chunkSize, chunkOverlap);
+      const chunks = documentChunks(text, filePath, chunkSize, chunkOverlap);
       if (chunks.length === 0) {
         result.filesProcessed += 1;
         continue;
@@ -208,7 +280,7 @@ export class DocumentIngestionService {
       try {
         for (let i = 0; i < chunks.length; i++) {
           const memory = await this.service.store(
-            chunks[i]!,
+            chunks[i]!.text,
             {
               source: filePath,
               chunk_index: i,
@@ -218,6 +290,7 @@ export class DocumentIngestionService {
             },
             undefined,
             opts.project,
+            { context: chunks[i]!.context },
           );
           result.memoryIds.push(memory.id);
           result.chunks += 1;

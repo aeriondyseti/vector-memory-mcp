@@ -6,7 +6,11 @@ import type { Database } from "bun:sqlite";
 import { connectToDatabase } from "../server/core/connection";
 import { MemoryRepository } from "../server/core/memory.repository";
 import { MemoryService } from "../server/core/memory.service";
-import { DocumentIngestionService } from "../server/core/document-ingestion.service";
+import {
+  DocumentIngestionService,
+  documentChunks,
+  markdownSections,
+} from "../server/core/document-ingestion.service";
 import { createMockEmbeddings, removeDir } from "./utils/test-helpers";
 
 describe("DocumentIngestionService", () => {
@@ -145,5 +149,58 @@ describe("DocumentIngestionService", () => {
     await expect(
       ingestion.ingest({ filePath, directoryPath: docsDir }),
     ).rejects.toThrow();
+  });
+
+  test("stores each Markdown chunk with its document and section as context", async () => {
+    const filePath = join(docsDir, "atlas.md");
+    writeFileSync(
+      filePath,
+      "# Atlas Design\n\nAtlas syncs notes.\n\n## Auth\n\nTokens expire hourly.\n\n### Refresh\n\nRefresh tokens rotate.\n",
+    );
+
+    const result = await ingestion.ingest({ filePath });
+    const stored = await repository.findByIds(result.memoryIds);
+    const byContent = new Map(stored.map((m) => [m.content, m.context]));
+
+    expect(byContent.get("Atlas syncs notes.")).toBe("Atlas Design");
+    expect(byContent.get("Tokens expire hourly.")).toBe("Atlas Design > Auth");
+    expect(byContent.get("Refresh tokens rotate.")).toBe("Atlas Design > Auth > Refresh");
+  });
+
+  test("a plain-text document's chunks carry its file name as context", async () => {
+    const filePath = join(docsDir, "meeting-notes.txt");
+    writeFileSync(filePath, "We agreed to ship on Friday.");
+
+    const result = await ingestion.ingest({ filePath });
+    const stored = await repository.findById(result.memoryIds[0]!);
+
+    expect(stored!.context).toBe("meeting-notes");
+  });
+});
+
+describe("markdownSections", () => {
+  test("tracks the heading path, popping to the right level", () => {
+    const sections = markdownSections("intro\n# A\none\n## B\ntwo\n# C\nthree");
+    expect(sections).toEqual([
+      { headings: [], text: "intro" },
+      { headings: ["A"], text: "one" },
+      { headings: ["A", "B"], text: "two" },
+      { headings: ["C"], text: "three" },
+    ]);
+  });
+
+  test("ignores heading-like lines inside fenced code and skips empty sections", () => {
+    const sections = markdownSections("# Setup\n```sh\n# not a heading\n```\n## Empty\n## Usage\nRun it.");
+    expect(sections).toEqual([
+      { headings: ["Setup"], text: "```sh\n# not a heading\n```" },
+      { headings: ["Setup", "Usage"], text: "Run it." },
+    ]);
+  });
+});
+
+describe("documentChunks", () => {
+  test("takes the title from frontmatter and doesn't repeat a matching first heading", () => {
+    const chunks = documentChunks("---\ntitle: Field Guide\n---\n# Field Guide\nBirds.\n## Owls\nThey hunt at night.", "/x/guide.md");
+    expect(chunks.map((c) => c.context)).toEqual(["Field Guide", "Field Guide", "Field Guide > Owls"]);
   });
 });

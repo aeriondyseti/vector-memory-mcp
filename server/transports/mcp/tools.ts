@@ -25,6 +25,8 @@ BAD: "Uses SQLite" (no context, no subject, no reasoning)
 
 For long content (>1000 chars), provide embedding_text with a searchable summary.
 
+When a memory comes from a larger source (a document, a note, a long discussion), name the source and its section in "context" — it is searched with the memory, so the memory is found by what it belongs to even when its own text doesn't say.
+
 A memory that near-exactly repeats an existing one in the same project is not stored again: the response names the existing memory instead (update it with update_memories if something changed).
 
 HOW MEMORIES UPDATE:
@@ -48,6 +50,13 @@ HOW MEMORIES UPDATE:
               type: "string",
               description:
                 "Summary for search embedding (required if content >1000 chars).",
+            },
+            context: {
+              type: "string",
+              description:
+                "Where this memory belongs, as a short path from source to section " +
+                "(e.g. 'Atlas design doc > Auth flow', 'Campaign notes > Valerica > Allies'). " +
+                "Searched along with the content; shown with the memory, not part of it.",
             },
             metadata: {
               type: "object",
@@ -201,6 +210,11 @@ Use to correct content, refine embedding text, or replace metadata without chang
             embedding_text: {
               type: "string",
               description: "New embedding summary (triggers embedding regeneration).",
+            },
+            context: {
+              type: "string",
+              description:
+                "New context — where the memory belongs, e.g. 'Atlas design doc > Auth flow' (triggers embedding regeneration). Empty string clears it.",
             },
             status: {
               type: "string",

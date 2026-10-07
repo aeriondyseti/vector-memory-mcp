@@ -79,6 +79,8 @@ export interface SearchResult {
   lastAccessed?: Date | null;
   pinned?: boolean;
   importance?: import("./memory").MemoryImportance | null;
+  /** Where the memory belongs (document, section), when it has a context. */
+  context?: string | null;
   /** Links from a top match or named entity, when the graph lane reached it. */
   graphDistance?: number | null;
   // History-specific fields

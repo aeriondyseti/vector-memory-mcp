@@ -70,6 +70,7 @@ describe("types/memory", () => {
         episodeId: null,
         sequenceNumber: null,
         precedingMemoryId: null,
+        context: null,
       });
     });
 

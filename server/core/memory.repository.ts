@@ -31,6 +31,13 @@ export const GRAPH_WEIGHT = 0.5;
  * 0.5 → −0.116 / +0.26, 0.1 → −0.056 / +0.31, 0 → ±0 / +0.25.
  */
 export const GRAPH_NEIGHBOR_WEIGHT = 0;
+/**
+ * BM25 weight of a memory's context (document, section) against 1 for its
+ * content: a word naming what the memory is about counts more than a word
+ * the text merely uses. Swept 1/2/4/8 on a real notes corpus; 4 ranked best
+ * on hand-written questions and overall.
+ */
+export const FTS_CONTEXT_WEIGHT = 4;
 import {
   type Memory,
   type HybridRow,
@@ -83,6 +90,7 @@ export class MemoryRepository {
       sequenceNumber:
         row.sequence_number != null ? (row.sequence_number as number) : null,
       precedingMemoryId: (row.preceding_memory_id as string) ?? null,
+      context: (row.context as string) ?? null,
     };
   }
 
@@ -105,7 +113,7 @@ export class MemoryRepository {
     "id, content, metadata, created_at, updated_at, superseded_by, usefulness, " +
     "access_count, last_accessed, project, pinned, archived, confidence, " +
     "importance, expires_at, quality_score, episode_id, sequence_number, " +
-    "preceding_memory_id";
+    "preceding_memory_id, context";
 
   private static readonly MEMORY_PLACEHOLDERS =
     MemoryRepository.MEMORY_COLUMNS.split(",").map(() => "?").join(", ");
@@ -132,6 +140,7 @@ export class MemoryRepository {
       memory.episodeId ?? null,
       memory.sequenceNumber ?? null,
       memory.precedingMemoryId ?? null,
+      memory.context ?? null,
     ];
   }
 
@@ -149,8 +158,8 @@ export class MemoryRepository {
         .run(memory.id, serializeVector(memory.embedding));
 
       this.db
-        .prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)")
-        .run(memory.id, memory.content);
+        .prepare("INSERT INTO memories_fts (id, content, context) VALUES (?, ?, ?)")
+        .run(memory.id, memory.content, memory.context ?? null);
     });
 
     tx();
@@ -174,8 +183,8 @@ export class MemoryRepository {
       // fts5 virtual tables don't support REPLACE — delete then insert
       this.db.prepare("DELETE FROM memories_fts WHERE id = ?").run(memory.id);
       this.db
-        .prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)")
-        .run(memory.id, memory.content);
+        .prepare("INSERT INTO memories_fts (id, content, context) VALUES (?, ?, ?)")
+        .run(memory.id, memory.content, memory.context ?? null);
     });
 
     tx();
@@ -679,6 +688,7 @@ export class MemoryRepository {
     // fusion), pre-filtered by project when scoped. Exact mode requires every
     // content word; the other modes match any of them.
     const ftsQuery = buildFtsQuery(query, filters?.mode === "exact" ? "all" : "any");
+    const bm25 = `bm25(memories_fts, 0, 1, ${FTS_CONTEXT_WEIGHT})`;
     const ftsResults: Array<{ id: string }> = ftsQuery
       ? project !== undefined
         ? (this.db
@@ -686,12 +696,12 @@ export class MemoryRepository {
               `SELECT memories_fts.id FROM memories_fts
                JOIN memories m ON memories_fts.id = m.id
                WHERE memories_fts MATCH ? AND m.project = ?
-               ORDER BY rank LIMIT ?`,
+               ORDER BY ${bm25} LIMIT ?`,
             )
             .all(ftsQuery, project, candidateLimit) as Array<{ id: string }>)
         : (this.db
             .prepare(
-              "SELECT id FROM memories_fts WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?",
+              `SELECT id FROM memories_fts WHERE memories_fts MATCH ? ORDER BY ${bm25} LIMIT ?`,
             )
             .all(ftsQuery, candidateLimit) as Array<{ id: string }>)
       : [];

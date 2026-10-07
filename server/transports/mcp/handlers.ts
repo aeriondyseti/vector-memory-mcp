@@ -150,6 +150,9 @@ function parseAttributes(obj: Record<string, unknown>): MemoryAttributes {
     a.precedingMemoryId =
       typeof obj.preceding_memory_id === "string" ? obj.preceding_memory_id : null;
   }
+  if (obj.context !== undefined) {
+    a.context = typeof obj.context === "string" ? obj.context : null;
+  }
   return a;
 }
 
@@ -513,7 +516,9 @@ function formatMemoryDetail(
     return `Memory ${memoryId} not found`;
   }
 
-  let result = `ID: ${memory.id}\nContent: ${memory.content}`;
+  let result = `ID: ${memory.id}`;
+  if (memory.context) result += `\nContext: ${memory.context}`;
+  result += `\nContent: ${memory.content}`;
   if (memory.metadata && Object.keys(memory.metadata).length > 0) {
     result += `\nMetadata: ${JSON.stringify(memory.metadata)}`;
   }
@@ -542,6 +547,9 @@ function formatSearchResult(r: SearchResult): string {
   }
   if (r.project) {
     result += `\nProject: ${r.project}`;
+  }
+  if (r.context) {
+    result += `\nContext: ${r.context}`;
   }
   result += `\nContent: ${r.content}`;
   if (r.metadata && Object.keys(r.metadata).length > 0) {

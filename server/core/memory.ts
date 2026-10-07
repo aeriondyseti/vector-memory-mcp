@@ -36,6 +36,30 @@ export interface Memory {
   sequenceNumber?: number | null;
   /** Explicit temporal predecessor within an episode (null = none). */
   precedingMemoryId?: string | null;
+  /**
+   * Where the memory belongs — e.g. a document and section ("Atlas design
+   * doc > Auth"). Embedded and keyword-indexed with the content (see
+   * `indexedText`) but not part of it. Null = none.
+   */
+  context?: string | null;
+}
+
+/** Longest context kept; a context is a short label, not content. */
+export const MAX_CONTEXT_CHARS = 300;
+
+/** Trim a caller-supplied context; empty → null, overlong → cut at MAX_CONTEXT_CHARS. */
+export function normalizeContext(value: string | null | undefined): string | null {
+  const trimmed = value?.replace(/\s+/g, " ").trim() ?? "";
+  return trimmed === "" ? null : trimmed.slice(0, MAX_CONTEXT_CHARS);
+}
+
+/**
+ * The text a memory is embedded as: its context, when it has one, ahead of
+ * its content (or of an explicit embedding text). A chunk of a long document
+ * says little on its own; its document and section say what it is about.
+ */
+export function indexedText(text: string, context: string | null | undefined): string {
+  return context ? `${context}\n\n${text}` : text;
 }
 
 export const MEMORY_CONFIDENCE_LEVELS = [
@@ -162,6 +186,8 @@ export interface MemoryAttributes {
   episodeId?: string | null;
   sequenceNumber?: number | null;
   precedingMemoryId?: string | null;
+  /** Where the memory belongs (see Memory.context); null clears it. */
+  context?: string | null;
 }
 
 /**
@@ -263,6 +289,7 @@ export function memoryToDict(memory: Memory): Record<string, unknown> {
     episodeId: memory.episodeId ?? null,
     sequenceNumber: memory.sequenceNumber ?? null,
     precedingMemoryId: memory.precedingMemoryId ?? null,
+    context: memory.context ?? null,
   };
 }
 
