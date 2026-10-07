@@ -301,11 +301,21 @@ export interface IntentProfile {
 }
 
 /** Signals preserved from the hybrid search pipeline for confidence scoring. */
+/** How a query's similarity spreads over every stored vector it was compared with. */
+export interface SimilarityStats {
+  mean: number;
+  std: number;
+  /** The best similarity of any of them. */
+  best: number;
+}
+
 export interface SearchSignals {
   cosineSimilarity: number | null;
   ftsMatch: boolean;
   knnRank: number | null;
   ftsRank: number | null;
+  /** The query's similarity stats, when the vector lane ran. */
+  similarity?: SimilarityStats | null;
   /** Links from the graph lane's nearest seed, when the graph reached it. */
   graphDistance?: number | null;
 }
@@ -315,17 +325,36 @@ export type WithRrfScore<T> = T & { rrfScore: number; signals: SearchSignals };
 
 export type HybridRow = WithRrfScore<Memory>;
 
-/**
- * Compute absolute confidence (0-1) from search signals.
- *
- * Based primarily on cosine similarity (the strongest absolute signal)
- * mapped through a sigmoid with an agreement bonus for dual-path matches.
- * The midpoint and steepness are calibrated for all-MiniLM-L6-v2 embeddings.
- */
-// Calibrated against all-MiniLM-L6-v2: noise ceiling ~0.25, weak-relevant floor ~0.30
+// Fallback confidence, for results without similarity stats (exact mode):
+// cosine through a sigmoid calibrated for all-MiniLM-L6-v2 (noise ceiling
+// ~0.25, weak-relevant floor ~0.30), plus a bonus for a strong keyword hit.
 const CONFIDENCE_STEEPNESS = 14;
 const CONFIDENCE_MIDPOINT = 0.35;
 const CONFIDENCE_AGREEMENT_BONUS = 0.08;
+
+/**
+ * Confidence model (see computeConfidence). Stage one — is anything stored
+ * relevant at all: the query's best similarity over the store through a
+ * sigmoid. Stage two — is this the result: a logistic model over the
+ * result's similarity z-score against the whole store, its gap to the best
+ * match, and its keyword rank. Fitted by logistic regression on the public
+ * benchmark sets' top-10 results (general, ConvoMem) for all-MiniLM-L6-v2;
+ * on a held-out real-world corpus it told right from wrong top results far
+ * better than cosine alone, kept off-topic queries low, and was calibrated
+ * (results scored ~0.7 were relevant about 70% of the time).
+ */
+const ANY_RELEVANT_STEEPNESS = 14;
+const ANY_RELEVANT_MIDPOINT = 0.4;
+const RELEVANCE_MODEL = {
+  intercept: -3.462,
+  z: 0.395,
+  gapToBest: -10.019,
+  ftsReciprocalRank: 2.186,
+  strongKeywordAgreement: 0.302,
+  keywordOnly: -0.262,
+  /** A keyword-only result has no similarity: it is scored as this far below the best match. */
+  keywordOnlyGap: 0.5,
+};
 /**
  * A keyword hit counts as strong evidence only among the top BM25 ranks: the
  * keyword lane matches any of a question's content words, so a low-ranked
@@ -341,8 +370,33 @@ export function isStrongFtsMatch(signals: SearchSignals): boolean {
   return signals.ftsMatch && signals.ftsRank !== null && signals.ftsRank <= STRONG_FTS_RANK;
 }
 
+const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
+
+/**
+ * Confidence (0–1) that a result is relevant: P(anything stored is relevant)
+ * × P(this result is the one | something is) — see RELEVANCE_MODEL. Without
+ * similarity stats (exact mode, where the vector lane doesn't run) it falls
+ * back to cosine-through-a-sigmoid and fixed keyword-only values.
+ */
 export function computeConfidence(signals: SearchSignals): number {
   const sim = signals.cosineSimilarity;
+  const stats = signals.similarity;
+
+  if (stats) {
+    const m = RELEVANCE_MODEL;
+    const keywordOnly = sim === null;
+    const z = keywordOnly ? 0 : (sim - stats.mean) / (stats.std || 1e-6);
+    const gap = keywordOnly ? m.keywordOnlyGap : Math.max(0, stats.best - sim);
+    const logit =
+      m.intercept +
+      m.z * z +
+      m.gapToBest * gap +
+      m.ftsReciprocalRank * (signals.ftsRank ? 1 / signals.ftsRank : 0) +
+      m.strongKeywordAgreement * (!keywordOnly && isStrongFtsMatch(signals) ? 1 : 0) +
+      m.keywordOnly * (keywordOnly ? 1 : 0);
+    const anyRelevant = sigmoid(ANY_RELEVANT_STEEPNESS * (stats.best - ANY_RELEVANT_MIDPOINT));
+    return anyRelevant * sigmoid(logit);
+  }
 
   if (sim === null) {
     // FTS-only result — keyword match but no semantic confirmation

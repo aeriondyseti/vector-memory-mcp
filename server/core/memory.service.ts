@@ -88,6 +88,13 @@ function matchesAttributeFilters(
 const CURRENT_PROJECT_BOOST = 1.15;
 
 // ── Write-time duplicate check ──────────────────────────────────────
+/**
+ * Default confidence proactive_context surfaces a memory at. Confidence is a
+ * calibrated probability (computeConfidence): at 0.5 a surfaced memory is
+ * more likely relevant than not, and off-topic context surfaces nothing.
+ */
+export const PROACTIVE_CONFIDENCE_THRESHOLD = 0.5;
+
 // A new memory is a duplicate of an existing one only when both signals
 // agree: near-identical embeddings AND near-identical wording. Embeddings
 // alone conflate different facts on the same subject ("chose X" / "chose
@@ -776,7 +783,7 @@ export class MemoryService {
   async proactiveContext(
     context: string,
     maxResults = 5,
-    threshold = 0.65,
+    threshold = PROACTIVE_CONFIDENCE_THRESHOLD,
     autoIngest = false,
   ): Promise<SearchResult[]> {
     const results = await this.search(context, "associative", {

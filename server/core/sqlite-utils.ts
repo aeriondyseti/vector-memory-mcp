@@ -68,6 +68,21 @@ export function knnSearch(
   k: number,
   candidates?: { sql: string; params: Array<string | number> },
 ): Array<{ id: string; distance: number }> {
+  return knnSearchWithStats(db, table, queryVec, k, candidates).results;
+}
+
+/**
+ * knnSearch, plus how the query's similarity spreads over every vector it
+ * was compared with (null when there were none) — the baseline confidence
+ * judges a match against. Free: the scan computes every similarity anyway.
+ */
+export function knnSearchWithStats(
+  db: Database,
+  table: VecTable,
+  queryVec: number[],
+  k: number,
+  candidates?: { sql: string; params: Array<string | number> },
+): { results: Array<{ id: string; distance: number }>; stats: SimilarityStats | null } {
   const rows = (
     candidates
       ? db.prepare(candidates.sql).all(...candidates.params)
@@ -75,6 +90,9 @@ export function knnSearch(
   ) as Array<{ id: string; vector: Buffer }>;
 
   const qv = new Float32Array(queryVec);
+  let sum = 0;
+  let sumSq = 0;
+  let best = -Infinity;
   const scored = rows.map((r) => {
     const vec = new Float32Array(
       r.vector.buffer,
@@ -82,12 +100,19 @@ export function knnSearch(
       r.vector.byteLength / 4,
     );
     const sim = cosineSimilarity(qv, vec);
+    sum += sim;
+    sumSq += sim * sim;
+    if (sim > best) best = sim;
     // Convert similarity to distance (1 - sim) for consistency with previous API
     return { id: r.id, distance: 1 - sim };
   });
 
   scored.sort((a, b) => a.distance - b.distance);
-  return scored.slice(0, k);
+  const n = rows.length;
+  const mean = n > 0 ? sum / n : 0;
+  const stats =
+    n === 0 ? null : { mean, std: Math.sqrt(Math.max(0, sumSq / n - mean * mean)), best };
+  return { results: scored.slice(0, k), stats };
 }
 
 /**
@@ -163,15 +188,17 @@ export function hybridRRF(
   return scores;
 }
 
-import type { SearchSignals } from "./memory";
+import type { SearchSignals, SimilarityStats } from "./memory";
 
 /**
  * Compute hybrid RRF scores while preserving per-result search signals
- * (cosine similarity, FTS match, rank positions) for confidence scoring.
+ * (cosine similarity, FTS match, rank positions, and the query's similarity
+ * stats when the vector lane ran) for confidence scoring.
  */
 export function hybridRRFWithSignals(
   vectorResults: Array<{ id: string; distance: number }>,
   ftsResults: Array<{ id: string }>,
+  similarity: SimilarityStats | null = null,
   k: number = RRF_K
 ): Map<string, SearchSignals & { rrfScore: number }> {
   const knnMap = new Map<string, { similarity: number; rank: number }>();
@@ -200,6 +227,7 @@ export function hybridRRFWithSignals(
       ftsMatch: ftsRank !== null,
       knnRank: knn?.rank ?? null,
       ftsRank,
+      similarity,
     });
   }
 

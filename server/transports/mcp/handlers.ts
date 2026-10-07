@@ -1,5 +1,9 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { type MemoryService, WRITE_DUPLICATE_SIMILARITY } from "../../core/memory.service";
+import {
+  type MemoryService,
+  PROACTIVE_CONFIDENCE_THRESHOLD,
+  WRITE_DUPLICATE_SIMILARITY,
+} from "../../core/memory.service";
 import type { ConversationHistoryService } from "../../core/conversation.service";
 import type {
   SearchIntent,
@@ -1048,7 +1052,9 @@ export async function handleProactiveContext(
   const context = requireString(args, "context");
   const maxResults = asInt(args?.max_results, 5, 1, 50);
   const threshold =
-    typeof args?.threshold === "number" ? Math.max(0, Math.min(1, args.threshold)) : 0.65;
+    typeof args?.threshold === "number"
+      ? Math.max(0, Math.min(1, args.threshold))
+      : PROACTIVE_CONFIDENCE_THRESHOLD;
   const autoIngest = asBool(args?.auto_ingest, false);
 
   const results = await service.proactiveContext(context, maxResults, threshold, autoIngest);
