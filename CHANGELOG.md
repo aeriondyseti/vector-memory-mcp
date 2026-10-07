@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-07
+
 ### Added
 - **Automatic waypoint checkpoints** (Claude Code mod, `plugin/hooks/mods/`, registered under `modules` in `hooks.json`); tests run with `claude plugin test plugin`.
   - **Compaction**: a `session.compact` hook saves a model-drafted waypoint (`set_waypoint`) before every main-conversation compaction and appends it (`get_waypoint`) to the compacted conversation. `/compact <text>` steers the draft. Falls back to a plain compaction on any failure; skips `precompute` and subagent compactions.
@@ -41,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Keyword hits are ranked**: memory keyword results were returned in insertion order and fed to the fusion as if ranked; they are now ordered by BM25 (`ORDER BY rank`), as conversation history already was.
 - **Keyword search stems words** (Porter): "migration" finds "migrating". Schema v3 rebuilds both FTS indexes with the stemming tokenizer from the rows they index, on first start after upgrading.
 - **Confidence counts only strong keyword hits**: the agreement bonus applies to keyword ranks ≤ 10, and a keyword-only result scores 0.40 when ranked that high, 0.20 otherwise.
+
+### Removed
+- **Context monitor**: the session-health alerts (context usage and compaction count, on `Stop` and `PostToolUse`) moved to their own `context-monitor` plugin; install it to keep them. With both plugins installed, every alert fired twice. Removed `context-monitor.ts`, the compaction-counter hook (`session-compact.ts`), and the monitor-state reset on `/clear`. The automatic waypoint checkpoints (compaction, `/clear`, `/exit`) are unchanged.
 
 ## [3.0.0] - 2026-09-27
 
@@ -308,6 +313,8 @@ LanceDB (`@lancedb/lancedb`, `apache-arrow`) ships as a production dependency in
 - Initial MCP server implementation
 - Basic project structure
 
+[3.1.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v3.0.0...v3.1.0
+[3.0.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v2.4.0...v3.0.0
 [2.4.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v2.2.3...v2.4.0
 [2.0.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v1.0.2...v1.1.0
