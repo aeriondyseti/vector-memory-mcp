@@ -7,7 +7,7 @@ import type {
 import {
   serializeVector,
   safeParseJsonObject,
-  sanitizeFtsQuery,
+  buildFtsQuery,
   hybridRRFWithSignals,
   topByRRF,
   knnSearch,
@@ -292,10 +292,13 @@ export class ConversationRepository {
         : undefined,
     );
 
-    // FTS5 search, pre-filtered by project when scoped
-    const ftsQuery = sanitizeFtsQuery(query);
+    // FTS5 search (at least half the content words, BM25-ranked), pre-filtered by project
+    // when scoped; skipped when the query has no word to search for
+    const ftsQuery = buildFtsQuery(query, "half");
     const ftsResults = (
-      project !== undefined
+      ftsQuery === null
+        ? []
+        : project !== undefined
         ? this.db
             .prepare(
               `SELECT conversation_history_fts.id FROM conversation_history_fts

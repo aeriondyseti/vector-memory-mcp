@@ -91,13 +91,73 @@ export function knnSearch(
 }
 
 /**
- * Sanitize a user query for FTS5 by quoting each token as a literal.
- * Prevents FTS5 syntax errors from special characters like AND, OR, *, etc.
+ * Function and question words dropped from keyword queries: they carry no
+ * topic, and as required terms they veto every memory that lacks them
+ * ("who", "what do we know about"). Domain-neutral on purpose.
  */
-export function sanitizeFtsQuery(query: string): string {
-  const tokens = query.trim().split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return '""';
-  return tokens.map(t => `"${t.replace(/"/g, '""')}"`).join(" ");
+const FTS_STOP_WORDS: ReadonlySet<string> = new Set([
+  "a", "an", "the", "and", "or", "but", "if", "then", "so", "of", "in", "on", "at", "to", "for",
+  "from", "by", "with", "about", "into", "onto", "over", "under", "after", "before", "as", "than",
+  "is", "are", "was", "were", "be", "been", "being", "am", "do", "does", "did", "done", "doing",
+  "have", "has", "had", "having", "i", "me", "my", "we", "us", "our", "you", "your", "he", "him",
+  "his", "she", "her", "it", "its", "they", "them", "their", "this", "that", "these", "those",
+  "there", "here", "what", "which", "who", "whom", "whose", "when", "where", "why", "how", "can",
+  "could", "would", "should", "will", "shall", "may", "might", "must", "not", "no", "any", "all",
+  "some", "just", "also", "very", "too", "more", "most", "again", "ever", "know", "tell",
+  "remind", "anything", "something", "get", "got",
+]);
+
+/**
+ * How a keyword query combines its terms: "half" — at least half of the
+ * content words, ranked by BM25 (the search lanes) — or "all" — every
+ * content word (exact mode).
+ *
+ * Why half: AND over every word (the old behaviour) matched almost no
+ * natural-language question; plain OR let a memory sharing one common word
+ * cast a full keyword vote (general benchmark MRR 0.818 → 0.750). Requiring
+ * half improved the general benchmark (0.818 → 0.840) and a larger
+ * real-world corpus alike.
+ */
+export type FtsMatch = "half" | "all";
+
+/** "half" spells out every combination of its terms; this bounds them (C(7,4) = 35). */
+const MAX_HALF_MATCH_TERMS = 7;
+
+/**
+ * Build an FTS5 query from natural language: lowercase words (split on
+ * anything that isn't a letter or digit, so "Valerica's" → "valerica"),
+ * stop words and duplicates dropped, each term quoted as a literal (no FTS5
+ * syntax gets through). A query of only stop words keeps its words rather
+ * than matching nothing. Returns null when no term is left: skip the lane.
+ *
+ * "half" is written as an OR of AND-groups — FTS5 has no "at least k of n":
+ * the longest (most specific) MAX_HALF_MATCH_TERMS terms are kept, and each
+ * group holds ceil(n / 2) of them (n = all content words, capped at the
+ * terms kept). One or two terms simply OR.
+ */
+export function buildFtsQuery(query: string, match: FtsMatch = "half"): string | null {
+  const words = [...new Set(query.toLowerCase().split(/[^\p{L}\p{N}]+/u))].filter(
+    (w) => w.length > 1 || /\p{N}/u.test(w),
+  );
+  const content = words.filter((w) => !FTS_STOP_WORDS.has(w));
+  const terms = content.length > 0 ? content : words;
+  if (terms.length === 0) return null;
+  const quote = (t: string) => `"${t}"`;
+  if (match === "all") return terms.map(quote).join(" ");
+  if (terms.length <= 2) return terms.map(quote).join(" OR ");
+
+  const kept = [...terms].sort((a, b) => b.length - a.length).slice(0, MAX_HALF_MATCH_TERMS);
+  const need = Math.min(Math.ceil(terms.length / 2), kept.length);
+  const groups: string[] = [];
+  const choose = (start: number, chosen: string[]) => {
+    if (chosen.length === need) {
+      groups.push(`(${chosen.map(quote).join(" ")})`);
+      return;
+    }
+    for (let i = start; i < kept.length; i++) choose(i + 1, [...chosen, kept[i]]);
+  };
+  choose(0, []);
+  return groups.join(" OR ");
 }
 
 /**

@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Plugin root is `plugin/`**: the marketplace entry's source is now `./plugin` and the manifest lives at `plugin/.claude-plugin/plugin.json`, so installs copy only the plugin, not the whole repo.
 - **hook-kit is a real dependency, no longer vendored**: hooks import `@aeriondyseti/hook-kit` from `plugin/package.json` + `plugin/bun.lock`, which Claude Code installs automatically into each cached plugin version. Removed the committed bundle, `scripts/vendor-hook-kit.ts`, the `vendor:hooks` scripts, and the CI drift guard.
 
+### Fixed
+- **Keyword search works for natural-language questions**: the keyword (FTS5) lane required every word of the query, so a question like "Who leads the Scarlet Covenant?" matched nothing unless "who" appeared in a memory — in practice search ran on vectors alone. Queries are now built from content words (question and function words dropped, possessives split, FTS syntax neutralised) and a memory must contain **at least half** of them; `exact` mode still requires every content word. Plain OR was measured and rejected: it let one-word overlaps cast full keyword votes (general benchmark MRR 0.818 → 0.750); half-matching improves it (→ 0.838).
+- **Keyword hits are ranked**: memory keyword results were returned in insertion order and fed to the fusion as if ranked; they are now ordered by BM25 (`ORDER BY rank`), as conversation history already was.
+- **Keyword search stems words** (Porter): "migration" finds "migrating". Schema v3 rebuilds both FTS indexes with the stemming tokenizer from the rows they index, on first start after upgrading.
+- **Confidence counts only strong keyword hits**: the agreement bonus applies to keyword ranks ≤ 10, and a keyword-only result scores 0.40 when ranked that high, 0.20 otherwise.
+
 ## [3.0.0] - 2026-09-27
 
 Major release: completes the entire feature roadmap (Phases 1–4 + Knowledge Graph)
