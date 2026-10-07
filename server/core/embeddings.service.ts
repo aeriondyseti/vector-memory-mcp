@@ -7,20 +7,54 @@ import { existsSync } from "fs";
 const HF_CDN = "https://huggingface.co";
 const MAX_SEQ_LENGTH = 512;
 
+/** How a model turns its token vectors into one embedding, and how it wants a search query phrased. */
+export interface EmbeddingModelProfile {
+  /** "mean": average of the tokens; "cls": the first token's vector. */
+  pooling: "mean" | "cls";
+  /** Prepended to search queries (not to stored text) by models trained for asymmetric retrieval. */
+  queryPrefix: string;
+}
+
+const RETRIEVAL_QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
+
+/** Known models (ONNX exports on Hugging Face); others default to mean pooling, no prefix. */
+export const MODEL_PROFILES: Record<string, EmbeddingModelProfile> = {
+  "Xenova/all-MiniLM-L6-v2": { pooling: "mean", queryPrefix: "" },
+  "Snowflake/snowflake-arctic-embed-xs": { pooling: "cls", queryPrefix: RETRIEVAL_QUERY_PREFIX },
+  "Snowflake/snowflake-arctic-embed-s": { pooling: "cls", queryPrefix: RETRIEVAL_QUERY_PREFIX },
+  "Xenova/bge-small-en-v1.5": { pooling: "cls", queryPrefix: RETRIEVAL_QUERY_PREFIX },
+};
+
+export function modelProfile(modelName: string): EmbeddingModelProfile {
+  return MODEL_PROFILES[modelName] ?? { pooling: "mean", queryPrefix: "" };
+}
+
 export class EmbeddingsService {
   private modelName: string;
   private session: ort.InferenceSession | null = null;
   private tokenizer: Tokenizer | null = null;
   private initPromise: Promise<void> | null = null;
   private _dimension: number;
+  private profile: EmbeddingModelProfile;
 
   constructor(modelName: string, dimension: number) {
     this.modelName = modelName;
     this._dimension = dimension;
+    this.profile = modelProfile(modelName);
   }
 
   get dimension(): number {
     return this._dimension;
+  }
+
+  /** A search query as the model wants it embedded (its query prefix, if any). */
+  queryText(query: string): string {
+    return this.profile.queryPrefix + query;
+  }
+
+  /** Embed a search query (vs. `embed` for text being stored). */
+  async embedQuery(query: string): Promise<number[]> {
+    return this.embed(this.queryText(query));
   }
 
   get isReady(): boolean {
@@ -94,7 +128,11 @@ export class EmbeddingsService {
     const output = await this.session!.run(feeds);
     const lastHidden = output["last_hidden_state"];
 
-    const pooled = this.meanPool(lastHidden.data as Float32Array, mask, seqLen);
+    const data = lastHidden.data as Float32Array;
+    const pooled =
+      this.profile.pooling === "cls"
+        ? Array.from(data.subarray(0, this._dimension))
+        : this.meanPool(data, mask, seqLen);
     return this.normalize(pooled);
   }
 
