@@ -26,7 +26,7 @@ There are two ways to install Vector Memory, depending on how much integration y
 
 ### Option A: Claude Code Plugin (recommended)
 
-Install as a plugin to get the full experience: MCP server, session lifecycle hooks, waypoint skills, and context monitoring — all managed automatically.
+Install as a plugin to get the full experience: MCP server, session lifecycle hooks, automatic waypoint checkpoints, and waypoint skills — all managed automatically.
 
 ```bash
 # Add the marketplace

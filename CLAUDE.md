@@ -112,7 +112,7 @@ This repo ships two independent artifacts from one codebase:
 | `plugin/.claude-plugin/plugin.json` | Plugin manifest (paths relative to `plugin/`) |
 | `plugin/package.json` + `plugin/bun.lock` | Hook dependencies (`@aeriondyseti/hook-kit`). Claude Code runs `bun install --frozen-lockfile --ignore-scripts` in each cached plugin version |
 | `plugin/.mcp.json` | Runs MCP server via `bunx @aeriondyseti/vector-memory-mcp@latest` |
-| `plugin/hooks/` | Session lifecycle hooks (start, clear, compact, context monitor) |
+| `plugin/hooks/` | Session lifecycle hooks (start, clear) and waypoint checkpoint mods (compaction, /clear, /exit). Context-usage warnings live in the separate `context-monitor` plugin |
 | `plugin/hooks/scripts/hooks-lib.ts` | Hook utilities (formatting, server discovery) — self-contained copy |
 | `plugin/skills/` | Skills: vector-memory-usage, waypoint-set, waypoint-get, waypoint-workflow |
 | `scripts/sync-version.ts` | `npm version` hook: stamps version into plugin/marketplace manifests |

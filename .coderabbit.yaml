@@ -36,7 +36,7 @@ reviews:
         Plugin hooks run as standalone Bun child processes, not inside the server.
         They communicate with the server via HTTP (lockfile-based discovery).
         Shared formatting is imported directly from server/utils/formatting.ts.
-        Hook-specific code (emitHookOutput, getStatePath, server discovery) stays in hooks-lib.ts.
+        Hook-specific code (emitHookOutput, server discovery) stays in hooks-lib.ts.
     - path: "tests/**/*.ts"
       instructions: |
         Framework: bun:test (not Jest/Vitest).

@@ -11,8 +11,8 @@
  * so the plugin directory is fully self-contained (no imports outside plugin/).
  */
 
-import { readFileSync, mkdirSync } from "fs";
-import { homedir, tmpdir } from "os";
+import { readFileSync } from "fs";
+import { homedir } from "os";
 import { join } from "path";
 
 // ── ANSI escape codes ───────────────────────────────────────────────
@@ -223,17 +223,6 @@ export function runHook(label: string, fn: () => Promise<void>): void {
       ]),
     });
   });
-}
-
-// ── Monitor state ───────────────────────────────────────────────────
-
-export const STATE_DIR = join(tmpdir(), "claude-context-monitor");
-
-export function getStatePath(sessionId: string): string {
-  mkdirSync(STATE_DIR, { recursive: true });
-  // Sanitize to prevent path traversal — strip anything that isn't alphanumeric or hyphens
-  const safe = sessionId.replace(/[^a-zA-Z0-9-]/g, "_");
-  return join(STATE_DIR, `${safe}.json`);
 }
 
 // ── Server discovery ────────────────────────────────────────────────
