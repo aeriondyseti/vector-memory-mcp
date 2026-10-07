@@ -116,11 +116,13 @@ export const RERANK_DEPTH = 30;
 export const RERANK_BLEND = 0.5;
 
 /**
- * Default confidence proactive_context surfaces a memory at. Confidence is a
- * calibrated probability (computeConfidence): at 0.5 a surfaced memory is
- * more likely relevant than not, and off-topic context surfaces nothing.
+ * Default confidence proactive_context surfaces a memory at. Chosen on the
+ * RAG-injection evaluation (hit rate, precision, and silence on chit-chat and
+ * off-topic context across four datasets) with reranker-aware confidence:
+ * 0.6 balanced finding a relevant memory against injecting noise; chit-chat
+ * stayed silent 97–100% of the time.
  */
-export const PROACTIVE_CONFIDENCE_THRESHOLD = 0.5;
+export const PROACTIVE_CONFIDENCE_THRESHOLD = 0.6;
 
 // A new memory is a duplicate of an existing one only when both signals
 // agree: near-identical embeddings AND near-identical wording. Embeddings
