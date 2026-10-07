@@ -57,7 +57,7 @@ const CATEGORY_THRESHOLDS: Record<
 };
 
 export interface RunOptions {
-  /** Rank in the knowledge-graph lane (default true, as search does). */
+  /** Rank in the knowledge-graph lane (default false, as search does). */
   useGraph?: boolean;
 }
 
@@ -211,7 +211,7 @@ export class BenchmarkRunner {
       const intent: SearchIntent = "fact_check";
       const results = await this.service.search(query.query, intent, {
         limit: 10,
-        useGraph: options.useGraph ?? true,
+        useGraph: options.useGraph ?? false,
       });
       const retrievedIds = results.map((m) => m.id);
       const confidences = results.map((m) => m.confidence);

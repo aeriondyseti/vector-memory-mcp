@@ -143,7 +143,7 @@ export interface SearchOptions {
   includeSuperseded?: boolean;
   /** Include open-until-resolved memories already resolved (default false). */
   includeResolved?: boolean;
-  /** Rank in memories linked through the knowledge graph (default true). */
+  /** Rank in memories linked through the knowledge graph (opt-in, default false). */
   useGraph?: boolean;
   /** Graph lane weights — a tuning knob for benchmarks, not exposed by the MCP tools. */
   graphWeights?: { named?: number; neighbor?: number };

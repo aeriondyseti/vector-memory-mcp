@@ -455,7 +455,7 @@ export class MemoryService {
       includeExpired: options?.includeExpired ?? false,
       now: now.getTime(),
       mode,
-      useGraph: options?.useGraph ?? true,
+      useGraph: options?.useGraph ?? false,
       graphWeights: options?.graphWeights,
     };
 

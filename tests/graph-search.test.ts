@@ -143,11 +143,12 @@ describe("entitiesNamedIn", () => {
 });
 
 describe("search with the graph lane", () => {
+  // These tests are about the lane, so they opt in unless a test says otherwise.
   const search = async (query: string, extra: Record<string, unknown> = {}) =>
     (
       (
         await handleSearchMemories(
-          { query, intent: "fact_check", reason_for_search: "test", include_history: false, limit: 3, ...extra },
+          { query, intent: "fact_check", reason_for_search: "test", include_history: false, limit: 3, include_graph: true, ...extra },
           s,
         )
       ).content[0] as { text: string }
@@ -191,11 +192,14 @@ describe("search with the graph lane", () => {
     expect(out).toContain("via graph (1 link)");
   });
 
-  test("include_graph: false and exact mode leave the graph out", async () => {
+  test("is off unless asked for, and never used in exact mode", async () => {
     await eventMemories();
+    const named = "what do we know about the Spring Gala";
 
-    expect(await search("venue contract", { include_graph: false })).not.toContain("via graph");
-    expect(await search("venue contract", { mode: "exact" })).not.toContain("via graph");
+    expect(await search(named)).toContain("via graph"); // opted in by this suite's helper
+    expect(await search(named, { include_graph: undefined })).not.toContain("via graph"); // the tool's default
+    expect(await search(named, { include_graph: false })).not.toContain("via graph");
+    expect(await search(named, { mode: "exact" })).not.toContain("via graph");
   });
 
   test("a project-scoped search keeps graph hits in the project", async () => {

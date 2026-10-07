@@ -647,7 +647,7 @@ export class MemoryRepository {
       now?: number;
       /** "semantic" (default) / "hybrid" use vector+FTS; "exact" uses FTS only. */
       mode?: "semantic" | "exact" | "hybrid";
-      /** Fuse in the graph lane (default true; never in "exact" mode). */
+      /** Fuse in the graph lane (opt-in, default off; never in "exact" mode). */
       useGraph?: boolean;
       /** Graph lane weights (tuning and benchmarks); default GRAPH_WEIGHT / GRAPH_NEIGHBOR_WEIGHT. */
       graphWeights?: { named?: number; neighbor?: number };
@@ -700,7 +700,7 @@ export class MemoryRepository {
 
     // Graph lane: memories linked to the best text matches, or to entities
     // the query names, join the fusion at GRAPH_WEIGHT. Off in "exact" mode.
-    if (filters?.mode !== "exact" && filters?.useGraph !== false) {
+    if (filters?.mode !== "exact" && filters?.useGraph === true) {
       // Seeds are real matches — a keyword hit or a close embedding — not
       // merely the best-ranked of the vector lane's every-memory candidates.
       const matched = new Map(

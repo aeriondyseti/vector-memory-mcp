@@ -50,7 +50,7 @@ Same memories and graph in both columns; only `include_graph` differs (off → o
 | 0.1 | −0.056 | +0.308 | +0.155 |
 | **0 (default)** | **±0 (noise)** | **+0.250** | **+0.098** |
 
-With `RRF_K = 10`, adjacent ranks in one lane differ by under 0.01. Any neighbour vote large enough to matter therefore lifts topic siblings over the true top answer. The default keeps only the named-entity part (`GRAPH_NEIGHBOR_WEIGHT = 0` in `server/core/memory.repository.ts`).
+With `RRF_K = 10`, adjacent ranks in one lane differ by under 0.01. Any neighbour vote large enough to matter therefore lifts topic siblings over the true top answer. The default keeps only the named-entity part (`GRAPH_NEIGHBOR_WEIGHT = 0` in `server/core/memory.repository.ts`). The lane as a whole is opt-in (`include_graph: true`): on a larger real-world corpus it cost top-rank precision, so it ships off by default until it is tuned further.
 
 Reproduce with `bun run benchmark:graph` (add `--write` to record a new section here).
 
