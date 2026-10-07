@@ -81,6 +81,8 @@ export interface SearchResult {
   importance?: import("./memory").MemoryImportance | null;
   /** Where the memory belongs (document, section), when it has a context. */
   context?: string | null;
+  /** Versions this memory replaced (same key, or merged into it), newest first. */
+  history?: Array<{ content: string; createdAt: Date; replacedAt: Date }>;
   /** Links from a top match or named entity, when the graph lane reached it. */
   graphDistance?: number | null;
   // History-specific fields
@@ -147,6 +149,8 @@ export interface SearchOptions {
   includeResolved?: boolean;
   /** Rerank memory results with the cross-encoder when one is configured (default true). */
   rerank?: boolean;
+  /** Only memories with this status (task, next-step and blocker memories, or any given one). */
+  status?: import("./memory").MemoryStatus;
   /** Rank in memories linked through the knowledge graph (opt-in, default false). */
   useGraph?: boolean;
   /** Graph lane weights — a tuning knob for benchmarks, not exposed by the MCP tools. */

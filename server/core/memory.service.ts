@@ -100,6 +100,9 @@ function matchesAttributeFilters(
 const CURRENT_PROJECT_BOOST = 1.15;
 
 // ── Write-time duplicate check ──────────────────────────────────────
+/** Earlier versions shown with a current memory in search results. */
+export const MAX_INLINE_HISTORY = 3;
+
 /** Memory candidates the cross-encoder rescores per search (or the page size, if larger). */
 export const RERANK_DEPTH = 30;
 /**
@@ -589,7 +592,8 @@ export class MemoryService {
               const live = candidates
                 .filter((m) => includeDeleted || !isDeleted(m))
                 .filter((m) => includeDeleted || options?.includeSuperseded || !isSuperseded(m))
-                .filter((m) => options?.includeResolved || !isResolved(m))
+                .filter((m) => options?.includeResolved || options?.status === "resolved" || !isResolved(m))
+                .filter((m) => !options?.status || memoryStatus(m.metadata) === options.status)
                 .filter((m) => matchesAttributeFilters(m, options));
               const relevanceOf = relativeTo(live.map((m) => m.rrfScore));
               const kept = live.map((candidate, i) => ({
@@ -665,7 +669,39 @@ export class MemoryService {
     const merged = [...memoryResults, ...historyResults];
     merged.sort((a, b) => b.score - a.score);
 
-    return merged.slice(offset, offset + limit);
+    const page = merged.slice(offset, offset + limit);
+    this.attachHistory(page);
+    return page;
+  }
+
+  /**
+   * Give each current memory on the page the versions it replaced, newest
+   * first (up to MAX_INLINE_HISTORY, following the supersede chain): an
+   * agent sees what changed alongside the current value, instead of stale
+   * versions competing as separate results. Versions worded like the
+   * current one (merged duplicates) are left out.
+   */
+  private attachHistory(page: SearchResult[]): void {
+    const current = page.filter((r) => r.source === "memory" && r.supersededBy === null);
+    // Each step: the version replaced by the frontier memory → the result it belongs to.
+    let frontier = new Map(current.map((r) => [r.id, r]));
+    for (let depth = 0; depth < MAX_INLINE_HISTORY && frontier.size > 0; depth++) {
+      const replaced = this.repository.findSupersededBy([...frontier.keys()]);
+      const next = new Map<string, SearchResult>();
+      for (const [id, result] of frontier) {
+        const previous = (replaced.get(id) ?? []).find(
+          (m) => tokenJaccard(m.content, result.content) < WRITE_DUPLICATE_JACCARD,
+        );
+        if (!previous) continue;
+        (result.history ??= []).push({
+          content: previous.content,
+          createdAt: previous.createdAt,
+          replacedAt: previous.updatedAt,
+        });
+        next.set(previous.id, result);
+      }
+      frontier = next;
+    }
   }
 
   async trackAccess(ids: string[]): Promise<void> {
@@ -1050,7 +1086,8 @@ export class MemoryService {
    *  - keep_content: keep the survivor's content as-is
    *  - keep_newest:  adopt the newest member's content
    *  - combine_content: concatenate all distinct contents (re-embedded)
-   * The merged-away memories are soft-deleted. Returns the survivor.
+   * The merged-away memories are superseded by the survivor — kept as its
+   * history, out of default search. Returns the survivor.
    */
   async mergeDuplicates(
     keepId: string,
@@ -1086,8 +1123,9 @@ export class MemoryService {
         ? await this.update(keepId, { content })
         : keep;
 
-    // Soft-delete the merged-away duplicates.
-    this.repository.markDeletedBulk(mergeIds.filter((id) => id !== keepId));
+    // The merged-away duplicates become the survivor's history (searchable
+    // with include_superseded), not deletions.
+    this.repository.supersede(mergeIds, keepId);
     return merged;
   }
 

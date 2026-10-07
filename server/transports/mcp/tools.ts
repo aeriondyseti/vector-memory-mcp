@@ -389,6 +389,12 @@ SCOPE: Memories are stored globally across all projects. By default, search cove
         type: "boolean",
         description: "Include tasks, next steps and blockers already resolved (default: false).",
       },
+      status: {
+        type: "string",
+        enum: ["open", "resolved"],
+        description:
+          "Only memories with this status: 'open' for what is still to do or unresolved (tasks, next steps, blockers, or anything stored open), 'resolved' for what was done.",
+      },
       rerank: {
         type: "boolean",
         description:
