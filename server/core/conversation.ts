@@ -145,6 +145,8 @@ export interface SearchOptions {
   includeSuperseded?: boolean;
   /** Include open-until-resolved memories already resolved (default false). */
   includeResolved?: boolean;
+  /** Rerank memory results with the cross-encoder when one is configured (default true). */
+  rerank?: boolean;
   /** Rank in memories linked through the knowledge graph (opt-in, default false). */
   useGraph?: boolean;
   /** Graph lane weights — a tuning knob for benchmarks, not exposed by the MCP tools. */

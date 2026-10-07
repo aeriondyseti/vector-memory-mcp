@@ -140,3 +140,27 @@ describe("environment variable fallbacks", () => {
     expect(config.httpPort).toBe(3271);
   });
 });
+
+describe("reranking setting", () => {
+  afterEach(() => {
+    delete process.env.VECTOR_MEMORY_RERANK;
+  });
+
+  test("is on by default", () => {
+    expect(loadConfig().rerank).toBe(true);
+    expect(parseCliArgs([]).rerank).toBeUndefined();
+  });
+
+  test("--no-rerank turns it off", () => {
+    expect(loadConfig(parseCliArgs(["--no-rerank"])).rerank).toBe(false);
+  });
+
+  test("VECTOR_MEMORY_RERANK=0 (or false/off/no) turns it off", () => {
+    for (const value of ["0", "false", "OFF", "no"]) {
+      process.env.VECTOR_MEMORY_RERANK = value;
+      expect(loadConfig().rerank).toBe(false);
+    }
+    process.env.VECTOR_MEMORY_RERANK = "1";
+    expect(loadConfig().rerank).toBe(true);
+  });
+});

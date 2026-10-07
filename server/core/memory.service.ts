@@ -28,6 +28,7 @@ import type { SearchResult, SearchOptions, HistoryFilters } from "./conversation
 import type { MemoryRepository } from "./memory.repository";
 import type { EmbeddingsService } from "./embeddings.service";
 import type { ConversationHistoryService } from "./conversation.service";
+import type { RerankerService } from "./reranker.service";
 import { normalizeProject } from "./project";
 
 // Jitter values halved from original (0.02/0.05/0.15) because RRF_K=10 produces
@@ -88,6 +89,17 @@ function matchesAttributeFilters(
 const CURRENT_PROJECT_BOOST = 1.15;
 
 // ── Write-time duplicate check ──────────────────────────────────────
+/** Memory candidates the cross-encoder rescores per search (or the page size, if larger). */
+export const RERANK_DEPTH = 30;
+/**
+ * Share of a reranked candidate's relevance from the cross-encoder; the rest
+ * is its fused (vector + keyword) score, both spread to 0–1 over the
+ * candidates. The cross-encoder alone ranked best on long notes but lost on
+ * short conversational memories (it misreads implicit connections); an even
+ * blend improved every benchmark set and no category lost.
+ */
+export const RERANK_BLEND = 0.5;
+
 /**
  * Default confidence proactive_context surfaces a memory at. Confidence is a
  * calibrated probability (computeConfidence): at 0.5 a surfaced memory is
@@ -140,6 +152,7 @@ export type StoreOutcome =
 
 export class MemoryService {
   private conversationService: ConversationHistoryService | null = null;
+  private reranker: RerankerService | null = null;
 
   constructor(
     private repository: MemoryRepository,
@@ -153,6 +166,15 @@ export class MemoryService {
 
   setConversationService(service: ConversationHistoryService): void {
     this.conversationService = service;
+  }
+
+  /** Rerank search's top memory candidates with this cross-encoder (null: don't). */
+  setReranker(reranker: RerankerService | null): void {
+    this.reranker = reranker;
+  }
+
+  getReranker(): RerankerService | null {
+    return this.reranker;
   }
 
   getConversationService(): ConversationHistoryService | null {
@@ -398,13 +420,53 @@ export class MemoryService {
     return updatedMemory;
   }
 
+  /**
+   * Rescore the top `depth` candidates with the cross-encoder: blended with
+   * their fused score (RERANK_BLEND), it becomes their relevance, re-weighted
+   * by the intent like any relevance. Candidates past the depth keep their
+   * order, below every reranked one.
+   */
+  private async rerankCandidates(
+    query: string,
+    scored: Array<{ candidate: HybridRow; score: number }>,
+    depth: number,
+    rescore: (candidate: HybridRow, relevance: number) => number,
+  ): Promise<Array<{ candidate: HybridRow; score: number }>> {
+    const sorted = [...scored].sort((a, b) => b.score - a.score);
+    const head = sorted.slice(0, depth);
+    if (head.length === 0) return sorted;
+    const logits = await this.reranker!.score(
+      query,
+      head.map(({ candidate }) => indexedText(candidate.content, candidate.context)),
+    );
+    // Logits spread over the head to 0–1, keeping their order (a sigmoid
+    // would flatten every confident match to ~1 and let tie-breaks decide).
+    const spread = (xs: number[]) => {
+      const lo = Math.min(...xs);
+      const range = Math.max(...xs) - lo;
+      return xs.map((x) => (range > 0 ? (x - lo) / range : 1));
+    };
+    const ce = spread(logits);
+    const fused = spread(head.map(({ candidate }) => candidate.rrfScore));
+    const reranked = head.map(({ candidate }, i) => ({
+      candidate,
+      score: rescore(candidate, RERANK_BLEND * ce[i]! + (1 - RERANK_BLEND) * fused[i]!),
+    }));
+    const floor = Math.min(...reranked.map((r) => r.score));
+    const below = sorted.slice(depth).map(({ candidate, score }, i) => ({
+      candidate,
+      score: Math.min(score, floor) * (1 - (i + 1) * 1e-6),
+    }));
+    return [...reranked, ...below];
+  }
+
   private computeMemoryScore(
     candidate: HybridRow,
     profile: IntentProfile,
     now: Date,
-    mode: "semantic" | "exact" | "hybrid" = "semantic"
+    mode: "semantic" | "exact" | "hybrid" = "semantic",
+    relevance: number = candidate.rrfScore,
   ): number {
-    const relevance = candidate.rrfScore;
     const lastAccessed = candidate.lastAccessed ?? candidate.createdAt;
     const hoursSinceAccess = Math.max(
       0,
@@ -502,27 +564,38 @@ export class MemoryService {
         ? CURRENT_PROJECT_BOOST
         : 1;
 
+    // Rerank memory candidates with the cross-encoder, when one is set
+    // (exact mode is keyword matching: left as ranked).
+    const rerank = this.reranker !== null && (options?.rerank ?? true) && mode !== "exact";
+
     // Run memory + history queries in parallel
     const memoryPromise =
       !historyOnly
         ? this.repository
             .findHybrid(queryEmbedding, query, effectiveLimit * 5, memoryFilters)
-            .then((candidates) =>
-              candidates
+            .then(async (candidates) => {
+              const kept = candidates
                 .filter((m) => includeDeleted || !isDeleted(m))
                 .filter((m) => includeDeleted || options?.includeSuperseded || !isSuperseded(m))
                 .filter((m) => options?.includeResolved || !isResolved(m))
                 .filter((m) => matchesAttributeFilters(m, options))
                 .map((candidate) => ({
+                  candidate,
+                  score: this.computeMemoryScore(candidate, profile, now, mode) * boost(candidate.project),
+                }));
+              const scored = rerank
+                ? await this.rerankCandidates(query, kept, Math.max(RERANK_DEPTH, effectiveLimit), (c, relevance) =>
+                    this.computeMemoryScore(c, profile, now, mode, relevance) * boost(c.project),
+                  )
+                : kept;
+              return scored.map(({ candidate, score }) => ({
                   id: candidate.id,
                   content: candidate.content,
                   metadata: candidate.metadata,
                   createdAt: candidate.createdAt,
                   updatedAt: candidate.updatedAt,
                   source: "memory" as const,
-                  score:
-                    this.computeMemoryScore(candidate, profile, now, mode) *
-                    boost(candidate.project),
+                  score,
                   confidence: computeConfidence(candidate.signals),
                   project: candidate.project,
                   supersededBy: candidate.supersededBy,
@@ -533,8 +606,8 @@ export class MemoryService {
                   importance: candidate.importance ?? null,
                   context: candidate.context ?? null,
                   graphDistance: candidate.signals.graphDistance ?? null,
-                }))
-            )
+                }));
+            })
         : Promise.resolve([] as SearchResult[]);
 
     const historyPromise =

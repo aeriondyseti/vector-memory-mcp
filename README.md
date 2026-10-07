@@ -193,6 +193,7 @@ CLI flags:
 | `--enable-history` | | *(disabled)* | Enable conversation history indexing |
 | `--history-path` | | *(auto-detect)* | Path to session log directory |
 | `--history-weight` | | `0.75` | Weight for history results in unified search |
+| `--no-rerank` | | *(reranking on)* | Skip cross-encoder reranking of search results (faster; also `VECTOR_MEMORY_RERANK=0`) |
 
 ---
 
