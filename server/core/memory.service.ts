@@ -43,6 +43,17 @@ const INTENT_PROFILES: Record<SearchIntent, IntentProfile> = {
 
 const sigmoid = (x: number): number => 1 / (1 + Math.exp(-x));
 
+/**
+ * Fused (RRF) scores as relevance on the 0–1 scale recency and utility use:
+ * each divided by the best of the search. Raw RRF scores run ~0.03–0.18, so
+ * added to recency and utility (0–1) they decided little — a fresh, weak
+ * match outranked an older, exact one whatever the intent's weights said.
+ */
+function relativeTo(scores: number[]): number[] {
+  const best = Math.max(0, ...scores);
+  return scores.map((s) => (best > 0 ? s / best : 0));
+}
+
 /** Extract a memory's tag list from metadata.tags (tolerant of bad shapes). */
 export function memoryTags(metadata: Record<string, unknown>): string[] {
   const raw = metadata.tags;
@@ -464,8 +475,9 @@ export class MemoryService {
     candidate: HybridRow,
     profile: IntentProfile,
     now: Date,
-    mode: "semantic" | "exact" | "hybrid" = "semantic",
-    relevance: number = candidate.rrfScore,
+    mode: "semantic" | "exact" | "hybrid",
+    /** 0–1: the candidate's fused score relative to the search's best, or its reranked relevance. */
+    relevance: number,
   ): number {
     const lastAccessed = candidate.lastAccessed ?? candidate.createdAt;
     const hoursSinceAccess = Math.max(
@@ -574,15 +586,16 @@ export class MemoryService {
         ? this.repository
             .findHybrid(queryEmbedding, query, effectiveLimit * 5, memoryFilters)
             .then(async (candidates) => {
-              const kept = candidates
+              const live = candidates
                 .filter((m) => includeDeleted || !isDeleted(m))
                 .filter((m) => includeDeleted || options?.includeSuperseded || !isSuperseded(m))
                 .filter((m) => options?.includeResolved || !isResolved(m))
-                .filter((m) => matchesAttributeFilters(m, options))
-                .map((candidate) => ({
-                  candidate,
-                  score: this.computeMemoryScore(candidate, profile, now, mode) * boost(candidate.project),
-                }));
+                .filter((m) => matchesAttributeFilters(m, options));
+              const relevanceOf = relativeTo(live.map((m) => m.rrfScore));
+              const kept = live.map((candidate, i) => ({
+                candidate,
+                score: this.computeMemoryScore(candidate, profile, now, mode, relevanceOf[i]!) * boost(candidate.project),
+              }));
               const scored = rerank
                 ? await this.rerankCandidates(query, kept, Math.max(RERANK_DEPTH, effectiveLimit), (c, relevance) =>
                     this.computeMemoryScore(c, profile, now, mode, relevance) * boost(c.project),
@@ -619,8 +632,9 @@ export class MemoryService {
               historyOnly ? effectiveLimit * 5 : effectiveLimit * 3,
               effectiveHistoryFilters
             )
-            .then((historyRows) =>
-              historyRows.map((row) => {
+            .then((historyRows) => {
+              const relevanceOf = relativeTo(historyRows.map((row) => row.rrfScore));
+              return historyRows.map((row, i) => {
                 const rowProject = (row.metadata?.project as string) ?? null;
                 return {
                   id: row.id,
@@ -629,7 +643,7 @@ export class MemoryService {
                   createdAt: row.createdAt,
                   updatedAt: row.createdAt,
                   source: "conversation_history" as const,
-                  score: row.rrfScore * historyWeight * boost(rowProject),
+                  score: relevanceOf[i]! * historyWeight * boost(rowProject),
                   confidence: computeConfidence(row.signals),
                   project: rowProject,
                   supersededBy: null,
@@ -638,8 +652,8 @@ export class MemoryService {
                   messageIndexStart: (row.metadata?.message_index_start as number) ?? 0,
                   messageIndexEnd: (row.metadata?.message_index_end as number) ?? 0,
                 };
-              })
-            )
+              });
+            })
         : Promise.resolve([] as SearchResult[]);
 
     const [memoryResults, historyResults] = await Promise.all([
