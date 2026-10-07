@@ -1,7 +1,7 @@
 {
   "$schema": "../../.claude-plugin/schemas/plugin.schema.json",
   "name": "vector-memory",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "RAG-powered session memory with waypoints for Claude Code",
   "author": {
     "name": "AerionDyseti",
@@ -24,14 +24,22 @@
       "type": "string",
       "title": "Waypoint before /clear and /exit",
       "description": "Save a waypoint before /clear and /exit: ask each time, always save, or never.",
-      "options": ["ask", "always", "never"],
+      "options": [
+        "ask",
+        "always",
+        "never"
+      ],
       "default": "ask"
     },
     "loadCheckpoint": {
       "type": "string",
       "title": "Load waypoint at start and after /clear",
       "description": "Load the latest waypoint into a new session: ask each time, always load, or never.",
-      "options": ["ask", "always", "never"],
+      "options": [
+        "ask",
+        "always",
+        "never"
+      ],
       "default": "ask"
     }
   }
