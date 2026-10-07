@@ -678,7 +678,26 @@ export class MemoryService {
 
     const page = merged.slice(offset, offset + limit);
     this.attachHistory(page);
+    await this.attachSources(page);
     return page;
+  }
+
+  /**
+   * Give each synthesis on the page (a memory citing `metadata.sources`) its
+   * source ids and how many have since been replaced or deleted — a stale
+   * synthesis says so.
+   */
+  private async attachSources(page: SearchResult[]): Promise<void> {
+    const citing = page.filter((r) => r.source === "memory" && Array.isArray(r.metadata?.sources));
+    if (citing.length === 0) return;
+    const ids = [...new Set(citing.flatMap((r) => (r.metadata.sources as unknown[]).filter((s): s is string => typeof s === "string")))];
+    const live = new Set(
+      (await this.repository.findByIds(ids)).filter((m) => m.supersededBy === null).map((m) => m.id),
+    );
+    for (const r of citing) {
+      const sourceIds = (r.metadata.sources as unknown[]).filter((s): s is string => typeof s === "string");
+      r.sources = { ids: sourceIds, outdated: sourceIds.filter((id) => !live.has(id)).length };
+    }
   }
 
   /**

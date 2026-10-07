@@ -27,6 +27,8 @@ For long content (>1000 chars), provide embedding_text with a searchable summary
 
 When a memory comes from a larger source (a document, a note, a long discussion), name the source and its section in "context" — it is searched with the memory, so the memory is found by what it belongs to even when its own text doesn't say.
 
+When you work out a conclusion that pulls several memories together (a summary, a pattern, an answer to a broad question), store it as its own memory with "sources" listing the memory IDs it draws on: the next broad question finds the synthesis directly instead of piecing it together again.
+
 A memory that near-exactly repeats an existing one in the same project is not stored again: the response names the existing memory instead (update it with update_memories if something changed).
 
 HOW MEMORIES UPDATE:
@@ -62,6 +64,13 @@ HOW MEMORIES UPDATE:
               type: "string",
               description:
                 "ISO date when what this memory describes happened, if not now (a past event, a session recorded later). Searches about a period use it.",
+            },
+            sources: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "IDs of the memories this one draws on — for a synthesis or conclusion reached across several memories. " +
+                "Search shows them, and flags the synthesis when a source is later replaced or deleted.",
             },
             metadata: {
               type: "object",

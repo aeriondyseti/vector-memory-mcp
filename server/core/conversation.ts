@@ -85,6 +85,8 @@ export interface SearchResult {
   occurredAt?: Date | null;
   /** Versions this memory replaced (same key, or merged into it), newest first. */
   history?: Array<{ content: string; createdAt: Date; replacedAt: Date }>;
+  /** For a synthesis: the memories it cites, and how many have since been replaced or deleted. */
+  sources?: { ids: string[]; outdated: number };
   /** Links from a top match or named entity, when the graph lane reached it. */
   graphDistance?: number | null;
   // History-specific fields
