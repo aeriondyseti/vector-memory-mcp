@@ -69,6 +69,69 @@ export const MEMORY_TYPE_BONUS: Record<string, number> = {
   observation: 0.0,
 };
 
+// ── Lifecycle per kind of memory ────────────────────────────────────
+//
+//  - cumulative (default): every entry is kept; repeats are caught at write.
+//  - superseding: a memory carrying `metadata.key` (a short slot name such as
+//    "current-goal" or "preferred-editor") replaces the live memory with the
+//    same key in the same project, which stays as history (superseded_by).
+//  - open until resolved: the kinds below carry `metadata.status` "open"
+//    (the default) or "resolved"; resolved ones are kept as history but drop
+//    out of default recall.
+
+/** Memory types that stay open until resolved. */
+export const OPEN_UNTIL_RESOLVED_TYPES: ReadonlySet<string> = new Set(["task", "next-step", "blocker"]);
+
+export const MEMORY_STATUSES = ["open", "resolved"] as const;
+export type MemoryStatus = (typeof MEMORY_STATUSES)[number];
+
+/** Whether memories of this metadata's type are open until resolved. */
+export function isOpenUntilResolvedType(metadata: Record<string, unknown>): boolean {
+  return typeof metadata.type === "string" && OPEN_UNTIL_RESOLVED_TYPES.has(metadata.type);
+}
+
+/** The memory's status, or null for kinds without one. */
+export function memoryStatus(metadata: Record<string, unknown>): MemoryStatus | null {
+  if (metadata.status === "open" || metadata.status === "resolved") return metadata.status;
+  return isOpenUntilResolvedType(metadata) ? "open" : null;
+}
+
+export function isResolved(memory: Pick<Memory, "metadata">): boolean {
+  return memoryStatus(memory.metadata) === "resolved";
+}
+
+/** The memory's superseding key (trimmed), or null when it has none. */
+export function memoryKey(metadata: Record<string, unknown>): string | null {
+  return typeof metadata.key === "string" && metadata.key.trim() !== "" ? metadata.key.trim() : null;
+}
+
+/** Replaced by a newer memory (not deleted: that is the tombstone). */
+export function isSuperseded(memory: Pick<Memory, "supersededBy">): boolean {
+  return memory.supersededBy !== null && memory.supersededBy !== DELETED_TOMBSTONE;
+}
+
+/** Validate a caller-supplied status. */
+export function coerceStatus(value: unknown): MemoryStatus | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "string" && (MEMORY_STATUSES as readonly string[]).includes(value)) {
+    return value as MemoryStatus;
+  }
+  throw new Error(`status must be one of: ${MEMORY_STATUSES.join(", ")}`);
+}
+
+/**
+ * Metadata as a write stores it: an open-until-resolved kind without a
+ * status starts "open"; a key is trimmed.
+ */
+export function withLifecycleDefaults(metadata: Record<string, unknown>): Record<string, unknown> {
+  const key = memoryKey(metadata);
+  const next = { ...metadata };
+  if (key !== null) next.key = key;
+  else delete next.key;
+  if (isOpenUntilResolvedType(next) && next.status === undefined) next.status = "open";
+  return next;
+}
+
 /** Rank map for importance level comparisons (higher = more important). */
 export const IMPORTANCE_RANK: Record<MemoryImportance, number> = {
   low: 0,
@@ -216,6 +279,8 @@ export interface SearchSignals {
   ftsMatch: boolean;
   knnRank: number | null;
   ftsRank: number | null;
+  /** Links from the graph lane's nearest seed, when the graph reached it. */
+  graphDistance?: number | null;
 }
 
 /** Augments any entity type with an RRF score from hybrid search. */

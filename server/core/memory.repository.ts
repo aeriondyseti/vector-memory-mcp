@@ -7,9 +7,30 @@ import {
   hybridRRFWithSignals,
   topByRRF,
   knnSearch,
+  cosineSimilarity,
   batchedQuery,
   SQLITE_BATCH_SIZE,
+  RRF_K,
 } from "./sqlite-utils";
+import { entitiesNamedIn, type GraphHit, graphRecall } from "./graph-recall";
+
+/** Top text matches the graph lane starts from. */
+const GRAPH_SEEDS = 5;
+/** A vector-only candidate seeds the graph lane only at this cosine or above. */
+const GRAPH_SEED_MIN_SIMILARITY = 0.5;
+/**
+ * Fusion weight, against 1 for vector and keyword, of memories linked to an
+ * entity the query names — high-precision evidence.
+ */
+export const GRAPH_WEIGHT = 0.5;
+/**
+ * Fusion weight of neighbours of the top text matches — topic siblings.
+ * Off by default: with RRF_K = 10 adjacent ranks differ by under 0.01, so
+ * even a small vote lifts siblings over the true top match. Measured on the
+ * general+graph benchmark (original-query MRR / multi-hop R@5, vs off):
+ * 0.5 → −0.116 / +0.26, 0.1 → −0.056 / +0.31, 0 → ±0 / +0.25.
+ */
+export const GRAPH_NEIGHBOR_WEIGHT = 0;
 import {
   type Memory,
   type HybridRow,
@@ -370,22 +391,94 @@ export class MemoryRepository {
     }));
   }
 
+  /** Which of `ids` belong to `project`. */
+  private idsInProject(ids: string[], project: string): string[] {
+    if (ids.length === 0) return [];
+    return (
+      this.db
+        .prepare(`SELECT id FROM memories WHERE project = ? AND id IN (${ids.map(() => "?").join(", ")})`)
+        .all(project, ...ids) as Array<{ id: string }>
+    ).map((r) => r.id);
+  }
+
+  /**
+   * Cosine similarity of each of `otherIds` to memory `id`, from the stored
+   * vectors; an id without a vector is left out.
+   */
+  similaritiesTo(id: string, otherIds: string[]): Map<string, number> {
+    const base = this.getEmbedding(id);
+    const result = new Map<string, number>();
+    if (base.length === 0) return result;
+    const bv = new Float32Array(base);
+    for (const other of otherIds) {
+      const v = this.getEmbedding(other);
+      if (v.length > 0) result.set(other, cosineSimilarity(bv, new Float32Array(v)));
+    }
+    return result;
+  }
+
+  /**
+   * The `k` live memories of `project` most similar to `embedding`, for the
+   * write-time duplicate check: not superseded or deleted, not archived, not
+   * waypoints. `project` null matches memories filed under no project.
+   */
+  findNearestLive(
+    embedding: number[],
+    project: string | null,
+    k: number,
+  ): Array<{ id: string; similarity: number }> {
+    return knnSearch(this.db, "memories_vec", embedding, k, {
+      sql: `SELECT v.id, v.vector FROM memories_vec v JOIN memories m ON v.id = m.id
+            WHERE ${project === null ? "m.project IS NULL" : "m.project = ?"}
+              AND m.superseded_by IS NULL AND m.archived = 0
+              AND json_extract(m.metadata, '$.type') IS NOT 'waypoint'
+              AND json_extract(m.metadata, '$.status') IS NOT 'resolved'`,
+      params: project === null ? [] : [project],
+    }).map((r) => ({ id: r.id, similarity: 1 - r.distance }));
+  }
+
+  /**
+   * Mark every live memory of `project` carrying superseding `key` — other
+   * than `newId` — as superseded by `newId`. Returns the ids replaced.
+   */
+  supersedeByKey(project: string | null, key: string, newId: string): string[] {
+    const projectCondition = project === null ? "project IS NULL" : "project = ?";
+    const params = project === null ? [key, newId] : [project, key, newId];
+    const ids = (
+      this.db
+        .prepare(
+          `SELECT id FROM memories
+           WHERE ${projectCondition} AND json_extract(metadata, '$.key') = ?
+             AND superseded_by IS NULL AND id != ?`,
+        )
+        .all(...params) as Array<{ id: string }>
+    ).map((r) => r.id);
+
+    const stmt = this.db.prepare(
+      "UPDATE memories SET superseded_by = ?, updated_at = ? WHERE id = ?",
+    );
+    const now = Date.now();
+    for (const id of ids) stmt.run(newId, now, id);
+    return ids;
+  }
+
   /**
    * Find near-duplicate clusters via pairwise cosine similarity over the
    * vector table (Feature 14). Brute-force O(n²) — acceptable for a personal
    * store (<10K rows); larger stores should sample or use ANN. Returns groups
    * of ≥2 memory ids whose vectors exceed `threshold`, keeping the newest as
-   * the suggested survivor.
+   * the suggested survivor. Live memories only: superseded versions are
+   * history, not duplicates.
    */
   findDuplicateClusters(threshold: number): Array<{ keepId: string; duplicateIds: string[] }> {
     const rows = this.db
       .prepare(
         `SELECT v.id AS id, v.vector AS vector, m.created_at AS created_at
          FROM memories_vec v JOIN memories m ON v.id = m.id
-         WHERE m.superseded_by IS NOT ? AND m.archived = 0
+         WHERE m.superseded_by IS NULL AND m.archived = 0
            AND json_extract(m.metadata, '$.type') IS NOT 'waypoint'`,
       )
-      .all(DELETED_TOMBSTONE) as Array<{
+      .all() as Array<{
       id: string;
       vector: Buffer;
       created_at: number;
@@ -554,6 +647,10 @@ export class MemoryRepository {
       now?: number;
       /** "semantic" (default) / "hybrid" use vector+FTS; "exact" uses FTS only. */
       mode?: "semantic" | "exact" | "hybrid";
+      /** Fuse in the graph lane (opt-in, default off; never in "exact" mode). */
+      useGraph?: boolean;
+      /** Graph lane weights (tuning and benchmarks); default GRAPH_WEIGHT / GRAPH_NEIGHBOR_WEIGHT. */
+      graphWeights?: { named?: number; neighbor?: number };
     },
   ): Promise<HybridRow[]> {
     const candidateLimit = limit * 5;
@@ -600,6 +697,72 @@ export class MemoryRepository {
     const signalsMap = hybridRRFWithSignals(vectorResults, ftsResults);
     const rrfScores = new Map<string, number>();
     for (const [id, s] of signalsMap) rrfScores.set(id, s.rrfScore);
+
+    // Graph lane: memories linked to the best text matches, or to entities
+    // the query names, join the fusion at GRAPH_WEIGHT. Off in "exact" mode.
+    if (filters?.mode !== "exact" && filters?.useGraph === true) {
+      // Seeds are real matches — a keyword hit or a close embedding — not
+      // merely the best-ranked of the vector lane's every-memory candidates.
+      const matched = new Map(
+        [...signalsMap].filter(
+          ([, sig]) => sig.ftsMatch || (sig.cosineSimilarity ?? 0) >= GRAPH_SEED_MIN_SIMILARITY,
+        ).map(([id, sig]) => [id, sig.rrfScore]),
+      );
+      const seedIds = topByRRF(matched, GRAPH_SEEDS);
+      const seedSet = new Set(seedIds);
+      const named = entitiesNamedIn(this.db, query);
+
+      // Two graph lanes, weighted by how strong their evidence is: memories
+      // linked to an entity the query names, and neighbours of the top text
+      // matches. Seeds take no neighbour boost — linked top matches boosting
+      // each other rewards centrality, not relevance (see BENCHMARKS.md).
+      const namedWeight = filters?.graphWeights?.named ?? GRAPH_WEIGHT;
+      const neighborWeight = filters?.graphWeights?.neighbor ?? GRAPH_NEIGHBOR_WEIGHT;
+      const lanes: Array<{ hits: GraphHit[]; weight: number }> = [
+        {
+          hits: named.length > 0 ? graphRecall(this.db, { memoryIds: [], entityIds: named }, candidateLimit) : [],
+          weight: namedWeight,
+        },
+        {
+          hits:
+            neighborWeight > 0
+              ? graphRecall(this.db, { memoryIds: seedIds, entityIds: [] }, candidateLimit).filter(
+                  (h) => !seedSet.has(h.id),
+                )
+              : [],
+          weight: neighborWeight,
+        },
+      ];
+      const reached = lanes.flatMap((l) => l.hits.map((h) => h.id));
+      const inProject =
+        project === undefined ? null : new Set(this.idsInProject(reached, project));
+      const qv = new Float32Array(embedding);
+      for (const lane of lanes) {
+        let rank = 0;
+        for (const hit of lane.hits) {
+          if (inProject && !inProject.has(hit.id)) continue;
+          rank++;
+          const boost = lane.weight / (RRF_K + rank);
+          const existing = signalsMap.get(hit.id);
+          if (existing) {
+            existing.rrfScore += boost;
+            existing.graphDistance = Math.min(existing.graphDistance ?? hit.distance, hit.distance);
+          } else {
+            const vec = this.getEmbedding(hit.id);
+            signalsMap.set(hit.id, {
+              rrfScore: boost,
+              cosineSimilarity: vec.length > 0 ? cosineSimilarity(qv, new Float32Array(vec)) : null,
+              ftsMatch: false,
+              knnRank: null,
+              ftsRank: null,
+              graphDistance: hit.distance,
+            });
+          }
+          rrfScores.set(hit.id, signalsMap.get(hit.id)!.rrfScore);
+        }
+      }
+    }
+
     const topIds = topByRRF(rrfScores, limit);
 
     if (topIds.length === 0) return [];
@@ -657,6 +820,7 @@ export class MemoryRepository {
           ftsMatch: signals.ftsMatch,
           knnRank: signals.knnRank,
           ftsRank: signals.ftsRank,
+          graphDistance: signals.graphDistance ?? null,
         },
       });
     }

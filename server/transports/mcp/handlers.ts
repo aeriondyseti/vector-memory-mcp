@@ -1,5 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { MemoryService } from "../../core/memory.service";
+import { type MemoryService, WRITE_DUPLICATE_SIMILARITY } from "../../core/memory.service";
 import type { ConversationHistoryService } from "../../core/conversation.service";
 import type {
   SearchIntent,
@@ -10,6 +10,8 @@ import type {
 import {
   coerceConfidence,
   coerceImportance,
+  coerceStatus,
+  DELETED_TOMBSTONE,
   MEMORY_CONFIDENCE_LEVELS,
   MEMORY_IMPORTANCE_LEVELS,
 } from "../../core/memory";
@@ -175,6 +177,8 @@ export async function handleStoreMemories(
     embedding_text?: string;
     metadata?: Record<string, unknown>;
     project?: string;
+    key?: unknown;
+    status?: unknown;
   }>;
   try {
     memories = asArray(args?.memories, "memories");
@@ -182,33 +186,83 @@ export async function handleStoreMemories(
     return errorResult(errorText(e));
   }
 
+  const allowDuplicates = args?.allow_duplicates === true;
+
   const ids: string[] = [];
+  const notes: string[] = [];
   try {
     for (const item of memories) {
-      const memory = await service.store(
+      const project = typeof item.project === "string" ? item.project : undefined;
+      const attributes = parseAttributes(item as Record<string, unknown>);
+
+      const outcome = await service.storeUnlessDuplicate(
         item.content,
-        item.metadata ?? {},
+        lifecycleMetadata(item.metadata ?? {}, item.key, coerceStatus(item.status)),
         item.embedding_text,
-        typeof item.project === "string" ? item.project : undefined,
-        parseAttributes(item as Record<string, unknown>)
+        project,
+        attributes,
+        { checkDuplicates: !allowDuplicates }
       );
-      ids.push(memory.id);
+      if (outcome.status === "duplicate") {
+        notes.push(duplicateNote(outcome.existing.id, outcome.existing.content));
+        continue;
+      }
+      ids.push(outcome.memory.id);
+      if (outcome.possibleDuplicateOf.length > 0) {
+        notes.push(
+          `Stored ${outcome.memory.id}, but it closely matches ${outcome.possibleDuplicateOf.join(", ")}; ` +
+            "review with find_duplicates."
+        );
+      }
+      if (outcome.superseded.length > 0) {
+        notes.push(
+          `Stored ${outcome.memory.id} as the current "${outcome.memory.metadata.key}", replacing ` +
+            `${outcome.superseded.join(", ")} (kept as history; search with include_superseded to see it).`
+        );
+      }
     }
   } catch (e) {
     return errorResult(errorText(e));
   }
 
-  return {
-    content: [
-      {
-        type: "text",
-        text:
+  const stored =
+    ids.length === 0
+      ? []
+      : [
           ids.length === 1
             ? `Memory stored with ID: ${ids[0]}`
             : `Stored ${ids.length} memories:\n${ids.map((id) => `- ${id}`).join("\n")}`,
-      },
-    ],
+        ];
+
+  return {
+    content: [{ type: "text", text: [...stored, ...notes].join("\n\n") }],
   };
+}
+
+/**
+ * Fold the store/update `key` and `status` fields into metadata, where the
+ * lifecycle reads them; explicit fields win over metadata's own.
+ */
+function lifecycleMetadata(
+  metadata: Record<string, unknown>,
+  key: unknown,
+  status: string | undefined
+): Record<string, unknown> {
+  const next = { ...metadata };
+  if (typeof key === "string") next.key = key;
+  if (status !== undefined) next.status = status;
+  return next;
+}
+
+/** The store_memories line for a write skipped as a duplicate. */
+function duplicateNote(existingId: string, existingContent: string): string {
+  const preview =
+    existingContent.length > 200 ? `${existingContent.slice(0, 200)}…` : existingContent;
+  return (
+    `Not stored: duplicate of existing memory ${existingId}:\n  "${preview}"\n` +
+    "To change that memory use update_memories; to store a separate copy anyway, " +
+    "call store_memories again with allow_duplicates: true."
+  );
 }
 
 export async function handleDeleteMemories(
@@ -293,6 +347,8 @@ export async function handleUpdateMemories(
     content?: string;
     embedding_text?: string;
     metadata?: Record<string, unknown>;
+    key?: unknown;
+    status?: unknown;
   }>;
   try {
     updates = asArray(args?.updates, "updates");
@@ -310,11 +366,18 @@ export async function handleUpdateMemories(
 
     let memory;
     try {
+      // A new key needs the existing metadata to land in, so fetch it first.
+      let metadata = update.metadata;
+      if (typeof update.key === "string") {
+        const base = metadata ?? (await service.getRepository().findById(update.id))?.metadata ?? {};
+        metadata = lifecycleMetadata(base, update.key, undefined);
+      }
       memory = await service.update(update.id, {
         content: update.content,
         embeddingText: update.embedding_text,
-        metadata: update.metadata,
+        metadata,
         attributes: parseAttributes(update as Record<string, unknown>),
+        status: coerceStatus(update.status),
       });
     } catch (e) {
       results.push(`Memory ${update.id}: ${errorText(e)}`);
@@ -393,6 +456,9 @@ export async function handleSearchMemories(
     before: dateFilters.before,
     includeArchived: asBool(args?.include_archived, false),
     includeExpired: asBool(args?.include_expired, false),
+    includeSuperseded: asBool(args?.include_superseded, false),
+    includeResolved: asBool(args?.include_resolved, false),
+    useGraph: asBool(args?.include_graph, false),
     minConfidence: asStringLevel<MemoryConfidence>(args?.min_confidence, MEMORY_CONFIDENCE_LEVELS),
     minImportance: asStringLevel<MemoryImportance>(args?.min_importance, MEMORY_IMPORTANCE_LEVELS),
     type: asOptionalString(args?.type),
@@ -408,7 +474,7 @@ export async function handleSearchMemories(
     };
   }
 
-  const formatted = results.map((r) => formatSearchResult(r, includeDeleted));
+  const formatted = results.map((r) => formatSearchResult(r));
   const maxChars = asInt(args?.max_response_chars, 0, 0, 1_000_000);
   const text = joinWithinBudget(formatted, "\n\n---\n\n", maxChars);
 
@@ -467,10 +533,13 @@ function formatMemoryDetail(
   return result;
 }
 
-function formatSearchResult(r: SearchResult, includeDeleted: boolean): string {
+function formatSearchResult(r: SearchResult): string {
   let result = `[${r.source}] ID: ${r.id}\nConfidence: ${r.confidence.toFixed(2)}`;
   if (r.pinned) result += ` | 📌 pinned`;
   if (r.importance && r.importance !== "normal") result += ` | importance: ${r.importance}`;
+  if (r.graphDistance != null) {
+    result += ` | via graph (${r.graphDistance} ${r.graphDistance === 1 ? "link" : "links"})`;
+  }
   if (r.project) {
     result += `\nProject: ${r.project}`;
   }
@@ -478,8 +547,8 @@ function formatSearchResult(r: SearchResult, includeDeleted: boolean): string {
   if (r.metadata && Object.keys(r.metadata).length > 0) {
     result += `\nMetadata: ${JSON.stringify(r.metadata)}`;
   }
-  if (r.source === "memory" && includeDeleted && r.supersededBy) {
-    result += `\n[DELETED]`;
+  if (r.source === "memory" && r.supersededBy) {
+    result += r.supersededBy === DELETED_TOMBSTONE ? `\n[DELETED]` : `\n[SUPERSEDED by ${r.supersededBy}]`;
   }
   if (r.source === "conversation_history" && r.sessionId) {
     result += `\nSession: ${r.sessionId}`;
@@ -1082,11 +1151,30 @@ export async function handleCleanupDuplicates(
   const threshold =
     typeof args?.similarity_threshold === "number"
       ? Math.max(0.5, Math.min(1, args.similarity_threshold))
-      : 0.92;
-  const r = await service.cleanupDuplicates(threshold);
-  return textResult(
-    `Cleaned up ${r.clusters} clusters, removed ${r.deleted} duplicate memories.`,
-  );
+      : WRITE_DUPLICATE_SIMILARITY;
+  const dryRun = args?.dry_run === true;
+  const r = await service.cleanupDuplicates(threshold, dryRun);
+
+  const lines = [
+    dryRun
+      ? `Would merge ${r.deleted} duplicate memories in ${r.clusters} clusters (dry run, threshold ${threshold}).`
+      : `Cleaned up ${r.clusters} clusters, removed ${r.deleted} duplicate memories.`,
+  ];
+  if (dryRun) {
+    for (const p of r.plans.filter((p) => p.mergeIds.length > 0)) {
+      lines.push(`- keep ${p.keepId}, merge: ${p.mergeIds.join(", ")}`);
+    }
+  }
+  if (r.review > 0) {
+    lines.push(
+      "",
+      `${r.review} near-duplicates left for review (merge them with merge_duplicates if they really are the same):`,
+    );
+    for (const p of r.plans) {
+      for (const item of p.review) lines.push(`- ${item.id} vs ${p.keepId}: ${item.reason}`);
+    }
+  }
+  return textResult(lines.join("\n"));
 }
 
 // ── Memory consolidation (Feature 18) ─────────────────────────────────
@@ -1107,6 +1195,11 @@ export async function handleConsolidateMemories(
     `- Live memories: ${r.total} | Avg quality: ${r.averageQuality.toFixed(3)}`,
     `- Duplicate clusters: ${r.duplicateClusters} | Forget candidates: ${r.forgetCandidates}`,
   ];
+  if (r.duplicatesForReview > 0) {
+    lines.push(
+      `- Near-duplicates left for review (not merged automatically): ${r.duplicatesForReview} — see cleanup_duplicates with dry_run: true`,
+    );
+  }
   if (r.action === "run") {
     lines.push(
       `- Rescored: ${r.rescored} | Compressed (merged): ${r.compressed} | Forgotten (archived): ${r.forgotten}`,

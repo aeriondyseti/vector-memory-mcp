@@ -54,6 +54,7 @@ export const defaultThresholds: ThresholdConfig = {
     related_concept: { minRecall5: 0.4 },
     negative: {}, // Informational only
     edge_case: { minMRR: 0.3 },
+    multi_hop: {}, // Informational: graph-aware search comparison
   },
 };
 
@@ -153,6 +154,7 @@ export function formatReport(
     "related_concept",
     "negative",
     "edge_case",
+    "multi_hop",
   ];
 
   for (const category of categoryOrder) {

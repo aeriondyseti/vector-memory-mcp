@@ -23,7 +23,14 @@ DON'T STORE: machine-specific paths, local env details, ephemeral states, pleasa
 GOOD: "Aerion chose libSQL over PostgreSQL for Resonance (Dec 2024) because of native vector support and simpler deployment."
 BAD: "Uses SQLite" (no context, no subject, no reasoning)
 
-For long content (>1000 chars), provide embedding_text with a searchable summary.`,
+For long content (>1000 chars), provide embedding_text with a searchable summary.
+
+A memory that near-exactly repeats an existing one in the same project is not stored again: the response names the existing memory instead (update it with update_memories if something changed).
+
+HOW MEMORIES UPDATE:
+- Most memories accumulate: each is kept.
+- Facts with one current value (a goal, a preference, how something is done now): give a short "key" (e.g. "current-goal", "preferred-editor"). Storing a new memory with the same key replaces the old one, which is kept as history.
+- task, next-step and blocker memories start open; mark them resolved with update_memories (status: "resolved") when done, and they drop out of default recall.`,
   inputSchema: {
     type: "object",
     properties: {
@@ -52,6 +59,17 @@ For long content (>1000 chars), provide embedding_text with a searchable summary
               description:
                 "Project to tag this memory with (canonical absolute path). " +
                 "Defaults to the current project — only pass this to file a memory under a different project.",
+            },
+            key: {
+              type: "string",
+              description:
+                "Short name for a fact with one current value (e.g. 'current-goal'). A new memory with the same key in the same project replaces the previous one, kept as history.",
+            },
+            status: {
+              type: "string",
+              enum: ["open", "resolved"],
+              description:
+                "For task, next-step and blocker memories (default open). Store as resolved to record something already done.",
             },
             pinned: {
               type: "boolean",
@@ -98,6 +116,12 @@ For long content (>1000 chars), provide embedding_text with a searchable summary
           },
           required: ["content"],
         },
+      },
+      allow_duplicates: {
+        type: "boolean",
+        description:
+          "Store even when a memory is a near-exact duplicate of an existing one in the same project. " +
+          "By default such a write is skipped and the existing memory's ID is returned.",
       },
     },
     required: ["memories"],
@@ -177,6 +201,17 @@ Use to correct content, refine embedding text, or replace metadata without chang
             embedding_text: {
               type: "string",
               description: "New embedding summary (triggers embedding regeneration).",
+            },
+            status: {
+              type: "string",
+              enum: ["open", "resolved"],
+              description:
+                "Resolve a task, next step or blocker (or reopen it). Merged into metadata; resolved ones drop out of default recall.",
+            },
+            key: {
+              type: "string",
+              description:
+                "Give the memory a superseding key; it becomes the current value for that key, replacing the previous holder.",
             },
             metadata: {
               type: "object",
@@ -330,6 +365,20 @@ SCOPE: Memories are stored globally across all projects. By default, search cove
       include_expired: {
         type: "boolean",
         description: "Include expired (TTL-passed) memories in results (default: false).",
+      },
+      include_superseded: {
+        type: "boolean",
+        description:
+          "Include earlier versions replaced by a newer memory with the same key (default: false). Useful for how something changed over time.",
+      },
+      include_resolved: {
+        type: "boolean",
+        description: "Include tasks, next steps and blockers already resolved (default: false).",
+      },
+      include_graph: {
+        type: "boolean",
+        description:
+          "Also rank in memories linked through the knowledge graph to entities named in the query (default: false — opt in; never in exact mode). Helps questions about a named person, place or thing; on large stores it can push passing mentions above the answer, so it is off unless asked for. Such results are marked 'via graph'.",
       },
       min_confidence: {
         type: "string",
@@ -635,7 +684,7 @@ export const searchByTagsTool: Tool = {
 export const getSessionContextTool: Tool = {
   name: "get_session_context",
   description:
-    "Return the always-relevant memories (pinned, or importance 'critical') for the current project as a compact, character-budgeted summary suitable for injecting at session start. Complements query-time search: important context loads without an explicit query.",
+    "Return the always-relevant memories (pinned, or importance 'critical', then open tasks, next steps and blockers) for the current project as a compact, character-budgeted summary suitable for injecting at session start. Complements query-time search: important context loads without an explicit query.",
   inputSchema: {
     type: "object",
     properties: {
@@ -827,11 +876,15 @@ export const mergeDuplicatesTool: Tool = {
 export const cleanupDuplicatesTool: Tool = {
   name: "cleanup_duplicates",
   description:
-    "Automatically merge every near-duplicate cluster at a safe threshold (keeps the newest of each). Use find_duplicates first to preview.",
+    "Merge near-duplicate memories automatically (keeping the newest), but only clear cases: same project, matching the survivor directly in both meaning and wording, and not pinned or critical. Everything else is listed for review with the reason, never merged on a guess. Use dry_run: true to preview.",
   inputSchema: {
     type: "object",
     properties: {
-      similarity_threshold: { type: "number", description: "Cosine similarity threshold (default 0.92)." },
+      similarity_threshold: { type: "number", description: "Cosine similarity threshold (default 0.95)." },
+      dry_run: {
+        type: "boolean",
+        description: "List what would be merged and what needs review, without changing anything.",
+      },
     },
   },
 };
@@ -839,7 +892,7 @@ export const cleanupDuplicatesTool: Tool = {
 export const consolidateMemoriesTool: Tool = {
   name: "consolidate_memories",
   description:
-    "Periodic maintenance that prevents quality drift: rescore (decay), cluster + merge near-duplicates (compress), and archive low-quality unprotected memories (forget). action: 'recommend' (default, preview), 'status' (counts), or 'run' (perform).",
+    "Periodic maintenance that prevents quality drift: rescore (decay), merge clear near-duplicates (compress — same rule as cleanup_duplicates; unclear ones are counted for review, not merged), and archive low-quality unprotected memories (forget). action: 'recommend' (default, preview), 'status' (counts), or 'run' (perform).",
   inputSchema: {
     type: "object",
     properties: {

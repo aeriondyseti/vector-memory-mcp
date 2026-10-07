@@ -79,6 +79,8 @@ export interface SearchResult {
   lastAccessed?: Date | null;
   pinned?: boolean;
   importance?: import("./memory").MemoryImportance | null;
+  /** Links from a top match or named entity, when the graph lane reached it. */
+  graphDistance?: number | null;
   // History-specific fields
   sessionId?: string;
   role?: string;
@@ -137,6 +139,14 @@ export interface SearchOptions {
   before?: Date;
   /** Include archived memories in results (default false). */
   includeArchived?: boolean;
+  /** Include memories replaced by a newer one with the same key (default false). */
+  includeSuperseded?: boolean;
+  /** Include open-until-resolved memories already resolved (default false). */
+  includeResolved?: boolean;
+  /** Rank in memories linked through the knowledge graph (opt-in, default false). */
+  useGraph?: boolean;
+  /** Graph lane weights — a tuning knob for benchmarks, not exposed by the MCP tools. */
+  graphWeights?: { named?: number; neighbor?: number };
   /** Include expired (TTL-passed) memories in results (default false). */
   includeExpired?: boolean;
   /** Minimum confidence level to include (memories below this rank are dropped). */

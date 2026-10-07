@@ -7,10 +7,16 @@ import type {
   HybridRow,
   MemoryAttributes,
   MemoryImportance,
+  MemoryStatus,
 } from "./memory";
 import {
   isDeleted,
   isProtected,
+  isResolved,
+  isSuperseded,
+  memoryKey,
+  memoryStatus,
+  withLifecycleDefaults,
   computeConfidence,
   computeQualityScore,
   CONFIDENCE_RANK,
@@ -79,6 +85,50 @@ function matchesAttributeFilters(
 // memories win ties without hiding cross-project results.
 const CURRENT_PROJECT_BOOST = 1.15;
 
+// ── Write-time duplicate check ──────────────────────────────────────
+// A new memory is a duplicate of an existing one only when both signals
+// agree: near-identical embeddings AND near-identical wording. Embeddings
+// alone conflate different facts on the same subject ("chose X" / "chose
+// Y"); requiring both keeps false positives — lost writes — rare.
+export const WRITE_DUPLICATE_SIMILARITY = 0.95;
+export const WRITE_DUPLICATE_JACCARD = 0.85;
+const WRITE_DUPLICATE_CANDIDATES = 5;
+
+/** Lowercased word tokens of 3+ characters, for lexical comparison. */
+export function lexicalTokens(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((t) => t.length >= 3),
+  );
+}
+
+/** Jaccard similarity of two texts' token sets (1 when both are empty). */
+export function tokenJaccard(a: string, b: string): number {
+  const ta = lexicalTokens(a);
+  const tb = lexicalTokens(b);
+  if (ta.size === 0 && tb.size === 0) return 1;
+  let shared = 0;
+  for (const t of ta) if (tb.has(t)) shared++;
+  return shared / (ta.size + tb.size - shared);
+}
+
+/**
+ * One near-duplicate cluster as cleanup sees it: the members safe to merge
+ * into `keepId` automatically, and the rest with why they need review.
+ */
+export type DuplicatePlan = {
+  keepId: string;
+  mergeIds: string[];
+  review: Array<{ id: string; reason: string }>;
+};
+
+/** What a checked write did: stored (maybe flagged), or skipped as a duplicate. */
+export type StoreOutcome =
+  | { status: "stored"; memory: Memory; possibleDuplicateOf: string[]; superseded: string[] }
+  | { status: "duplicate"; existing: Memory; similarity: number };
+
 export class MemoryService {
   private conversationService: ConversationHistoryService | null = null;
 
@@ -115,16 +165,79 @@ export class MemoryService {
     project?: string,
     attributes?: MemoryAttributes
   ): Promise<Memory> {
+    const embedding = await this.embeddings.embed(embeddingText ?? content);
+    return (await this.insertNew(content, metadata, embedding, project, attributes)).memory;
+  }
+
+  /**
+   * Store a memory unless it duplicates a live one in the same project.
+   *
+   * Exactly one duplicate (similar embedding AND wording): nothing is stored
+   * and the existing memory comes back, so the caller can update it instead.
+   * Several: ambiguous — stored, with `metadata.possible_duplicate_of`
+   * naming them for review (find_duplicates), never merged on a guess.
+   * `checkDuplicates: false` skips the check (store_memories' allow_duplicates).
+   */
+  async storeUnlessDuplicate(
+    content: string,
+    metadata: Record<string, unknown> = {},
+    embeddingText?: string,
+    project?: string,
+    attributes?: MemoryAttributes,
+    { checkDuplicates = true }: { checkDuplicates?: boolean } = {}
+  ): Promise<StoreOutcome> {
+    const embedding = await this.embeddings.embed(embeddingText ?? content);
+    const targetProject = project !== undefined ? normalizeProject(project) : this.project;
+
+    const nearest = !checkDuplicates
+      ? []
+      : this.repository
+          .findNearestLive(embedding, targetProject, WRITE_DUPLICATE_CANDIDATES)
+          .filter((n) => n.similarity >= WRITE_DUPLICATE_SIMILARITY);
+    const candidates = await this.repository.findByIds(nearest.map((n) => n.id));
+    const similarityOf = new Map(nearest.map((n) => [n.id, n.similarity]));
+    const duplicates = candidates
+      .filter((m) => tokenJaccard(m.content, content) >= WRITE_DUPLICATE_JACCARD)
+      .sort((a, b) => (similarityOf.get(b.id) ?? 0) - (similarityOf.get(a.id) ?? 0));
+
+    if (duplicates.length === 1) {
+      const existing = duplicates[0];
+      return { status: "duplicate", existing, similarity: similarityOf.get(existing.id) ?? 0 };
+    }
+
+    const possibleDuplicateOf = duplicates.map((m) => m.id);
+    const { memory, superseded } = await this.insertNew(
+      content,
+      possibleDuplicateOf.length > 0
+        ? { ...metadata, possible_duplicate_of: possibleDuplicateOf }
+        : metadata,
+      embedding,
+      project,
+      attributes,
+    );
+    return { status: "stored", memory, possibleDuplicateOf, superseded };
+  }
+
+  /**
+   * Insert a new memory under its kind's lifecycle (withLifecycleDefaults):
+   * a superseding `key` replaces the live memory with that key in the same
+   * project, whose ids come back as `superseded`.
+   */
+  private async insertNew(
+    content: string,
+    metadata: Record<string, unknown>,
+    embedding: number[],
+    project?: string,
+    attributes?: MemoryAttributes
+  ): Promise<{ memory: Memory; superseded: string[] }> {
     const id = randomUUID();
     const now = new Date();
-    const textToEmbed = embeddingText ?? content;
-    const embedding = await this.embeddings.embed(textToEmbed);
 
     const memory: Memory = {
       id,
       content,
       embedding,
-      metadata,
+      metadata: withLifecycleDefaults(metadata),
       createdAt: now,
       updatedAt: now,
       supersededBy: null,
@@ -144,7 +257,9 @@ export class MemoryService {
     memory.qualityScore = computeQualityScore(memory, now);
 
     await this.repository.insert(memory);
-    return memory;
+    const key = memoryKey(memory.metadata);
+    const superseded = key === null ? [] : this.repository.supersedeByKey(memory.project, key, id);
+    return { memory, superseded };
   }
 
   async get(id: string): Promise<Memory | null> {
@@ -184,6 +299,8 @@ export class MemoryService {
       embeddingText?: string;
       metadata?: Record<string, unknown>;
       attributes?: MemoryAttributes;
+      /** Open or resolve the memory (merged into its metadata). */
+      status?: MemoryStatus;
     }
   ): Promise<Memory | null> {
     const existing = await this.repository.findById(id);
@@ -192,7 +309,12 @@ export class MemoryService {
     }
 
     const newContent = updates.content ?? existing.content;
-    const newMetadata = updates.metadata ?? existing.metadata;
+    let newMetadata = withLifecycleDefaults(updates.metadata ?? existing.metadata);
+    if (updates.status !== undefined) {
+      newMetadata = { ...newMetadata, status: updates.status };
+      if (updates.status === "resolved") newMetadata.resolved_at = new Date().toISOString();
+      else delete newMetadata.resolved_at;
+    }
 
     // Regenerate embedding if content or embeddingText changed
     let newEmbedding = existing.embedding;
@@ -227,6 +349,12 @@ export class MemoryService {
     };
 
     await this.repository.upsert(updatedMemory);
+
+    // A live memory given a new superseding key replaces the holder of that key.
+    const key = memoryKey(newMetadata);
+    if (key !== null && key !== memoryKey(existing.metadata) && existing.supersededBy === null) {
+      this.repository.supersedeByKey(updatedMemory.project, key, id);
+    }
     return updatedMemory;
   }
 
@@ -327,6 +455,8 @@ export class MemoryService {
       includeExpired: options?.includeExpired ?? false,
       now: now.getTime(),
       mode,
+      useGraph: options?.useGraph ?? false,
+      graphWeights: options?.graphWeights,
     };
 
     // Merge top-level date filters into history filters so after/before
@@ -357,6 +487,8 @@ export class MemoryService {
             .then((candidates) =>
               candidates
                 .filter((m) => includeDeleted || !isDeleted(m))
+                .filter((m) => includeDeleted || options?.includeSuperseded || !isSuperseded(m))
+                .filter((m) => options?.includeResolved || !isResolved(m))
                 .filter((m) => matchesAttributeFilters(m, options))
                 .map((candidate) => ({
                   id: candidate.id,
@@ -376,6 +508,7 @@ export class MemoryService {
                   lastAccessed: candidate.lastAccessed,
                   pinned: candidate.pinned ?? false,
                   importance: candidate.importance ?? null,
+                  graphDistance: candidate.signals.graphDistance ?? null,
                 }))
             )
         : Promise.resolve([] as SearchResult[]);
@@ -641,7 +774,7 @@ export class MemoryService {
       .filter((r) => r.confidence >= threshold)
       .slice(0, maxResults);
     if (autoIngest) {
-      await this.store(context, { type: "observation", auto_ingested: true });
+      await this.storeUnlessDuplicate(context, { type: "observation", auto_ingested: true });
     }
     return filtered;
   }
@@ -730,6 +863,7 @@ export class MemoryService {
     timeHorizon: string;
     total: number;
     duplicateClusters: number;
+    duplicatesForReview: number;
     forgetCandidates: number;
     rescored?: number;
     compressed?: number;
@@ -739,7 +873,6 @@ export class MemoryService {
     // Longer horizons prune more aggressively.
     const forgetThreshold =
       timeHorizon === "daily" ? 0.15 : timeHorizon === "monthly" ? 0.3 : 0.22;
-    const dupThreshold = 0.93;
     const now = new Date();
 
     const live = this.repository.queryMemories({ includeArchived: false });
@@ -749,14 +882,18 @@ export class MemoryService {
     const forgetCandidates = live.filter(
       (m, i) => scored[i] < forgetThreshold && !isProtected(m),
     );
-    const clusters = this.repository.findDuplicateClusters(dupThreshold);
+    // Compress merges only what the write-time rule calls a duplicate.
+    const dupPlans = await this.planDuplicateCleanup(WRITE_DUPLICATE_SIMILARITY);
+    const mergeable = dupPlans.filter((p) => p.mergeIds.length > 0);
+    const duplicatesForReview = dupPlans.reduce((n, p) => n + p.review.length, 0);
 
     if (action === "status" || action === "recommend") {
       return {
         action,
         timeHorizon,
         total: live.length,
-        duplicateClusters: clusters.length,
+        duplicateClusters: mergeable.length,
+        duplicatesForReview,
         forgetCandidates: forgetCandidates.length,
         averageQuality: avgQuality,
       };
@@ -765,9 +902,9 @@ export class MemoryService {
     // action === "run"
     const { scored: rescored } = await this.scoreMemories(now);
     let compressed = 0;
-    for (const c of clusters) {
-      await this.mergeDuplicates(c.keepId, c.duplicateIds, "keep_newest");
-      compressed += c.duplicateIds.length;
+    for (const p of mergeable) {
+      await this.mergeDuplicates(p.keepId, p.mergeIds, "keep_newest");
+      compressed += p.mergeIds.length;
     }
     const forgotten = await this.setArchived(
       forgetCandidates.map((m) => m.id),
@@ -778,7 +915,8 @@ export class MemoryService {
       action,
       timeHorizon,
       total: live.length,
-      duplicateClusters: clusters.length,
+      duplicateClusters: mergeable.length,
+      duplicatesForReview,
       forgetCandidates: forgetCandidates.length,
       rescored,
       compressed,
@@ -842,17 +980,66 @@ export class MemoryService {
     return merged;
   }
 
-  /** Auto-merge every near-duplicate cluster at a safe threshold (keep_newest). */
-  async cleanupDuplicates(
-    threshold = 0.92,
-  ): Promise<{ clusters: number; deleted: number }> {
-    const clusters = this.findDuplicates(threshold);
-    let deleted = 0;
-    for (const c of clusters) {
-      await this.mergeDuplicates(c.keepId, c.duplicateIds, "keep_newest");
-      deleted += c.duplicateIds.length;
+  /**
+   * Split each near-duplicate cluster into what is safe to merge automatically
+   * and what needs a person's review, by the write-time rule: a member merges
+   * into the survivor only when it is in the survivor's project, matches the
+   * survivor directly (cosine >= `threshold` — not merely through another
+   * member of the chain) AND in wording (Jaccard >= WRITE_DUPLICATE_JACCARD),
+   * and is not protected (pinned / critical).
+   */
+  async planDuplicateCleanup(threshold = WRITE_DUPLICATE_SIMILARITY): Promise<DuplicatePlan[]> {
+    const plans: DuplicatePlan[] = [];
+    for (const c of this.repository.findDuplicateClusters(threshold)) {
+      const members = await this.repository.findByIds([c.keepId, ...c.duplicateIds]);
+      const keep = members.find((m) => m.id === c.keepId);
+      if (!keep) continue;
+      const similarity = this.repository.similaritiesTo(c.keepId, c.duplicateIds);
+
+      const plan: DuplicatePlan = { keepId: c.keepId, mergeIds: [], review: [] };
+      for (const m of members) {
+        if (m.id === keep.id) continue;
+        const reason =
+          m.project !== keep.project
+            ? "different project"
+            : isProtected(m)
+              ? "pinned or critical"
+              : memoryStatus(m.metadata) !== memoryStatus(keep.metadata)
+                ? "different status"
+              : (similarity.get(m.id) ?? 0) < threshold
+                ? "similar only through other members"
+                : tokenJaccard(m.content, keep.content) < WRITE_DUPLICATE_JACCARD
+                  ? "worded differently"
+                  : null;
+        if (reason === null) plan.mergeIds.push(m.id);
+        else plan.review.push({ id: m.id, reason });
+      }
+      plans.push(plan);
     }
-    return { clusters: clusters.length, deleted };
+    return plans;
+  }
+
+  /**
+   * Merge what planDuplicateCleanup deems safe (keep_newest) and leave the
+   * rest for review; `dryRun` only plans. `clusters` counts clusters merged.
+   * Defaults to the write-time similarity (0.95); find_duplicates, being
+   * read-only, lists candidates from the lower 0.92.
+   */
+  async cleanupDuplicates(
+    threshold = WRITE_DUPLICATE_SIMILARITY,
+    dryRun = false,
+  ): Promise<{ clusters: number; deleted: number; review: number; plans: DuplicatePlan[] }> {
+    const plans = await this.planDuplicateCleanup(threshold);
+    let clusters = 0;
+    let deleted = 0;
+    for (const p of plans) {
+      if (p.mergeIds.length === 0) continue;
+      if (!dryRun) await this.mergeDuplicates(p.keepId, p.mergeIds, "keep_newest");
+      clusters++;
+      deleted += p.mergeIds.length;
+    }
+    const review = plans.reduce((n, p) => n + p.review.length, 0);
+    return { clusters, deleted, review, plans };
   }
 
   /**
@@ -873,9 +1060,12 @@ export class MemoryService {
           ? normalizeProject(opts.project)
           : (this.project ?? undefined);
 
-    const rows = this.repository
-      .queryMemories({ project })
-      .filter((m) => isProtected(m));
+    const live = this.repository.queryMemories({ project }).filter((m) => !isSuperseded(m));
+    const rows = live.filter((m) => isProtected(m));
+    // Open items (tasks, next steps, blockers) follow, newest first.
+    const open = live
+      .filter((m) => !isProtected(m) && memoryStatus(m.metadata) === "open")
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
     rows.sort((a, b) => {
       const ra = a.importance ? IMPORTANCE_RANK[a.importance] : 1;
@@ -890,8 +1080,12 @@ export class MemoryService {
     const parts: string[] = [];
     let used = 0;
     let truncated = false;
-    for (const m of rows) {
-      const label = m.importance === "critical" ? "critical" : "pinned";
+    for (const m of [...rows, ...open]) {
+      const label = isProtected(m)
+        ? m.importance === "critical"
+          ? "critical"
+          : "pinned"
+        : `open ${(m.metadata.type as string | undefined) ?? "item"}`;
       const block = `- [${label}] ${m.content}`;
       if (used + block.length + 1 > maxChars && included.length > 0) {
         truncated = true;
