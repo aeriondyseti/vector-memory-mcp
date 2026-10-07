@@ -10,6 +10,50 @@ Search quality metrics tracked across releases. Higher is better for all metrics
 
 Results are averaged over multiple runs to smooth out scoring jitter.
 
+## Graph-aware search: before / after (2026-10-06)
+
+**Model:** Xenova/all-MiniLM-L6-v2 (384d) | **Dataset:** general+graph (45 memories, 46 queries; graph of 35 entities, 27 relations, memories auto-linked by mention) | **Averaged over 5 runs per mode**
+
+Same memories and graph in both columns; only `include_graph` differs (off → on).
+
+| Category | MRR | R@5 | NDCG@5 | Queries |
+|---|---|---|---|---|
+| **Overall (original 38)** | 0.817 → 0.839 (+0.022) | 1.000 → 1.000 (±0) | 0.816 → 0.831 (+0.015) | 38 |
+| exact_match | 0.900 → 0.975 (+0.075) | 1.000 → 1.000 (±0) | 0.934 → 0.959 (+0.025) | 8 |
+| semantic | 0.856 → 0.864 (+0.008) | 1.000 → 1.000 (±0) | 0.879 → 0.889 (+0.010) | 12 |
+| related_concept | 0.988 → 1.000 (+0.012) | 1.000 → 1.000 (±0) | 0.941 → 0.949 (+0.008) | 8 |
+| negative | 0.000 → 0.000 (±0) | 1.000 → 1.000 (±0) | 0.000 → 0.000 (±0) | 4 |
+| edge_case | 0.944 → 0.950 (+0.006) | 1.000 → 1.000 (±0) | 0.907 → 0.941 (+0.034) | 6 |
+| **multi_hop** (new) | 0.301 → 0.395 (+0.094) | 0.625 → 0.887 (+0.262) | 0.468 → 0.628 (+0.160) | 8 |
+
+`multi_hop` queries were written for this comparison: each names an entity whose answers are linked to it in the graph but not worded like the query. Read them as a demonstration of the lane, the original 38 as the regression check.
+
+| multi_hop query | MRR off → on |
+|---|---|
+| What do we know about Matriarch Valerica's faction? | 0.600 → 0.500 |
+| Who leads the group that meets at the Velvet Glove? | 0.250 → 0.333 |
+| What else is going on in the city Arch-Mage Varis wrote about? | 0.210 → 0.500 |
+| Which figure was executed in the period that the Bastille set off? | 0.500 → 0.500 |
+| Other ideas from the same field as Heisenberg | 0.500 → 0.500 |
+| Problems we hit while building the Auto-Blogger | 0.000 → 0.333 |
+| What did we give up by choosing MongoDB? | 0.350 → 0.333 |
+| Which libraries did we pick after the DatePicker trouble? | 0.000 → 0.164 |
+
+**Reading it:** on the original 38 queries the graph lane makes no measurable difference. Repeated identical runs moved overall MRR between −0.004 and +0.022, and the graph-off baseline alone varies 0.817–0.834. On multi-hop queries it finds clearly more of the linked answers: R@5 +0.25 to +0.26 and NDCG@5 +0.15 to +0.16 across runs.
+
+**Tuning (how the default was chosen).** The lane has two parts: memories linked to an entity the **query names** (weight 0.5), and **neighbours** of the top text matches. The neighbour weight was measured on this dataset (deltas vs graph off, 5 runs each):
+
+| Neighbour weight | Original 38 MRR | multi_hop R@5 | multi_hop MRR |
+|---|---|---|---|
+| 0.5 | −0.116 | +0.258 | +0.088 |
+| 0.5, seeds not boosted | −0.200 | +0.287 | +0.340 |
+| 0.1 | −0.056 | +0.308 | +0.155 |
+| **0 (default)** | **±0 (noise)** | **+0.250** | **+0.098** |
+
+With `RRF_K = 10`, adjacent ranks in one lane differ by under 0.01. Any neighbour vote large enough to matter therefore lifts topic siblings over the true top answer. The default keeps only the named-entity part (`GRAPH_NEIGHBOR_WEIGHT = 0` in `server/core/memory.repository.ts`). The lane as a whole is opt-in (`include_graph: true`): on a larger real-world corpus it cost top-rank precision, so it ships off by default until it is tuned further.
+
+Reproduce with `bun run benchmark:graph` (add `--write` to record a new section here).
+
 ## v2.4.0 (2026-03-27)
 
 **Model:** Xenova/all-MiniLM-L6-v2 (384d) | **Dataset:** general (45 memories, 38 queries) | **Queries passed:** ~20/38 | **Averaged over 5 runs**
