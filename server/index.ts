@@ -9,6 +9,7 @@ import { backfillVectors, repairConversationProjects } from "./core/migrations";
 import { MemoryRepository } from "./core/memory.repository";
 import { ConversationRepository } from "./core/conversation.repository";
 import { EmbeddingsService } from "./core/embeddings.service";
+import { RerankerService } from "./core/reranker.service";
 import { MemoryService } from "./core/memory.service";
 import { ConversationHistoryService } from "./core/conversation.service";
 import { startServer } from "./transports/mcp/server";
@@ -57,6 +58,7 @@ async function main(): Promise<void> {
   // Initialize layers
   const repository = new MemoryRepository(db);
   const memoryService = new MemoryService(repository, embeddings, config.project);
+  if (config.rerank) memoryService.setReranker(new RerankerService());
 
   if (config.pluginMode) {
     console.error("[vector-memory-mcp] Running in plugin mode");

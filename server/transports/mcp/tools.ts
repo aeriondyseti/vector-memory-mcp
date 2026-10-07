@@ -389,6 +389,11 @@ SCOPE: Memories are stored globally across all projects. By default, search cove
         type: "boolean",
         description: "Include tasks, next steps and blockers already resolved (default: false).",
       },
+      rerank: {
+        type: "boolean",
+        description:
+          "Re-score the top candidates with the cross-encoder, which reads the query and each memory together (default: true when the server has reranking on). Set false for a faster, rougher search.",
+      },
       include_graph: {
         type: "boolean",
         description:

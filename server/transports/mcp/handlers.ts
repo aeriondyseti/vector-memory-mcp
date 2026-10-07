@@ -465,6 +465,7 @@ export async function handleSearchMemories(
     includeExpired: asBool(args?.include_expired, false),
     includeSuperseded: asBool(args?.include_superseded, false),
     includeResolved: asBool(args?.include_resolved, false),
+    rerank: asBool(args?.rerank, true),
     useGraph: asBool(args?.include_graph, false),
     minConfidence: asStringLevel<MemoryConfidence>(args?.min_confidence, MEMORY_CONFIDENCE_LEVELS),
     minImportance: asStringLevel<MemoryImportance>(args?.min_importance, MEMORY_IMPORTANCE_LEVELS),

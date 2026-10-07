@@ -7,6 +7,7 @@
 
 import { config } from "../server/config/index";
 import { EmbeddingsService } from "../server/core/embeddings.service";
+import { DEFAULT_RERANKER_MODEL, RerankerService } from "../server/core/reranker.service";
 
 async function warmup(): Promise<void> {
   console.log("🔥 Warming up vector-memory-mcp...");
@@ -38,6 +39,10 @@ async function warmup(): Promise<void> {
     // Trigger model download by generating a test embedding
     const startTime = Date.now();
     await embeddings.embed("warmup test");
+    if (config.rerank) {
+      console.log(`   Reranker: ${DEFAULT_RERANKER_MODEL}`);
+      await new RerankerService().score("warmup test", ["warmup test"]);
+    }
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
     console.log();

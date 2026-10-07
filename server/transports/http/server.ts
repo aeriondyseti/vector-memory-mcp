@@ -151,11 +151,13 @@ export function createHttpApp(memoryService: MemoryService, config: Config): Hon
   // Warmup endpoint — triggers ONNX model load if not already cached
   app.post("/warmup", async (c) => {
     const embeddings = memoryService.getEmbeddings();
-    if (embeddings.isReady) {
+    const reranker = memoryService.getReranker();
+    if (embeddings.isReady && (reranker?.isReady ?? true)) {
       return c.json({ status: "already_warm" });
     }
     const start = Date.now();
     await embeddings.warmup();
+    await reranker?.warmup();
     return c.json({ status: "warmed", elapsed: Date.now() - start });
   });
 

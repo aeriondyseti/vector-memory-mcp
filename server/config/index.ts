@@ -27,6 +27,8 @@ export interface Config {
   project: string;
   embeddingModel: string;
   embeddingDimension: number;
+  /** Rerank search's top memory candidates with a cross-encoder (default on). */
+  rerank: boolean;
   httpPort: number;
   httpHost: string;
   enableHttp: boolean;
@@ -45,6 +47,7 @@ export interface ConfigOverrides {
   enableHistory?: boolean;
   historyPath?: string;
   historyWeight?: number;
+  rerank?: boolean;
 }
 
 // Defaults — single global store shared by all projects. Memories are tagged
@@ -77,6 +80,9 @@ export function loadConfig(overrides: ConfigOverrides = {}): Config {
     project: normalizeProject(overrides.project ?? process.cwd()),
     embeddingModel: DEFAULT_EMBEDDING_MODEL,
     embeddingDimension: DEFAULT_EMBEDDING_DIMENSION,
+    rerank:
+      overrides.rerank ??
+      !["0", "false", "off", "no"].includes((process.env.VECTOR_MEMORY_RERANK ?? "").toLowerCase()),
     httpPort:
       overrides.httpPort
       ?? (process.env.VECTOR_MEMORY_HTTP_PORT
@@ -112,6 +118,7 @@ export function parseCliArgs(argv: string[]): ConfigOverrides {
       "--enable-history": Boolean,
       "--history-path": String,
       "--history-weight": Number,
+      "--no-rerank": Boolean,
 
       // Aliases
       "-d": "--db-file",
@@ -129,6 +136,7 @@ export function parseCliArgs(argv: string[]): ConfigOverrides {
     enableHistory: args["--enable-history"] ?? undefined,
     historyPath: args["--history-path"],
     historyWeight: args["--history-weight"],
+    rerank: args["--no-rerank"] ? false : undefined,
   };
 }
 

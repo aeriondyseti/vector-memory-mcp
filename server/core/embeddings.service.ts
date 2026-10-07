@@ -29,6 +29,35 @@ export function modelProfile(modelName: string): EmbeddingModelProfile {
   return MODEL_PROFILES[modelName] ?? { pooling: "mean", queryPrefix: "" };
 }
 
+/** Download a model file from Hugging Face into the package's model cache, unless already there. */
+async function downloadIfMissing(modelName: string, fileName: string): Promise<string> {
+  const packageRoot = join(dirname(Bun.main), "..");
+  const filePath = join(packageRoot, ".cache", "models", modelName, fileName);
+  if (existsSync(filePath)) return filePath;
+
+  const url = `${HF_CDN}/${modelName}/resolve/main/${fileName}`;
+  await mkdir(dirname(filePath), { recursive: true });
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Failed to download ${url}: ${response.status}`);
+  const buffer = await response.arrayBuffer();
+  await Bun.write(filePath, buffer);
+  return filePath;
+}
+
+/** A Hugging Face model's ONNX export (onnx/model.onnx) and tokenizer, downloaded on first use. */
+export async function loadOnnxModel(
+  modelName: string,
+): Promise<{ session: ort.InferenceSession; tokenizer: Tokenizer }> {
+  const modelPath = await downloadIfMissing(modelName, "onnx/model.onnx");
+  const tokenizerJsonPath = await downloadIfMissing(modelName, "tokenizer.json");
+  const tokenizerConfigPath = await downloadIfMissing(modelName, "tokenizer_config.json");
+
+  const session = await ort.InferenceSession.create(modelPath, { executionProviders: ["cpu"] });
+  const tokenizerJson = await Bun.file(tokenizerJsonPath).json();
+  const tokenizerConfig = await Bun.file(tokenizerConfigPath).json();
+  return { session, tokenizer: new Tokenizer(tokenizerJson, tokenizerConfig) };
+}
+
 export class EmbeddingsService {
   private modelName: string;
   private session: ort.InferenceSession | null = null;
@@ -73,36 +102,10 @@ export class EmbeddingsService {
     await this.initPromise;
   }
 
-  private get cacheDir(): string {
-    const packageRoot = join(dirname(Bun.main), "..");
-    return join(packageRoot, ".cache", "models", this.modelName);
-  }
-
-  private async downloadIfMissing(fileName: string): Promise<string> {
-    const filePath = join(this.cacheDir, fileName);
-    if (existsSync(filePath)) return filePath;
-
-    const url = `${HF_CDN}/${this.modelName}/resolve/main/${fileName}`;
-    await mkdir(dirname(filePath), { recursive: true });
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Failed to download ${url}: ${response.status}`);
-    const buffer = await response.arrayBuffer();
-    await Bun.write(filePath, buffer);
-    return filePath;
-  }
-
   private async _init(): Promise<void> {
-    const modelPath = await this.downloadIfMissing("onnx/model.onnx");
-    const tokenizerJsonPath = await this.downloadIfMissing("tokenizer.json");
-    const tokenizerConfigPath = await this.downloadIfMissing("tokenizer_config.json");
-
-    this.session = await ort.InferenceSession.create(modelPath, {
-      executionProviders: ["cpu"],
-    });
-
-    const tokenizerJson = await Bun.file(tokenizerJsonPath).json();
-    const tokenizerConfig = await Bun.file(tokenizerConfigPath).json();
-    this.tokenizer = new Tokenizer(tokenizerJson, tokenizerConfig);
+    const { session, tokenizer } = await loadOnnxModel(this.modelName);
+    this.session = session;
+    this.tokenizer = tokenizer;
   }
 
   async embed(text: string): Promise<number[]> {
