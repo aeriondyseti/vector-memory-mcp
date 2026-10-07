@@ -621,7 +621,7 @@ export class MemoryService {
                   updatedAt: candidate.updatedAt,
                   source: "memory" as const,
                   score,
-                  confidence: computeConfidence(candidate.signals),
+                  confidence: computeConfidence(candidate.signals, rerankScore),
                   project: candidate.project,
                   supersededBy: candidate.supersededBy,
                   usefulness: candidate.usefulness,

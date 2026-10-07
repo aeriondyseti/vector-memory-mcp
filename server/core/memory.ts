@@ -364,6 +364,23 @@ const RELEVANCE_MODEL = {
   keywordOnlyGap: 0.5,
 };
 /**
+ * Stage two for a result the cross-encoder scored: its logit joins the
+ * retrieval signals. Fitted like RELEVANCE_MODEL, on reranked searches over
+ * the public sets plus LongMemEval (long conversational memories); on a
+ * held-out real-world corpus it separated relevant from irrelevant results,
+ * and right from wrong top results, better than the retrieval-only model.
+ */
+const RERANKED_RELEVANCE_MODEL = {
+  intercept: -0.318,
+  rerankLogit: 0.218,
+  z: -0.056,
+  gapToBest: -6.069,
+  ftsReciprocalRank: 1.341,
+  strongKeywordAgreement: -0.045,
+  keywordOnly: -1.678,
+  keywordOnlyGap: 0.5,
+};
+/**
  * A keyword hit counts as strong evidence only among the top BM25 ranks: the
  * keyword lane matches any of a question's content words, so a low-ranked
  * hit may share little with the query and must not raise confidence like a
@@ -386,17 +403,19 @@ const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
  * similarity stats (exact mode, where the vector lane doesn't run) it falls
  * back to cosine-through-a-sigmoid and fixed keyword-only values.
  */
-export function computeConfidence(signals: SearchSignals): number {
+export function computeConfidence(signals: SearchSignals, rerankLogit?: number): number {
   const sim = signals.cosineSimilarity;
   const stats = signals.similarity;
 
   if (stats) {
-    const m = RELEVANCE_MODEL;
+    const reranked = rerankLogit !== undefined;
+    const m = reranked ? RERANKED_RELEVANCE_MODEL : RELEVANCE_MODEL;
     const keywordOnly = sim === null;
     const z = keywordOnly ? 0 : (sim - stats.mean) / (stats.std || 1e-6);
     const gap = keywordOnly ? m.keywordOnlyGap : Math.max(0, stats.best - sim);
     const logit =
       m.intercept +
+      (reranked ? RERANKED_RELEVANCE_MODEL.rerankLogit * rerankLogit : 0) +
       m.z * z +
       m.gapToBest * gap +
       m.ftsReciprocalRank * (signals.ftsRank ? 1 / signals.ftsRank : 0) +

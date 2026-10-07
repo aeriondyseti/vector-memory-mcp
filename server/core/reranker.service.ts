@@ -5,7 +5,12 @@ import { loadOnnxModel } from "./embeddings.service";
 /** A small cross-encoder trained on MS MARCO passage ranking: 6 layers, CPU-friendly. */
 export const DEFAULT_RERANKER_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2";
 
-const MAX_SEQ_LENGTH = 512;
+/**
+ * Tokens read per (query, memory) pair. 256 keeps quality (it rose on long
+ * conversational memories, held elsewhere) at a quarter to half the cost of
+ * 512: about 0.1–0.4 s per search instead of up to ~2 s on long memories.
+ */
+const MAX_SEQ_LENGTH = 256;
 /** Pairs scored per model call: one padded batch amortizes the call overhead. */
 const BATCH_SIZE = 16;
 /** Text beyond this many characters is cut before tokenizing (memories are short; long ones are truncated anyway). */
