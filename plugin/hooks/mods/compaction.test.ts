@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "claude-code/testing";
 import type { On, SessionMessage } from "claude-code";
-import { ANSWER, parseWaypointDraft } from "./checkpoint.ts";
+import { ANSWER, compactionDecision, parseWaypointDraft } from "./checkpoint.ts";
 
 const SERVER = "plugin:vector-memory:vector-memory";
 
@@ -181,9 +181,13 @@ interface Asking {
 /**
  * A person at a terminal who answers each question with the next of
  * `answers` (`null` dismisses), a fork drafting DRAFT and MEMORIES unless
- * `fails`, and a server that stores them.
+ * `fails`, and a server that stores them (and hands no waypoint back when
+ * `noWaypoint`).
  */
-function asking(on: On, { answers = [] as (string | null)[], fails = false } = {}): Asking {
+function asking(
+  on: On,
+  { answers = [] as (string | null)[], fails = false, noWaypoint = false } = {}
+): Asking {
   const h: Omit<Asking, "compacted"> = { calls: [], prompts: [], asked: [] };
   let compacted = false;
 
@@ -196,7 +200,8 @@ function asking(on: On, { answers = [] as (string | null)[], fails = false } = {
   on("mcp.call", (_$, e) => {
     h.calls.push({ tool: e.tool, args: e.args });
     if (e.tool === "store_memories") return mcpText(`Memory stored with ID: ${MEMORY_ID}`);
-    return mcpText(e.tool === "get_waypoint" ? "# Waypoint\n\nBuilding the thing." : "Waypoint stored");
+    if (e.tool === "get_waypoint") return mcpText(noWaypoint ? "No stored waypoint" : "# Waypoint\n\nBuilding the thing.");
+    return mcpText("Waypoint stored");
   });
   on("tool.call", { tool: "AskUserQuestion" }, (_$, e) => {
     const q = e.questions[0];
@@ -215,18 +220,48 @@ function asking(on: On, { answers = [] as (string | null)[], fails = false } = {
 }
 
 describe("session.compact (ask)", () => {
-  test("Save waypoint: stores memories, then the waypoint linking them, and appends it", async ($, on) => {
-    const h = asking(on, { answers: [ANSWER.save] });
+  test("reads the person's answer", async () => {
+    expect(compactionDecision(ANSWER.instead)).toEqual({ kind: "instead" });
+    expect(compactionDecision(ANSWER.memories)).toEqual({ kind: "memories" });
+    expect(compactionDecision(ANSWER.compact)).toEqual({ kind: "skip" });
+    expect(compactionDecision(ANSWER.cancel)).toEqual({ kind: "cancel" });
+    expect(compactionDecision("the auth bits")).toEqual({ kind: "instead", notes: "the auth bits" });
+  });
+
+  test("Waypoint instead: stores memories and the waypoint, then clears the conversation to it", async ($, on) => {
+    const h = asking(on, { answers: [ANSWER.instead] });
 
     const result = await $.session.compact({ trigger: "manual", messages: TRANSCRIPT });
 
-    expect(h.asked.map((a) => a.options)).toEqual([[ANSWER.save, ANSWER.memories, ANSWER.skip, ANSWER.cancel]]);
+    expect(h.asked.map((a) => a.options)).toEqual([[ANSWER.instead, ANSWER.memories, ANSWER.compact, ANSWER.cancel]]);
     expect(h.calls.map((c) => c.tool)).toEqual(["store_memories", "set_waypoint", "get_waypoint"]);
     expect(h.calls[0]?.args).toEqual({
       memories: [{ content: MEMORIES[0]?.content, metadata: { type: "decision", source: "auto-compaction" } }],
     });
     expect(h.calls[1]?.args).toEqual({ ...DRAFT, memory_ids: [MEMORY_ID], metadata: { source: "auto-compaction" } });
-    expect(result.messages?.length).toBe(2);
+    expect(h.compacted()).toBe(false); // the summarizer never ran
+    expect(result.messages?.length).toBe(1);
+    expect(result.messages?.[0]?.role).toBe("user");
+    expect(result.messages?.[0]?.text).toContain("Building the thing.");
+    expect(result.messages?.[0]?.text).toContain("the conversation before it was cleared");
+  });
+
+  test("Waypoint instead on an auto-compaction clears too", async ($, on) => {
+    const h = asking(on, { answers: [ANSWER.instead] });
+
+    const result = await $.session.compact({ trigger: "auto", messages: TRANSCRIPT });
+
+    expect(h.compacted()).toBe(false);
+    expect(result.messages?.length).toBe(1);
+  });
+
+  test("Waypoint instead compacts after all when the waypoint does not load back", async ($, on) => {
+    const h = asking(on, { answers: [ANSWER.instead], noWaypoint: true });
+
+    const result = await $.session.compact({ trigger: "manual", messages: TRANSCRIPT });
+
+    expect(h.compacted()).toBe(true);
+    expect(result.messages?.[0]?.text).toBe(SUMMARY.text);
   });
 
   test("Memories only: stores memories, no waypoint, nothing appended", async ($, on) => {
@@ -239,8 +274,8 @@ describe("session.compact (ask)", () => {
     expect(result.messages?.length).toBe(1);
   });
 
-  test("Skip: compacts without drafting", async ($, on) => {
-    const h = asking(on, { answers: [ANSWER.skip] });
+  test("Just compact: compacts without drafting", async ($, on) => {
+    const h = asking(on, { answers: [ANSWER.compact] });
 
     const result = await $.session.compact({ trigger: "manual", messages: TRANSCRIPT });
 
@@ -260,17 +295,18 @@ describe("session.compact (ask)", () => {
     expect(h.prompts).toEqual([]);
   });
 
-  test("auto-compaction: no Cancel, and Esc saves the waypoint", async ($, on) => {
+  test("auto-compaction: no Cancel, and Esc saves the waypoint and compacts", async ($, on) => {
     const h = asking(on, { answers: [null] });
 
     const result = await $.session.compact({ trigger: "auto", messages: TRANSCRIPT });
 
-    expect(h.asked[0]?.options).toEqual([ANSWER.save, ANSWER.memories, ANSWER.skip]);
+    expect(h.asked[0]?.options).toEqual([ANSWER.instead, ANSWER.memories, ANSWER.compact]);
     expect(h.calls.map((c) => c.tool)).toEqual(["store_memories", "set_waypoint", "get_waypoint"]);
+    expect(h.compacted()).toBe(true);
     expect(result.messages?.length).toBe(2);
   });
 
-  test("notes typed under Other steer the draft alongside /compact's", async ($, on) => {
+  test("notes typed under Other: a waypoint instead, steered by them and /compact's", async ($, on) => {
     const h = asking(on, { answers: ["the migration plan"] });
 
     await $.session.compact({ trigger: "manual", instructions: "keep the API notes", messages: TRANSCRIPT });
@@ -280,10 +316,11 @@ describe("session.compact (ask)", () => {
       source: "auto-compaction",
       user_notes: "keep the API notes\n\nthe migration plan",
     });
+    expect(h.compacted()).toBe(false);
   });
 
   test("a failed save on /compact asks whether to compact anyway", async ($, on) => {
-    const h = asking(on, { answers: [ANSWER.save, ANSWER.cancel], fails: true });
+    const h = asking(on, { answers: [ANSWER.instead, ANSWER.cancel], fails: true });
 
     const result = await $.session.compact({ trigger: "manual", messages: TRANSCRIPT });
 

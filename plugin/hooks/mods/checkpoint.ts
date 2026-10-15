@@ -230,7 +230,9 @@ export function checkpointMode(value: unknown): CheckpointMode {
 
 export const ANSWER = {
   save: "Save waypoint",
+  instead: "Waypoint instead",
   memories: "Memories only",
+  compact: "Just compact",
   skip: "Skip",
   cancel: "Cancel",
   proceed: "Continue anyway",
@@ -243,6 +245,22 @@ export type CheckpointDecision =
   | { kind: "memories" }
   | { kind: "skip" }
   | { kind: "cancel" };
+
+/**
+ * Before compaction, also `instead`: save the waypoint and clear the
+ * conversation down to it, in place of compacting. (`save` there is the
+ * unasked default: save the waypoint, compact, and append it.)
+ */
+export type CompactionDecision = CheckpointDecision | { kind: "instead"; notes?: string };
+
+/** Read the answer before compaction; free text typed under "Other" is `instead` with it as notes. */
+export function compactionDecision(answer: string): CompactionDecision {
+  if (answer === ANSWER.instead) return { kind: "instead" };
+  if (answer === ANSWER.memories) return { kind: "memories" };
+  if (answer === ANSWER.compact) return { kind: "skip" };
+  if (answer === ANSWER.cancel) return { kind: "cancel" };
+  return { kind: "instead", notes: answer };
+}
 
 /** Read the person's answer; free text typed under "Other" saves with it as notes. */
 export function checkpointDecision(answer: string): CheckpointDecision {

@@ -126,13 +126,20 @@ the waypoint linking them (`memory_ids`). You're asked first:
 
 When:
 
-- **Compaction** (`/compact` or auto-compaction): a saved waypoint is appended
-  to the compacted conversation so work resumes with it in context. Text after
-  `/compact` also steers the draft. An auto-compaction can't be cancelled (the
-  conversation no longer fits), so it offers no *Cancel* and Esc saves the
-  waypoint. With nobody to ask (`-p`, SDK) or for a plugin's compaction, it
-  saves without asking. Set `compactCheckpoint` in `/config` to `always` (save
-  without asking) or `never`.
+- **Compaction** (`/compact` or auto-compaction) asks whether to use a waypoint
+  *instead of* compacting:
+  - *Waypoint instead*: saves memories and the waypoint, then clears the
+    conversation down to the waypoint alone, as `/clear` would. No summary is
+    made. Text typed under *Other* does the same, using it as guidance.
+  - *Memories only*: saves memories, then compacts as usual.
+  - *Just compact*: compacts as usual.
+  - *Cancel*: only for `/compact`. An auto-compaction can't be cancelled (the
+    conversation no longer fits), and Esc there saves a waypoint and compacts.
+
+  Text after `/compact` also steers the draft. With nobody to ask (`-p`, SDK),
+  for a plugin's compaction, or with `compactCheckpoint` set to `always` in
+  `/config`, it saves a waypoint, compacts, and appends the waypoint to the
+  compacted conversation. `never` leaves compaction alone.
 - **`/clear` and `/exit`** (and `/new`, `/reset`, `/quit`). Set
   `exitCheckpoint` to `always` or `never` to skip the question.
 - **Session start and after `/clear`**: when a waypoint exists, you're asked

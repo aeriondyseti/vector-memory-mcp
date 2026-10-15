@@ -7,12 +7,13 @@
  * "Memories only" stores the memories without a waypoint.
  *
  * Compaction — wraps every compaction of the main conversation, per the
- * `compactCheckpoint` option: `ask` puts the choice to the person (save,
- * memories only, skip, cancel a `/compact`, or type notes under "Other" that
- * steer the waypoint), `always` saves without asking, `never` does nothing.
- * Nobody to ask (-p, SDK) or a plugin's compaction: saves without asking. A
- * saved waypoint is appended to the compacted conversation; `/compact <text>`
- * steers the draft too.
+ * `compactCheckpoint` option: `ask` puts the choice to the person (a
+ * waypoint instead — saved, then the conversation cleared down to it in
+ * place of compacting — memories only, just compact, cancel a `/compact`, or
+ * type notes under "Other" that steer that waypoint), `always` saves a
+ * waypoint, compacts and appends it, `never` does nothing. Nobody to ask
+ * (-p, SDK) or a plugin's compaction: as `always`. `/compact <text>` steers
+ * the draft too.
  *
  * /clear and /exit (and aliases: /new, /reset, /quit) — before the command
  * runs (`session.end` is too short-lived to draft one), the same choice per
@@ -39,6 +40,8 @@ import {
   checkpointDecision,
   checkpointMode,
   checkpointPrompt,
+  type CompactionDecision,
+  compactionDecision,
   errorMessage,
   findWaypointContext,
   loadQuestion,
@@ -142,37 +145,46 @@ async function saveCheckpoint(
   }
 }
 
-/** The waypoint as a message for the compacted conversation; null when none. */
-async function loadCheckpoint($: EngineInterface, server: string): Promise<SessionMessage | null> {
+/** The waypoint as a message for the conversation, headed by `how` it got there; null when none. */
+async function loadCheckpoint($: EngineInterface, server: string, how: string): Promise<SessionMessage | null> {
   const loaded = await $.mcp.call(server, "get_waypoint", {});
   const text = resultText(loaded);
   if (loaded.isError || text === "" || text.startsWith("No stored waypoint")) return null;
 
   return {
     role: "user",
-    text: `## Session Waypoint (checkpoint saved automatically before compaction)\n\n${RECALLED_CONTEXT_NOTE}\n\n${text}`,
+    text: `## Session Waypoint (${how})\n\n${RECALLED_CONTEXT_NOTE}\n\n${text}`,
     toolUses: [],
   };
 }
 
-/**
- * Asks what to save before `occasion` ("/clear", "compaction"). Without
- * `canCancel` (an auto-compaction must go ahead), there is no Cancel and
- * dismissing saves the waypoint, as before this asked; with it, dismissing
- * cancels.
- */
-async function askCheckpoint(
-  $: EngineInterface,
-  occasion: string,
-  canCancel: boolean
-): Promise<CheckpointDecision> {
-  const options = [ANSWER.save, ANSWER.memories, ANSWER.skip, ...(canCancel ? [ANSWER.cancel] : [])];
+async function askBeforeExit($: EngineInterface, command: string): Promise<CheckpointDecision> {
   try {
     const answer = await $.ui.ask(
-      `Save a waypoint before ${occasion}? Type under "Other" to say what it should focus on.`,
-      { header: "Waypoint", options }
+      `Save a waypoint before /${command}? Type under "Other" to say what it should focus on.`,
+      { header: "Waypoint", options: [ANSWER.save, ANSWER.memories, ANSWER.skip, ANSWER.cancel] }
     );
     return checkpointDecision(answer);
+  } catch {
+    return { kind: "cancel" }; // dismissed (Esc)
+  }
+}
+
+/**
+ * Asks whether to clear the conversation down to a waypoint instead of
+ * compacting it. Without `canCancel` (an auto-compaction must go ahead),
+ * there is no Cancel and dismissing saves the waypoint and compacts, as
+ * before this asked; with it, dismissing cancels.
+ */
+async function askBeforeCompaction($: EngineInterface, canCancel: boolean): Promise<CompactionDecision> {
+  const options = [ANSWER.instead, ANSWER.memories, ANSWER.compact, ...(canCancel ? [ANSWER.cancel] : [])];
+  try {
+    const answer = await $.ui.ask(
+      "Save a waypoint and memories and clear the conversation instead of compacting it? " +
+        'Type under "Other" to say what the waypoint should focus on.',
+      { header: "Compaction", options }
+    );
+    return compactionDecision(answer);
   } catch {
     return canCancel ? { kind: "cancel" } : SAVE; // dismissed (Esc)
   }
@@ -181,7 +193,7 @@ async function askCheckpoint(
 /** After a failed save: go ahead with `action` ("Run /clear", "Compact") anyway? */
 async function proceedWithoutSaving(
   $: EngineInterface,
-  decision: CheckpointDecision,
+  decision: CompactionDecision,
   action: string
 ): Promise<boolean> {
   const what = decision.kind === "memories" ? "The memories" : "The waypoint";
@@ -252,7 +264,7 @@ const checkpointBeforeCompaction: Hook<"session.compact"> = async ($, e, next) =
 
   // The person is asked about their /compact and an auto-compaction while
   // someone is there; a plugin's compaction, or one with nobody to ask,
-  // saves without asking. Only a /compact can be cancelled: an
+  // saves the waypoint and compacts. Only a /compact can be cancelled: an
   // auto-compaction runs when the conversation no longer fits.
   const isInteractive =
     compactCheckpointMode === "ask" &&
@@ -260,7 +272,7 @@ const checkpointBeforeCompaction: Hook<"session.compact"> = async ($, e, next) =
     (await $.session.surfaces()).length > 0;
   const canCancel = e.trigger === "manual";
 
-  const decision = isInteractive ? await askCheckpoint($, "compaction", canCancel) : SAVE;
+  const decision: CompactionDecision = isInteractive ? await askBeforeCompaction($, canCancel) : SAVE;
   if (decision.kind === "cancel") return { skip: "/compact cancelled." };
   if (decision.kind === "skip") return next(e);
 
@@ -270,6 +282,21 @@ const checkpointBeforeCompaction: Hook<"session.compact"> = async ($, e, next) =
 
   if (!saved && isInteractive && canCancel && !(await proceedWithoutSaving($, decision, "Compact"))) {
     return { skip: "/compact cancelled." };
+  }
+
+  // Instead of compacting: the conversation becomes the waypoint alone, as
+  // after /clear (the engine's summarizer never runs). Should the waypoint
+  // not load back, it compacts after all.
+  if (decision.kind === "instead" && saved && server !== null) {
+    try {
+      const waypoint = await loadCheckpoint($, server, "saved in place of compaction; the conversation before it was cleared");
+      if (waypoint) {
+        $.ui.toast(`${savedToast(true, memoryCount)}; conversation cleared to the waypoint`);
+        return { messages: [waypoint] };
+      }
+    } catch (err) {
+      $.ui.log(`${LABEL}: waypoint reload failed: ${errorMessage(err)}`);
+    }
   }
 
   const compacted = await next(e);
@@ -286,7 +313,7 @@ const checkpointBeforeCompaction: Hook<"session.compact"> = async ($, e, next) =
   }
 
   try {
-    const waypoint = await loadCheckpoint($, server);
+    const waypoint = await loadCheckpoint($, server, "checkpoint saved automatically before compaction");
     if (waypoint) {
       $.ui.toast(`${savedToast(true, memoryCount)} and reloaded across compaction`);
       return { ...compacted, messages: [...compacted.messages, waypoint] };
@@ -310,7 +337,7 @@ const checkpointBeforeExit: Hook<"command.run"> = async ($, e, next) => {
   const isInteractive = mode === "ask" && e.origin.kind === "composer";
   if (mode === "ask" && !isInteractive) return next(e);
 
-  const decision = isInteractive ? await askCheckpoint($, `/${command}`, true) : SAVE;
+  const decision = isInteractive ? await askBeforeExit($, command) : SAVE;
   if (decision.kind === "cancel") return { text: `/${command} cancelled.` };
   if (decision.kind === "skip") return next(e);
 
