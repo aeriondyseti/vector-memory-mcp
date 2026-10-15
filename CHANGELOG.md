@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-10-15
+
 ### Added
 - **"Memories only"**: a new answer to the checkpoint question. The model reviews the session for what is worth remembering (the same criteria as `/waypoint:set`'s memory step) and the plugin stores the result with `store_memories` (`metadata.source`: `auto-compaction`, `clear` or `exit`). No waypoint is saved, so the next session still asks before loading the previous one, and nothing is appended to a compacted conversation.
 - **A waypoint instead of compacting**: before every main-conversation compaction the plugin asks: *Waypoint instead*, *Memories only*, *Just compact*, or *Cancel* (`/compact` only). *Waypoint instead* (or notes typed under "Other", combined with `/compact <text>`) stores memories and the waypoint, then answers the compaction itself with the waypoint as the whole conversation — cleared as by `/clear`, with no summary made; should the waypoint not load back, it compacts as usual. *Memories only* stores memories and then compacts. An auto-compaction offers no Cancel, and Esc saves a waypoint and compacts. Compactions with nobody to ask (`-p`, SDK), started by a plugin, or under `compactCheckpoint: always` save a waypoint, compact and append it, as before. A failed save on `/compact` asks whether to compact anyway. New `compactCheckpoint` option (`ask` | `always` | `never`, default `ask`).
@@ -321,7 +323,8 @@ LanceDB (`@lancedb/lancedb`, `apache-arrow`) ships as a production dependency in
 - Initial MCP server implementation
 - Basic project structure
 
-[Unreleased]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/AerionDyseti/vector-memory-mcp/releases/tag/v3.2.0
 [3.1.0]: https://github.com/AerionDyseti/vector-memory-mcp/releases/tag/v3.1.0
 [3.0.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v2.4.0...v3.0.0
 [2.4.0]: https://github.com/AerionDyseti/vector-memory-mcp/compare/v2.2.3...v2.4.0
