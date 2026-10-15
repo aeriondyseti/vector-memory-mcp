@@ -112,28 +112,38 @@ Assistant: [calls set_waypoint with summary, completed items, next steps]
 ```
 
 **Automatic checkpoints** (plugin, on Claude Code builds with the mod system).
-The plugin drafts a waypoint from the session (a prompt-cached fork of the
-conversation) and saves it at the moments context would otherwise be lost:
+At the moments context would otherwise be lost, the plugin does what
+`/waypoint:set` does: from one prompt-cached fork of the conversation it
+drafts memories worth keeping and a waypoint, stores the memories, then saves
+the waypoint linking them (`memory_ids`). You're asked first:
 
-- **Compaction** (`/compact` or auto-compaction): saved first, then appended to
-  the compacted conversation so work resumes with it in context. Text after
-  `/compact` also steers the waypoint.
-- **`/clear` and `/exit`** (and `/new`, `/reset`, `/quit`): you're asked first:
-  *Save waypoint*, *Memories only*, *Skip*, or *Cancel* (Esc also cancels).
-  *Memories only* has the model extract memories from the session (as
-  `/waypoint:set` does) and stores them without saving a waypoint. Anything
-  typed under *Other* is used as guidance for the waypoint ("focus on the
-  migration plan").
-  Set `exitCheckpoint` in `/config` to `always` (save without asking) or
-  `never`.
+- *Save waypoint*: memories and the waypoint.
+- *Memories only*: the memories, no waypoint.
+- *Skip*: nothing.
+- *Cancel*: don't run the command (Esc also cancels).
+- Anything typed under *Other* saves the waypoint, using the text as guidance
+  ("focus on the migration plan").
+
+When:
+
+- **Compaction** (`/compact` or auto-compaction): a saved waypoint is appended
+  to the compacted conversation so work resumes with it in context. Text after
+  `/compact` also steers the draft. An auto-compaction can't be cancelled (the
+  conversation no longer fits), so it offers no *Cancel* and Esc saves the
+  waypoint. With nobody to ask (`-p`, SDK) or for a plugin's compaction, it
+  saves without asking. Set `compactCheckpoint` in `/config` to `always` (save
+  without asking) or `never`.
+- **`/clear` and `/exit`** (and `/new`, `/reset`, `/quit`). Set
+  `exitCheckpoint` to `always` or `never` to skip the question.
 - **Session start and after `/clear`**: when a waypoint exists, you're asked
   *"Load the waypoint saved 2h ago (feat/x) into this session?"*: *Load
   waypoint* or *Start fresh*. Dismissing the question loads it. A waypoint you
   just chose to save at `/clear` loads without asking again. Set
   `loadCheckpoint` to `always` or `never` to skip the question.
 
-If drafting or saving fails, compaction proceeds unchanged and `/clear` asks
-whether to continue anyway. Exits that bypass the command (ctrl+c, ctrl+d) are
+If drafting or saving fails, `/compact` and `/clear` ask whether to continue
+anyway; an auto-compaction proceeds unchanged. A waypoint is still saved when
+its memories fail to store, just without the links. Exits that bypass the command (ctrl+c, ctrl+d) are
 not checkpointed. Older Claude Code builds ignore the mod and keep the classic
 hooks.
 

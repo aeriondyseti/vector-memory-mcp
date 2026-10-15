@@ -20,10 +20,21 @@
   "hooks": "./hooks/hooks.json",
   "skills": "./skills/",
   "userConfig": {
+    "compactCheckpoint": {
+      "type": "string",
+      "title": "Waypoint before compaction",
+      "description": "Save a waypoint (and memories) before compaction: ask each time, always save, or never.",
+      "options": [
+        "ask",
+        "always",
+        "never"
+      ],
+      "default": "ask"
+    },
     "exitCheckpoint": {
       "type": "string",
       "title": "Waypoint before /clear and /exit",
-      "description": "Save a waypoint before /clear and /exit: ask each time, always save, or never.",
+      "description": "Save a waypoint (and memories) before /clear and /exit: ask each time, always save, or never.",
       "options": [
         "ask",
         "always",

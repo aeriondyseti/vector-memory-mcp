@@ -8,7 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **"Memories only" before `/clear` and `/exit`**: a fourth answer to the checkpoint question. The model reviews the session for what is worth remembering (the same criteria as `/waypoint:set`'s memory step) and the plugin stores the result with `store_memories` (`metadata.source`: `clear` or `exit`). No waypoint is saved, so the next session still asks before loading the previous one. On a failed save it asks whether to continue.
+- **"Memories only"**: a new answer to the checkpoint question. The model reviews the session for what is worth remembering (the same criteria as `/waypoint:set`'s memory step) and the plugin stores the result with `store_memories` (`metadata.source`: `auto-compaction`, `clear` or `exit`). No waypoint is saved, so the next session still asks before loading the previous one, and nothing is appended to a compacted conversation.
+- **Compaction asks too**: the same question as `/clear` and `/exit` (save, memories only, skip, cancel, or notes under "Other", combined with `/compact <text>`) before every main-conversation compaction. Only `/compact` offers *Cancel* (it vetoes the compaction); an auto-compaction offers no Cancel and Esc saves the waypoint. Compactions with nobody to ask (`-p`, SDK) or started by a plugin save without asking, as before. A failed save on `/compact` asks whether to compact anyway. New `compactCheckpoint` option (`ask` | `always` | `never`, default `ask`).
+
+### Changed
+- **Automatic waypoints store memories, as `/waypoint:set` does**: one fork drafts both memories and the waypoint; the memories are stored first (`store_memories`) and the waypoint links them (`memory_ids`, including the existing memory a skipped duplicate repeats). A waypoint whose memories fail to store is still saved, unlinked.
 
 ## [3.1.0] - 2026-10-07
 
