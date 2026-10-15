@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **"Memories only" before `/clear` and `/exit`**: a fourth answer to the checkpoint question. The model reviews the session for what is worth remembering (the same criteria as `/waypoint:set`'s memory step) and the plugin stores the result with `store_memories` (`metadata.source`: `clear` or `exit`). No waypoint is saved, so the next session still asks before loading the previous one. On a failed save it asks whether to continue.
+
 ## [3.1.0] - 2026-10-07
 
 ### Added

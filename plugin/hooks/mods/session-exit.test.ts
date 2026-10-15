@@ -4,7 +4,15 @@
 
 import { describe, expect, test } from "claude-code/testing";
 import type { CommandRunInput, On } from "claude-code";
-import { ANSWER, checkpointPrompt, exitDecision, checkpointMode } from "./checkpoint.ts";
+import {
+  ANSWER,
+  checkpointPrompt,
+  exitDecision,
+  checkpointMode,
+  MEMORIES_PROMPT,
+  memoriesArgs,
+  parseMemoriesDraft,
+} from "./checkpoint.ts";
 
 const SERVER = "plugin:vector-memory:vector-memory";
 
@@ -14,6 +22,13 @@ const DRAFT = {
   in_progress_blocked: [],
   key_decisions: [],
   next_steps: ["Write tests"],
+};
+
+const MEMORIES = {
+  memories: [
+    { content: "The team chose SQLite over Postgres for its zero-setup deployment.", type: "decision" },
+    { content: "The importer skips rows without an id.", type: "insight", context: "Importer > Validation" },
+  ],
 };
 
 const USAGE = {
@@ -33,6 +48,8 @@ interface Harness {
   prompts: string[];
   /** `set_waypoint` arguments received. */
   saved: Record<string, unknown>[];
+  /** `store_memories` arguments received. */
+  stored: Record<string, unknown>[];
   /** Questions put to the person. */
   asked: string[];
   /** Whether the command itself (core) ran. */
@@ -42,27 +59,40 @@ interface Harness {
 /**
  * Stand in for the engine: a session with `turns` exchanges, a person who
  * answers each question with the next of `answers` (`null` dismisses), and a
- * fork that drafts DRAFT unless `forkFails`.
+ * fork that drafts DRAFT (or `memories` when asked for memories) unless
+ * `forkFails`.
  */
 function harness(
   on: On,
-  { turns = 3, answers = [] as (string | null)[], forkFails = false } = {}
+  {
+    turns = 3,
+    answers = [] as (string | null)[],
+    forkFails = false,
+    memories = MEMORIES as { memories: unknown[] },
+  } = {}
 ): Harness {
-  const h = { prompts: [] as string[], saved: [] as Record<string, unknown>[], asked: [] as string[] };
+  const h = {
+    prompts: [] as string[],
+    saved: [] as Record<string, unknown>[],
+    stored: [] as Record<string, unknown>[],
+    asked: [] as string[],
+  };
   let ran = false;
 
   on("session.turns", () => ({ value: turns }));
   on("mcp.connect", () => ({ value: { isConnected: true, server: SERVER } }));
   on("model.fork", (_$, e) => {
     h.prompts.push(e.prompt);
+    const draft = e.prompt.includes(MEMORIES_PROMPT) ? memories : DRAFT;
     return {
       value: forkFails
         ? { isAnswered: false as const, reason: "nothing-to-fork" as const }
-        : { isAnswered: true as const, text: JSON.stringify(DRAFT), usage: USAGE },
+        : { isAnswered: true as const, text: JSON.stringify(draft), usage: USAGE },
     };
   });
   on("mcp.call", (_$, e) => {
     if (e.tool === "set_waypoint") h.saved.push(e.args);
+    if (e.tool === "store_memories") h.stored.push(e.args);
     return { value: { content: [{ type: "text", text: "Waypoint stored" }], isError: false } };
   });
   on("tool.call", { tool: "AskUserQuestion" }, (_$, e) => {
@@ -83,6 +113,7 @@ function harness(
 describe("exit checkpoint helpers", () => {
   test("reads the person's answer", async () => {
     expect(exitDecision(ANSWER.save)).toEqual({ kind: "save" });
+    expect(exitDecision(ANSWER.memories)).toEqual({ kind: "memories" });
     expect(exitDecision(ANSWER.skip)).toEqual({ kind: "skip" });
     expect(exitDecision(ANSWER.cancel)).toEqual({ kind: "cancel" });
     expect(exitDecision("focus on the auth refactor")).toEqual({
@@ -101,6 +132,33 @@ describe("exit checkpoint helpers", () => {
   test("puts the person's notes in the drafting prompt", async () => {
     expect(checkpointPrompt("clear", "  the auth bits  ")).toContain('"""\nthe auth bits\n"""');
     expect(checkpointPrompt("clear")).not.toContain('"""');
+  });
+
+  test("parses a memories draft, dropping empty items and unknown types", async () => {
+    const text = `Here you go: ${JSON.stringify({
+      memories: [
+        { content: "  A decision.  ", type: "decision", context: " Doc > Section " },
+        { content: "An insight.", type: "rumour" },
+        { content: "   " },
+        "not an object",
+      ],
+    })}`;
+    expect(parseMemoriesDraft(text)).toEqual([
+      { content: "A decision.", type: "decision", context: "Doc > Section" },
+      { content: "An insight." },
+    ]);
+    expect(parseMemoriesDraft('{"memories": []}')).toEqual([]);
+    expect(parseMemoriesDraft("no json here")).toBeNull();
+    expect(parseMemoriesDraft('{"summary": "a waypoint"}')).toBeNull();
+  });
+
+  test("records the source on every stored memory", async () => {
+    expect(memoriesArgs([{ content: "A.", type: "insight" }, { content: "B." }], "exit")).toEqual({
+      memories: [
+        { content: "A.", metadata: { type: "insight", source: "exit" } },
+        { content: "B.", metadata: { source: "exit" } },
+      ],
+    });
   });
 });
 
@@ -125,6 +183,52 @@ describe("/clear and /exit (ask)", () => {
     expect(h.prompts[0]).toContain("/exit");
     expect(h.saved[0]?.metadata).toEqual({ source: "exit", user_notes: "focus on the migration" });
     expect(h.ran()).toBe(true);
+  });
+
+  test("stores memories but no waypoint, then clears, on Memories only", async ($, on) => {
+    const h = harness(on, { answers: [ANSWER.memories] });
+
+    const result = await $.command.run(run("clear"));
+
+    expect(h.prompts.length).toBe(1);
+    expect(h.prompts[0]).toContain(MEMORIES_PROMPT);
+    expect(h.prompts[0]).toContain("/clear");
+    expect(h.saved).toEqual([]);
+    expect(h.stored).toEqual([
+      {
+        memories: [
+          { content: MEMORIES.memories[0]?.content, metadata: { type: "decision", source: "clear" } },
+          {
+            content: MEMORIES.memories[1]?.content,
+            context: "Importer > Validation",
+            metadata: { type: "insight", source: "clear" },
+          },
+        ],
+      },
+    ]);
+    expect(h.ran()).toBe(true);
+    expect(result.text).toBe("cleared");
+  });
+
+  test("Memories only with nothing worth storing still runs the command", async ($, on) => {
+    const h = harness(on, { answers: [ANSWER.memories], memories: { memories: [] } });
+
+    await $.command.run(run("exit"));
+
+    expect(h.stored).toEqual([]);
+    expect(h.saved).toEqual([]);
+    expect(h.asked.length).toBe(1);
+    expect(h.ran()).toBe(true);
+  });
+
+  test("asks again when the memories cannot be saved", async ($, on) => {
+    const h = harness(on, { answers: [ANSWER.memories, ANSWER.cancel], forkFails: true });
+
+    const result = await $.command.run(run("clear"));
+
+    expect(h.asked[1]).toBe("The memories could not be saved. Run /clear anyway?");
+    expect(result.text).toBe("/clear cancelled.");
+    expect(h.ran()).toBe(false);
   });
 
   test("clears without a waypoint when the person skips", async ($, on) => {

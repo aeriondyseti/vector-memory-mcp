@@ -7,9 +7,10 @@
  *
  * /clear and /exit (and aliases: /new, /reset, /quit) — before the command
  * runs (`session.end` is too short-lived to draft one), per the
- * `exitCheckpoint` option: `ask` puts the choice to the person (save, skip,
- * cancel the command, or type notes under "Other" that steer the waypoint),
- * `always` saves without asking, `never` does nothing.
+ * `exitCheckpoint` option: `ask` puts the choice to the person (save, save
+ * memories only — drafted as for a waypoint, but no waypoint is stored —
+ * skip, cancel the command, or type notes under "Other" that steer the
+ * waypoint), `always` saves without asking, `never` does nothing.
  *
  * Session start and after /clear — the classic SessionStart hooks load the
  * latest waypoint as context; this wraps them, per the `loadCheckpoint`
@@ -34,6 +35,10 @@ import {
   exitDecision,
   findWaypointContext,
   loadQuestion,
+  type MemoriesSource,
+  memoriesArgs,
+  memoriesPrompt,
+  parseMemoriesDraft,
   parseWaypointDraft,
   RECALLED_CONTEXT_NOTE,
   resultText,
@@ -91,6 +96,40 @@ async function saveCheckpoint(
   }
 }
 
+/** Draft and store memories, without a waypoint; resolves the count stored, or null on failure. */
+async function saveMemories($: EngineInterface, source: MemoriesSource): Promise<number | null> {
+  $.ui.status("Saving memories…");
+  try {
+    const server = await connectServer($);
+    if (server === null) return null;
+
+    const reply = await $.model.fork({ prompt: memoriesPrompt(source) });
+    if (!reply.isAnswered) {
+      $.ui.log(`${LABEL}: memories not drafted (${reply.reason})`);
+      return null;
+    }
+
+    const memories = parseMemoriesDraft(reply.text);
+    if (!memories) {
+      $.ui.log(`${LABEL}: memories draft was not valid JSON`);
+      return null;
+    }
+    if (memories.length === 0) return 0;
+
+    const stored = await $.mcp.call(server, "store_memories", memoriesArgs(memories, source));
+    if (stored.isError) {
+      $.ui.log(`${LABEL}: store_memories failed: ${resultText(stored).slice(0, 200)}`);
+      return null;
+    }
+    return memories.length;
+  } catch (err) {
+    $.ui.log(`${LABEL}: memories failed: ${errorMessage(err)}`);
+    return null;
+  } finally {
+    $.ui.status(undefined);
+  }
+}
+
 /** The waypoint as a message for the compacted conversation; null when none. */
 async function loadCheckpoint($: EngineInterface, server: string): Promise<SessionMessage | null> {
   const loaded = await $.mcp.call(server, "get_waypoint", {});
@@ -108,7 +147,7 @@ async function askBeforeExit($: EngineInterface, command: string): Promise<ExitD
   try {
     const answer = await $.ui.ask(
       `Save a waypoint before /${command}? Type under "Other" to say what it should focus on.`,
-      { header: "Waypoint", options: [ANSWER.save, ANSWER.skip, ANSWER.cancel] }
+      { header: "Waypoint", options: [ANSWER.save, ANSWER.memories, ANSWER.skip, ANSWER.cancel] }
     );
     return exitDecision(answer);
   } catch {
@@ -116,9 +155,10 @@ async function askBeforeExit($: EngineInterface, command: string): Promise<ExitD
   }
 }
 
-async function proceedWithoutWaypoint($: EngineInterface, command: string): Promise<boolean> {
+/** After a failed save of `what` ("The waypoint", "The memories"): run the command anyway? */
+async function proceedWithoutSaving($: EngineInterface, command: string, what: string): Promise<boolean> {
   try {
-    const answer = await $.ui.ask(`The waypoint could not be saved. Run /${command} anyway?`, {
+    const answer = await $.ui.ask(`${what} could not be saved. Run /${command} anyway?`, {
       header: "Waypoint",
       options: [ANSWER.proceed, ANSWER.cancel],
     });
@@ -186,17 +226,30 @@ const checkpointBeforeExit: Hook<"command.run"> = async ($, e, next) => {
   if (decision.kind === "cancel") return { text: `/${command} cancelled.` };
   if (decision.kind === "skip") return next(e);
 
-  const { saved } = await saveCheckpoint(
-    $,
-    command === "clear" ? "clear" : "exit",
-    "notes" in decision ? decision.notes : undefined
-  );
+  const source = command === "clear" ? "clear" : "exit";
+
+  // Only reachable by asking, so a failure is put to the person.
+  if (decision.kind === "memories") {
+    const count = await saveMemories($, source);
+    if (count === null) {
+      if (!(await proceedWithoutSaving($, command, "The memories"))) return { text: `/${command} cancelled.` };
+    } else {
+      $.ui.toast(
+        count === 0
+          ? "Vector Memory: nothing new worth remembering"
+          : `Vector Memory: ${count} ${count === 1 ? "memory" : "memories"} saved (no waypoint)`
+      );
+    }
+    return next(e);
+  }
+
+  const { saved } = await saveCheckpoint($, source, "notes" in decision ? decision.notes : undefined);
 
   if (saved) {
     isSavedAtClear = command === "clear";
     $.ui.toast("Vector Memory: waypoint saved");
   } else if (isInteractive) {
-    if (!(await proceedWithoutWaypoint($, command))) return { text: `/${command} cancelled.` };
+    if (!(await proceedWithoutSaving($, command, "The waypoint"))) return { text: `/${command} cancelled.` };
   } else {
     $.ui.toast(`Vector Memory: waypoint not saved before /${command}`);
   }

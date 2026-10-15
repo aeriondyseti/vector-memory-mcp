@@ -119,8 +119,11 @@ conversation) and saves it at the moments context would otherwise be lost:
   the compacted conversation so work resumes with it in context. Text after
   `/compact` also steers the waypoint.
 - **`/clear` and `/exit`** (and `/new`, `/reset`, `/quit`): you're asked first:
-  *Save waypoint*, *Skip*, or *Cancel* (Esc also cancels). Anything typed under
-  *Other* is used as guidance for the waypoint ("focus on the migration plan").
+  *Save waypoint*, *Memories only*, *Skip*, or *Cancel* (Esc also cancels).
+  *Memories only* has the model extract memories from the session (as
+  `/waypoint:set` does) and stores them without saving a waypoint. Anything
+  typed under *Other* is used as guidance for the waypoint ("focus on the
+  migration plan").
   Set `exitCheckpoint` in `/config` to `always` (save without asking) or
   `never`.
 - **Session start and after `/clear`**: when a waypoint exists, you're asked

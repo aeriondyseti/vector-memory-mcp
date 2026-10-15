@@ -50,7 +50,7 @@ function harness(
   on("model.fork", () => ({
     value: {
       isAnswered: true as const,
-      text: '{"summary": "s"}',
+      text: '{"summary": "s", "memories": []}', // a waypoint or memories draft
       usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
     },
   }));
@@ -143,6 +143,21 @@ describe("loading at session start (ask)", () => {
 
     expect(h.asked.length).toBe(1); // the /clear question alone
     expect(started.additionalContext).toEqual([OTHER_CONTEXT, WAYPOINT]);
+  });
+
+  test("still asks after /clear saved memories only (the waypoint is an older one)", async ($, on) => {
+    const h = harness(on, { answers: [ANSWER.memories, ANSWER.fresh] });
+
+    await $.command.run({
+      command: "clear",
+      args: "",
+      origin: { kind: "composer" },
+      presentation: { isFullscreen: false, columns: 120 },
+    });
+    const started = await $.classic.SessionStart({ source: "clear" });
+
+    expect(h.asked.length).toBe(2);
+    expect(started.additionalContext).toEqual([OTHER_CONTEXT]);
   });
 });
 
