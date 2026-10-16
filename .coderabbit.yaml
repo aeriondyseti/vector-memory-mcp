@@ -19,9 +19,10 @@ reviews:
   path_instructions:
     - path: "**/*.ts"
       instructions: |
-        Runtime: Bun (not Node.js). Use bun:sqlite, Bun.file(), Bun.serve(), etc.
-        Module resolution: NodeNext — all relative imports must include .js extension.
-        TypeScript strict mode. No JSDoc — types serve as documentation.
+        Runtime: Bun (not Node.js) for server/, scripts/ and tests/. Use bun:sqlite, Bun.file(), Bun.serve(), etc.
+        Module resolution: Bundler — relative imports have no .js extension.
+        TypeScript strict mode. No JSDoc tags (@param, @returns): types serve as documentation;
+        short /** */ comments explaining why are the norm.
         Use `import type` for type-only imports.
         No console.log except server startup messages in server/index.ts.
     - path: "server/**/*.ts"
@@ -29,14 +30,30 @@ reviews:
         Files: kebab-case. Classes: PascalCase. Functions: camelCase. Constants: SCREAMING_SNAKE_CASE.
         Object dictionaries used as namespaces (ansi, icon) use camelCase — not SCREAMING_SNAKE.
         server/core/ contains all business logic, db, and type definitions.
-        server/transports/ contains MCP stdio and HTTP transport layers.
-        server/utils/ contains shared utilities used by both server and plugin.
+        server/transports/ contains the MCP (stdio) and HTTP/SSE transport layers.
+        server/utils/ is used by the server only; the plugin never imports from server/.
     - path: "plugin/**/*.ts"
       instructions: |
-        Plugin hooks run as standalone Bun child processes, not inside the server.
-        They communicate with the server via HTTP (lockfile-based discovery).
-        Shared formatting is imported directly from server/utils/formatting.ts.
-        Hook-specific code (emitHookOutput, server discovery) stays in hooks-lib.ts.
+        plugin/ ships separately (installed from a marketplace; only plugin/ is copied to the user's
+        machine), so it must stay self-contained: no imports from server/. Utilities it shares with the
+        server (ANSI codes, icons, message builders) are deliberately duplicated in
+        plugin/hooks/scripts/hooks-lib.ts. npm packages the hooks need go in plugin/package.json,
+        never the root package.json.
+    - path: "plugin/hooks/scripts/**/*.ts"
+      instructions: |
+        Classic Claude Code command hooks: standalone Bun processes started per event, reading the
+        hook input on stdin. They reach the MCP server over HTTP, discovering it via a per-project
+        lockfile (resolveServerUrl in hooks-lib.ts).
+    - path: "plugin/hooks/mods/**/*.ts"
+      instructions: |
+        Claude Code hooks modules ("mods"), loaded via `modules` in plugin/hooks/hooks.json. They run
+        inside Claude Code's own mod environment, not Bun or Node: no Node/Bun APIs, no DOM; everything
+        outside the module goes through the engine interface `$` (e.g. $.fs, $.mcp.call to the plugin's
+        MCP server, $.ui, $.clock). Hooks are `($, e, next)`; a failure must degrade to the default
+        behaviour (`.catch(($, e, next) => next(e))`), never block the person.
+        Pure helpers live in separate files (e.g. checkpoint.ts); code that calls `$` stays in index.ts.
+        Tests (*.test.ts here) use `claude-code/testing` and run with `claude plugin test plugin`,
+        not bun:test.
     - path: "tests/**/*.ts"
       instructions: |
         Framework: bun:test (not Jest/Vitest).
