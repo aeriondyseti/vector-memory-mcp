@@ -8,7 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **File-based memory sync**: when Claude writes or edits a Claude Code file-based memory (`<config dir>/projects/<project>/memory/<name>.md`, not the `MEMORY.md` index), a `tool.call` hook stores the file as a vector memory too: the frontmatter `description` and the body as content, keyed `file-memory:<name>` so a later edit replaces it (kept as history), with `metadata.source: "file-memory"`, the file's own type as `metadata.file_memory_type`, its path and `file-memory` tags. Content over 1000 characters gets an `embedding_text` summary (`<name>: <description>`, or the first 1000 characters without a description). Files without frontmatter `name` or a body are skipped; a failed sync is logged and never affects the write. New `fileMemorySync` option (`on` | `off`, default `on`).
+- **File-based memory sync**: when Claude writes or edits a Claude Code file-based memory (`<config dir>/projects/<project>/memory/<name>.md`, not the `MEMORY.md` index), `tool.call` hooks store the file as a vector memory too: the frontmatter `description` and the body as content, keyed `file-memory:<name>` so a later edit replaces it (kept as history), with `metadata.source: "file-memory"`, the file's own type as `metadata.file_memory_type`, its path and `file-memory` tags. Content over 1000 characters gets an `embedding_text` summary (`<name>: <description>`, or the first 1000 characters without a description).
+  - **Write, Edit and Bash**: Write and Edit are caught by path. For Bash (`cat >`, `sed -i`, heredocs, scripts), the hook lists the memory folder before and after the command (the folder is read from the system prompt's `memory` section via `$.prompt.compose()`) and syncs each file added or changed.
+  - **In the background**: the tool's result goes back at once; syncs run afterwards on a serialized queue (`$.clock.after`) and end with one toast naming the memory, or how many were synced.
+  - **No churn**: a file whose text is unchanged since its last sync (SHA-256) is not stored again.
+  - **Worktrees**: memories are filed under the main repository's root (`$.session.repo().root`), so edits from any worktree replace the same memory; outside a repository, the server's own project.
+  - Files without frontmatter `name` or a body are skipped; a failed sync is logged and never affects the tool call. New `fileMemorySync` option (`on` | `off`, default `on`).
 
 ## [3.2.0] - 2026-10-15
 
