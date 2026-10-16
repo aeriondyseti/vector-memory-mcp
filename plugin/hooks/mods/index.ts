@@ -1,5 +1,6 @@
 /**
- * vector-memory mods (Claude Code function hooks): waypoint checkpoints.
+ * vector-memory mods (Claude Code function hooks): waypoint checkpoints and
+ * file-based memory sync.
  *
  * A checkpoint is what `/waypoint:set` does: the model reviews the session
  * (a fork of the conversation), its memories are stored (`store_memories`),
@@ -26,14 +27,14 @@
  * fresh"), `always` keeps it, `never` drops it. A waypoint the person chose
  * to save at the /clear just run is loaded without asking again.
  *
- * File memories — after a Write or Edit of a Claude Code file-based memory
- * (`…/projects/<slug>/memory/<name>.md`, not the `MEMORY.md` index), the
- * file is stored as a vector memory keyed `file-memory:<name>`, so a later
+ * File memories — Claude Code's file-based memories live in the folder the
+ * system prompt's `memory` section names (`…/projects/<slug>/memory/`). After
+ * a Write or Edit of a file directly in it (not the `MEMORY.md` index), the
+ * file is stored as a vector memory keyed `file-memory:<path>`, so a later
  * edit replaces it (kept as history). Bash calls are caught by listing the
- * memory folder (named in the system prompt's `memory` section) before and
- * after. Syncs run in the background, skip a file whose text is unchanged
- * since its last sync, and never touch the tool's result. Per the
- * `fileMemorySync` option.
+ * folder before and after. Syncs run in the background, skip a file whose
+ * text is unchanged since its last sync, and never touch the tool's result.
+ * Per the `fileMemorySync` option.
  *
  * Every failure degrades to the command, compaction or start running as usual.
  * Loaded by Claude Code builds with the mod system (via `modules` in
@@ -69,9 +70,10 @@ import {
   changedMemoryFiles,
   fileMemoryArgs,
   fileMemorySyncMode,
-  isFileMemoryPath,
+  isStoredReply,
   type MemoryListing,
   memoryDirFromPrompt,
+  memoryFileName,
   memoryListing,
   parseFileMemory,
   sha256,
@@ -402,7 +404,7 @@ async function syncFileMemory($: EngineInterface, path: string): Promise<string 
 
     const project = (await $.session.repo())?.root;
     const stored = await $.mcp.call(server, "store_memories", fileMemoryArgs(memory, path, project));
-    if (stored.isError) {
+    if (stored.isError || !isStoredReply(resultText(stored))) {
       $.ui.log(`${LABEL}: file memory sync failed: ${resultText(stored).slice(0, 200)}`);
       return null;
     }
@@ -437,15 +439,25 @@ function syncInBackground($: EngineInterface, job: () => Promise<void>): void {
   });
 }
 
-/** After a Write or Edit to `path` ended as `done`: mirror a file memory into vector memory. */
+/**
+ * After a Write or Edit to `path` ended as `done`: mirror it into vector
+ * memory when it is a file in the memory folder (checked in the background,
+ * as finding the folder may compose the system prompt).
+ */
 function syncAfterWrite<T extends ToolCallResult>($: EngineInterface, path: string, done: T): T {
-  if (done.deny === undefined && !done.isError && isFileMemoryPath(path)) {
-    syncInBackground($, () => syncFileMemories($, [path]));
+  if (done.deny === undefined && !done.isError && path.endsWith(".md")) {
+    syncInBackground($, async () => {
+      const dir = await memoryDir($);
+      if (dir !== null && memoryFileName(path, dir) !== null) await syncFileMemories($, [path]);
+    });
   }
   return done;
 }
 
-/** The memory folder the system prompt names, looked up once per load; null when it names none. */
+/**
+ * The memory folder the system prompt names, looked up once per load; null
+ * when it names none. A failed lookup is not kept, so the next call tries again.
+ */
 let memoryDirLookup: Promise<string | null> | null = null;
 
 function memoryDir($: EngineInterface): Promise<string | null> {
@@ -454,6 +466,7 @@ function memoryDir($: EngineInterface): Promise<string | null> {
     .then(({ sections }) => memoryDirFromPrompt(sections))
     .catch((err: unknown) => {
       $.ui.log(`${LABEL}: memory folder lookup failed: ${errorMessage(err)}`);
+      memoryDirLookup = null;
       return null;
     });
   return memoryDirLookup;

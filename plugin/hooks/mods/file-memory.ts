@@ -4,12 +4,16 @@
  * Everything that calls the engine lives in index.ts.
  */
 
-/** A memory file: `…/projects/<slug>/memory/<name>.md`; not the `MEMORY.md` index. */
-const MEMORY_FILE = /[\\/]projects[\\/][^\\/]+[\\/]memory[\\/]([^\\/]+)\.md$/;
-
-export function isFileMemoryPath(path: string): boolean {
-  const match = MEMORY_FILE.exec(path);
-  return match !== null && match[1] !== "MEMORY";
+/**
+ * A file memory's name when `path` is directly inside the memory folder
+ * `dir` (not the `MEMORY.md` index); null for any other path, so a repo's
+ * own `…/projects/x/memory/*.md` is never mistaken for one.
+ */
+export function memoryFileName(path: string, dir: string): string | null {
+  const folder = dir.replace(/[\\/]+$/, "");
+  if (!path.startsWith(folder) || !/^[\\/]/.test(path.slice(folder.length))) return null;
+  const name = path.slice(folder.length + 1);
+  return /[\\/]/.test(name) || !isFileMemoryName(name) ? null : name;
 }
 
 export interface FileMemory {
@@ -20,32 +24,61 @@ export interface FileMemory {
   body: string;
 }
 
-const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
+const FRONTMATTER = /^﻿?---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
-function unquote(value: string): string {
+/** A scalar's value: quotes removed, or a trailing ` # comment` dropped when unquoted. */
+function scalar(value: string): string {
   const trimmed = value.trim();
   const quoted = /^(["'])(.*)\1$/.exec(trimmed);
-  return quoted ? (quoted[2] as string) : trimmed;
+  return quoted ? (quoted[2] as string) : trimmed.replace(/\s+#.*$/, "");
+}
+
+/** A block scalar's lines (`>` folded into one line, `|` kept as lines). */
+function blockScalar(indicator: string, lines: readonly string[]): string {
+  const indent = Math.min(...lines.filter((l) => l.trim() !== "").map((l) => /^\s*/.exec(l)![0].length));
+  const text = lines.map((l) => l.slice(indent).trimEnd());
+  return (indicator.startsWith(">") ? text.join(" ").replace(/\s+/g, " ") : text.join("\n")).trim();
 }
 
 /**
  * The memory a file holds: its frontmatter's `name`, `description` and
- * `metadata.type` (or a top-level `type`), and the body. Null without
- * frontmatter, a name, or a body.
+ * `metadata.type` (or a top-level `type`), and the body. Reads the YAML
+ * Claude Code's memory files use: top-level scalars, block scalars (`>`,
+ * `|`), and one level of nesting. Null without frontmatter, a name, or a body.
  */
 export function parseFileMemory(text: string): FileMemory | null {
   const match = FRONTMATTER.exec(text);
   if (!match) return null;
 
   const fields: Record<string, string> = {};
+  const lines = (match[1] as string).split(/\r?\n/);
   let section = "";
-  for (const line of (match[1] as string).split(/\r?\n/)) {
-    const field = /^(\s*)([A-Za-z_][\w-]*):\s*(.*)$/.exec(line);
+  let sectionIndent = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const field = /^(\s*)([A-Za-z_][\w-]*):\s*(.*)$/.exec(lines[i] as string);
     if (!field) continue;
     const [, indent, key, value] = field as unknown as [string, string, string, string];
-    if (indent === "") section = value === "" ? key : "";
-    const path = indent !== "" && section ? `${section}.${key}` : key;
-    if (value !== "") fields[path] = unquote(value);
+
+    let path: string | null = key;
+    if (indent === "") {
+      section = value === "" ? key : "";
+      sectionIndent = -1;
+    } else if (section && (sectionIndent === -1 || indent.length === sectionIndent)) {
+      sectionIndent = indent.length;
+      path = `${section}.${key}`;
+    } else {
+      path = null; // deeper nesting: not a field this reads
+    }
+
+    if (/^[>|][+-]?$/.test(value)) {
+      const block: string[] = [];
+      while (i + 1 < lines.length && (/^\s+\S/.test(lines[i + 1] as string) || (lines[i + 1] as string).trim() === "")) {
+        block.push(lines[++i] as string);
+      }
+      if (path !== null) fields[path] = blockScalar(value, block);
+    } else if (path !== null && value !== "") {
+      fields[path] = scalar(value);
+    }
   }
 
   const name = fields.name;
@@ -60,9 +93,13 @@ export function parseFileMemory(text: string): FileMemory | null {
   };
 }
 
-/** The `key` a file memory is stored under: a new version replaces the last. */
-export function fileMemoryKey(name: string): string {
-  return `file-memory:${name}`;
+/**
+ * The `key` a file memory is stored under, by its path: a new version of
+ * the file replaces the last, and two files sharing a frontmatter `name`
+ * never replace each other.
+ */
+export function fileMemoryKey(path: string): string {
+  return `file-memory:${path}`;
 }
 
 /** Past this many characters, content gets an `embedding_text` summary, as `store_memories` asks. */
@@ -75,18 +112,21 @@ export const LONG_CONTENT_CHARS = 1000;
  */
 export function fileMemoryArgs(memory: FileMemory, path: string, project?: string): Record<string, unknown> {
   const content = memory.description ? `${memory.description}\n\n${memory.body}` : memory.body;
+  // A summary headed by the name and description, then as much of the body as fits.
+  const head = memory.description ? `${memory.name}: ${memory.description}\n\n` : "";
   const embeddingText =
     content.length <= LONG_CONTENT_CHARS
       ? undefined
-      : memory.description
-        ? `${memory.name}: ${memory.description}`
-        : content.slice(0, LONG_CONTENT_CHARS);
+      : `${head}${memory.body}`.slice(0, Math.max(LONG_CONTENT_CHARS, head.length));
   return {
+    // The key already replaces the file's last version; the duplicate check
+    // would instead keep that stale version whenever an edit is small.
+    allow_duplicates: true,
     memories: [
       {
         content,
         ...(embeddingText ? { embedding_text: embeddingText } : {}),
-        key: fileMemoryKey(memory.name),
+        key: fileMemoryKey(path),
         ...(project ? { project } : {}),
         context: `File memory > ${memory.name}`,
         metadata: {
@@ -111,16 +151,22 @@ const MEMORY_DIR = /`([^`\n]*[\\/]projects[\\/][^`\\/\n]+[\\/]memory)[\\/]?`/;
 
 /**
  * The file-based memory folder the system prompt tells the model to write
- * to: from the `memory` section, else any section; null when none names one
- * (file-based memory off, or an engine that words it differently).
+ * to, from its `memory` section only (other sections carry CLAUDE.md and
+ * skill text, whose paths are not the memory folder); null when it names
+ * none (file-based memory off, or an engine that words it differently).
  */
 export function memoryDirFromPrompt(sections: ReadonlyArray<{ id: string; text: string }>): string | null {
-  const ordered = [...sections.filter((s) => s.id === "memory"), ...sections.filter((s) => s.id !== "memory")];
-  for (const section of ordered) {
+  for (const section of sections) {
+    if (section.id !== "memory") continue;
     const match = MEMORY_DIR.exec(section.text);
     if (match) return match[1] as string;
   }
   return null;
+}
+
+/** `store_memories` stored the memory (not "Not stored: duplicate of …"). */
+export function isStoredReply(text: string): boolean {
+  return /^Memory stored with ID: /m.test(text);
 }
 
 /** A memory folder's files: name → `size:mtimeMs`. */

@@ -7,8 +7,9 @@ import type { On } from "claude-code";
 import {
   changedMemoryFiles,
   fileMemoryArgs,
-  isFileMemoryPath,
+  isStoredReply,
   memoryDirFromPrompt,
+  memoryFileName,
   memoryListing,
   parseFileMemory,
   syncedToast,
@@ -16,7 +17,8 @@ import {
 
 const SERVER = "plugin:vector-memory:vector-memory";
 
-const MEMORY_PATH = "/Users/me/.claude/projects/-Users-me-repo/memory/prefers-bun.md";
+const MEMORY_DIR = "/Users/me/.claude/projects/-Users-me-repo/memory";
+const MEMORY_PATH = `${MEMORY_DIR}/prefers-bun.md`;
 
 const MEMORY_FILE = `---
 name: prefers-bun
@@ -29,17 +31,22 @@ Use Bun, not Node, for new scripts.
 **Why:** faster startup.
 `;
 
-describe("isFileMemoryPath", () => {
-  test("matches a memory file in any config dir", async () => {
-    expect(isFileMemoryPath(MEMORY_PATH)).toBe(true);
-    expect(isFileMemoryPath("/Users/me/.claude-work/projects/x/memory/a.md")).toBe(true);
+describe("memoryFileName", () => {
+  test("names a file directly in the memory folder", async () => {
+    expect(memoryFileName(MEMORY_PATH, MEMORY_DIR)).toBe("prefers-bun.md");
+    expect(memoryFileName(MEMORY_PATH, `${MEMORY_DIR}/`)).toBe("prefers-bun.md");
+    expect(memoryFileName("C:\\Users\\me\\.claude\\projects\\x\\memory\\a.md", "C:\\Users\\me\\.claude\\projects\\x\\memory")).toBe(
+      "a.md"
+    );
   });
 
-  test("skips the MEMORY.md index and other files", async () => {
-    expect(isFileMemoryPath("/Users/me/.claude/projects/x/memory/MEMORY.md")).toBe(false);
-    expect(isFileMemoryPath("/Users/me/.claude/projects/x/memory/notes.txt")).toBe(false);
-    expect(isFileMemoryPath("/Users/me/.claude/projects/x/memory/sub/a.md")).toBe(false);
-    expect(isFileMemoryPath("/repo/docs/memory.md")).toBe(false);
+  test("refuses the MEMORY.md index, other files, subfolders and look-alike folders", async () => {
+    expect(memoryFileName(`${MEMORY_DIR}/MEMORY.md`, MEMORY_DIR)).toBe(null);
+    expect(memoryFileName(`${MEMORY_DIR}/notes.txt`, MEMORY_DIR)).toBe(null);
+    expect(memoryFileName(`${MEMORY_DIR}/sub/a.md`, MEMORY_DIR)).toBe(null);
+    expect(memoryFileName(`${MEMORY_DIR}-old/a.md`, MEMORY_DIR)).toBe(null);
+    // A repo's own folder of the same shape is not the memory folder.
+    expect(memoryFileName("/home/me/projects/app/memory/notes.md", MEMORY_DIR)).toBe(null);
   });
 });
 
@@ -58,6 +65,24 @@ describe("parseFileMemory", () => {
     expect(parseFileMemory(text)).toEqual({ name: "a", description: "d: e", type: "user", body: "body" });
   });
 
+  test("reads folded and literal block values", async () => {
+    const folded = "---\nname: a\ndescription: >\n  first line\n  second line\ntype: user\n---\nbody";
+    expect(parseFileMemory(folded)?.description).toBe("first line second line");
+    expect(parseFileMemory(folded)?.type).toBe("user");
+    const literal = "---\nname: a\ndescription: |-\n  one\n  two\n---\nbody";
+    expect(parseFileMemory(literal)?.description).toBe("one\ntwo");
+  });
+
+  test("tolerates a byte-order mark, CRLF lines and trailing comments", async () => {
+    const text = "\uFEFF---\r\nname: a\r\nmetadata:\r\n  type: user # who they are\r\n---\r\nbody\r\n";
+    expect(parseFileMemory(text)).toEqual({ name: "a", type: "user", body: "body" });
+  });
+
+  test("reads only one level of nesting", async () => {
+    const text = "---\nname: a\nmetadata:\n  type: feedback\n  extra:\n    type: deep\n---\nbody";
+    expect(parseFileMemory(text)?.type).toBe("feedback");
+  });
+
   test("refuses a file without frontmatter, a name or a body", async () => {
     expect(parseFileMemory("just text")).toBe(null);
     expect(parseFileMemory("---\ndescription: d\n---\nbody")).toBe(null);
@@ -66,15 +91,16 @@ describe("parseFileMemory", () => {
 });
 
 describe("fileMemoryArgs", () => {
-  test("keys the memory by name and heads it with the description", async () => {
+  test("keys the memory by path, allows near-duplicates and heads it with the description", async () => {
     const memory = parseFileMemory(MEMORY_FILE);
     expect(memory).not.toBe(null);
     expect(fileMemoryArgs(memory!, MEMORY_PATH)).toEqual({
+      allow_duplicates: true,
       memories: [
         {
           content:
             "The user prefers Bun over Node for scripts\n\nUse Bun, not Node, for new scripts.\n**Why:** faster startup.",
-          key: "file-memory:prefers-bun",
+          key: `file-memory:${MEMORY_PATH}`,
           context: "File memory > prefers-bun",
           metadata: {
             type: "context",
@@ -97,9 +123,11 @@ describe("fileMemoryArgs embedding_text", () => {
     expect(first(fileMemoryArgs({ name: "a", description: "d", body }, MEMORY_PATH))?.embedding_text).toBe(undefined);
   });
 
-  test("name and description past 1000 characters", async () => {
+  test("past 1000 characters: name, description, then as much of the body as fits", async () => {
     const body = "x".repeat(1000);
-    expect(first(fileMemoryArgs({ name: "a", description: "d", body }, MEMORY_PATH))?.embedding_text).toBe("a: d");
+    const text = first(fileMemoryArgs({ name: "a", description: "d", body }, MEMORY_PATH))?.embedding_text as string;
+    expect(text.startsWith("a: d\n\nxxx")).toBe(true);
+    expect(text.length).toBe(1000);
   });
 
   test("the first 1000 characters past 1000 without a description", async () => {
@@ -109,13 +137,20 @@ describe("fileMemoryArgs embedding_text", () => {
 });
 
 describe("memory folder helpers", () => {
-  test("reads the memory folder from the system prompt's memory section", async () => {
-    const text = "You have a persistent file-based memory at `/Users/me/.claude/projects/-Users-me-repo/memory/`. Write…";
-    expect(memoryDirFromPrompt([{ id: "intro", text: "hi" }, { id: "memory", text }])).toBe(
-      "/Users/me/.claude/projects/-Users-me-repo/memory"
-    );
+  test("reads the memory folder from the system prompt's memory section only", async () => {
+    const text = `You have a persistent file-based memory at \`${MEMORY_DIR}/\`. Write…`;
+    expect(memoryDirFromPrompt([{ id: "intro", text: "hi" }, { id: "memory", text }])).toBe(MEMORY_DIR);
     expect(memoryDirFromPrompt([{ id: "memory", text: "no path here" }])).toBe(null);
     expect(memoryDirFromPrompt([])).toBe(null);
+    // A path in another section (CLAUDE.md, a skill) is never taken for it.
+    const claudeMd = { id: "claude_md", text: "see `/Users/x/projects/foo/memory` in your repo" };
+    expect(memoryDirFromPrompt([claudeMd, { id: "memory", text: "nothing" }])).toBe(null);
+  });
+
+  test("knows a stored reply from a skipped duplicate", async () => {
+    expect(isStoredReply("Memory stored with ID: 123")).toBe(true);
+    expect(isStoredReply('Not stored: duplicate of existing memory 123:\n  "x"')).toBe(false);
+    expect(isStoredReply("")).toBe(false);
   });
 
   test("lists memory files and finds the added and changed ones", async () => {
@@ -142,7 +177,6 @@ describe("memory folder helpers", () => {
   });
 });
 
-const MEMORY_DIR = "/Users/me/.claude/projects/-Users-me-repo/memory";
 /** The main working tree's root, as `$.session.repo()` answers it from a worktree too. */
 const REPO_ROOT = "/Users/me/repo";
 const MEMORY_SECTION = `# Memory\n\nYou have a persistent file-based memory at \`${MEMORY_DIR}/\`. Write to it directly.`;
@@ -163,6 +197,13 @@ function harness(
     section = MEMORY_SECTION,
     listings = [] as ReturnType<typeof entry>[][],
     repoRoot = REPO_ROOT as string | null,
+    /** What `store_memories` answers. */
+    reply = "Memory stored with ID: 00000000-0000-0000-0000-000000000001",
+    isConnected = true,
+    /** How many `prompt.compose` calls fail before one succeeds. */
+    composeFailures = 0,
+    /** How many `fs.read` calls fail before one succeeds. */
+    readFailures = 0,
   } = {}
 ) {
   const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
@@ -194,7 +235,11 @@ function harness(
   on("tool.call", { tool: "Write" }, ran);
   on("tool.call", { tool: "Edit" }, ran);
   on("tool.call", { tool: "Bash" }, ran);
-  on("prompt.compose", () => ({ sections: [{ id: "memory", text: section, scope: "session" as const }] }));
+  on("prompt.compose", () => {
+    activity++;
+    if (composeFailures-- > 0) throw new Error("compose failed");
+    return { sections: [{ id: "memory", text: section, scope: "session" as const }] };
+  });
   on("fs.list", (_$, e) => {
     activity++;
     lists.push(e.path);
@@ -203,6 +248,7 @@ function harness(
   on("fs.read", (_$, e) => {
     activity++;
     reads.push(e.path);
+    if (readFailures-- > 0) return { deny: "read failed" };
     return { value: (files.length > 1 ? files.shift() : files[0]) ?? "" };
   });
   on("session.repo", () => {
@@ -211,12 +257,16 @@ function harness(
   });
   on("mcp.connect", () => {
     activity++;
-    return { value: { isConnected: true, server: SERVER } };
+    return {
+      value: isConnected
+        ? { isConnected: true as const, server: SERVER }
+        : { isConnected: false as const, reason: "disabled" as const, message: "off" },
+    };
   });
   on("mcp.call", (_$, e) => {
     activity++;
     calls.push({ tool: e.tool, args: e.args });
-    return { value: { content: [{ type: "text", text: "Memory stored" }], isError: false } };
+    return { value: { content: [{ type: "text", text: reply }], isError: false } };
   });
   on("ui.toast", (_$, e) => {
     activity++;
@@ -298,6 +348,60 @@ describe("tool.call: Write and Edit", () => {
     expect(h.toasts).toEqual([]);
   });
 
+  test("a reply that stored nothing is not counted: no toast, and the next save tries again", async ($, on) => {
+    const h = harness(on, { reply: 'Not stored: duplicate of existing memory 123:\n  "x"' });
+    for (let i = 1; i <= 2; i++) {
+      await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
+      await h.settle(() => h.calls.length >= i);
+    }
+    await h.settle();
+    expect(h.calls.length).toBe(2);
+    expect(h.toasts).toEqual([]);
+  });
+
+  test("with the server not connected, nothing is stored and nothing is toasted", async ($, on) => {
+    const h = harness(on, { isConnected: false });
+    await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
+    await h.settle();
+    expect(h.calls).toEqual([]);
+    expect(h.toasts).toEqual([]);
+  });
+
+  test("a repo's own projects/x/memory folder is not the memory folder", async ($, on) => {
+    const h = harness(on);
+    await $.tool.call({ tool: "Write", file_path: "/home/me/projects/app/memory/notes.md", content: MEMORY_FILE });
+    await h.settle();
+    expect(h.reads).toEqual([]);
+    expect(h.calls).toEqual([]);
+  });
+
+  test("without a memory folder in the system prompt, a Write is not synced", async ($, on) => {
+    const h = harness(on, { section: "No file-based memory here." });
+    await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
+    await h.settle();
+    expect(h.calls).toEqual([]);
+  });
+
+  test("a failed memory folder lookup is tried again on the next call", async ($, on) => {
+    const h = harness(on, { composeFailures: 1 });
+    await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
+    await h.settle();
+    expect(h.calls).toEqual([]);
+
+    await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
+    await h.settle(() => h.toasts.length > 0);
+    expect(h.calls.map((c) => c.tool)).toEqual(["store_memories"]);
+  });
+
+  test("a sync that fails does not hold up the next one", async ($, on) => {
+    const h = harness(on, { readFailures: 1 });
+    await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
+    await $.tool.call({ tool: "Edit", file_path: MEMORY_PATH, old_string: "a", new_string: "b" });
+    await h.settle(() => h.toasts.length > 0);
+    expect(h.reads.length).toBe(2);
+    expect(h.calls.map((c) => c.tool)).toEqual(["store_memories"]);
+  });
+
   test("off: nothing is synced", { options: { fileMemorySync: "off" } }, async ($, on) => {
     const h = harness(on);
     await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
@@ -323,8 +427,8 @@ describe("tool.call: Bash", () => {
     expect(h.lists).toEqual([MEMORY_DIR, MEMORY_DIR]);
     expect(h.reads).toEqual([`${MEMORY_DIR}/a.md`, `${MEMORY_DIR}/new.md`]);
     expect(h.calls.map((c) => (c.args.memories as Array<{ key: string }>)[0]?.key)).toEqual([
-      "file-memory:a",
-      "file-memory:new",
+      `file-memory:${MEMORY_DIR}/a.md`,
+      `file-memory:${MEMORY_DIR}/new.md`,
     ]);
     expect(h.toasts).toEqual(["Vector Memory: synced 2 file memories"]);
   });
