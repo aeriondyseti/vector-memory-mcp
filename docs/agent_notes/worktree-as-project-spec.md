@@ -37,7 +37,7 @@ Today one value, "project = cwd", does four jobs. We split it:
 
 | Name | Value | Used for |
 |---|---|---|
-| **project** | main working tree root of the repo containing cwd (or cwd if not a linked worktree) | memory stamping, search filter and boost, file memories, conversation history |
+| **project** | main working tree root of the repo containing cwd, exactly what `$.session.repo().root` answers (cwd outside a repo) | memory stamping, search filter and boost, file memories, conversation history |
 | **workspace** | `normalizeProject(cwd)`, exactly today's value | waypoint ID, server-discovery lockfile, the new `workspace` column, `scope: "workspace"` and the workspace boost |
 
 Why keep `workspace`? Parallel sessions in two worktrees of one repo must not share a waypoint (they'd overwrite
@@ -45,8 +45,8 @@ each other), and each session's hooks must find *their own* server's lockfile. K
 waypoints and server discovery behave **exactly as today**, so neither needs a migration. Recording it on every
 row as well means a search can still tell "from this worktree" apart from "from this repo" (§7).
 
-For a session in the main checkout, or in any folder that isn't a linked worktree, `project === workspace`.
-Nothing changes for those users.
+For a session at the root of a main checkout, or outside any repository, `project === workspace`, and nothing
+changes. Sessions in a worktree *or a subdirectory* get `project !== workspace` (§4).
 
 ## 4. Resolving the project
 
@@ -56,26 +56,45 @@ New function in `server/core/project.ts`:
 export function resolveProject(cwd: string): string
 ```
 
-Algorithm:
+**Must match file-memory sync byte for byte.** File memories are filed under `$.session.repo().root`. That is a
+Claude Code engine API (the `claude-code` module), not hook-kit. Its contract only says "the repository's root,
+absolute: the main working tree's for a worktree; null outside a repository". So step 1 probed it: a throwaway mod
+recorded `repo().root` from real fixture folders under Claude Code 2.1.301 (2026-10-16):
 
-1. Run `git -C <cwd> rev-parse --path-format=absolute --git-dir --git-common-dir` (`Bun.spawnSync`, short timeout).
-2. If git fails (not a repo, git not installed, folder gone), go to step 5.
-3. If `git-dir === git-common-dir`, this is a main checkout (or a bare repo), so return `normalizeProject(cwd)`.
-   That leaves today's behaviour untouched, including sessions started in a subdirectory.
-4. Otherwise it's a linked worktree. If `basename(commonDir) === ".git"`, return `normalizeProject(dirname(commonDir))`,
-   which is the main working tree root. If not (a worktree of a bare repo, or a submodule's `.git/modules/x`), there
-   is no main checkout to fold into, so return `normalizeProject(cwd)`.
-5. Fallback for paths that no longer exist (used by the migration and the history parser): if the path matches
+| Session started in | `repo().root` |
+|---|---|
+| main checkout | main root |
+| **subdirectory of the main checkout** | **main root** (not the subdirectory) |
+| `.claude/worktrees/wt`, or a subdirectory of it | main root |
+| a worktree outside the repo (`git worktree add ../elsewhere`) | main root |
+| a symlink to the checkout, or a subdirectory through it | main root, as a **real path** (the engine's session root is resolved too) |
+| `/tmp/…` worktree (`/tmp` → `/private/tmp` on macOS) | `/private/tmp/…/main` |
+| a folder outside any repository | `null` |
+
+That is exactly `dirname(git rev-parse --path-format=absolute --git-common-dir)`, since git also answers real paths.
+The probe also overturned the first draft's step 3, which kept a main-checkout *subdirectory* as its own project.
+The engine folds it into the repo root, so the server must too, or a subdirectory session's file memories stay
+unjoined. (Not probed: submodules and bare-repo worktrees, both rare; they keep the fallback below.)
+
+Algorithm, as implemented in `server/core/project.ts` (tested by `tests/project-resolution.test.ts`):
+
+1. Run `git -C <cwd> rev-parse --path-format=absolute --git-common-dir` (`Bun.spawnSync`, 2s timeout).
+2. If it answers and `basename(commonDir) === ".git"`, return `normalizeProject(dirname(commonDir))`. That covers
+   the main checkout, its subdirectories and every linked worktree, all through symlinks.
+3. If it answers anything else (a submodule's `.git/modules/x`, a bare repository), there's no main checkout to
+   fold into. Return `git rev-parse --show-toplevel`, or the folder if that fails.
+4. If git fails (not a repo, git not installed, folder gone): for a folder that no longer exists and matches
    `^(.*)/\.claude/worktrees/[^/]+(/.*)?$`, return `normalizeProject(<group 1>)`. Otherwise return
    `normalizeProject(cwd)`.
 
 Results are memoized per input path (a `Map`), so the history parser doesn't spawn git once per message.
 
-`normalizeProject()` stays as-is: a pure string normalizer that every comparison still goes through.
+`normalizeProject()` stays as-is: a pure string normalizer that every comparison still goes through. The server's
+own `process.cwd()` is already a physical path (`getcwd` resolves symlinks), so nothing needs to resolve it first.
 
-**Must match file-memory sync byte for byte.** Step 0 of implementation is to read hook-kit's `$.session.repo()` and
-confirm it produces the same root, especially around symlinks (git returns real paths; cwd may not be one).
-If they differ, align `resolveProject` with hook-kit, since the point of this work is joining with those rows.
+**Consequence: subdirectory sessions change too.** A session started in `<repo>/server` used to file under
+`<repo>/server`; it now files under `<repo>`, with `<repo>/server` as its workspace. Migration v6 picks these rows up
+with no extra work, because `resolveProject()` on an existing subdirectory answers the repo root.
 
 ## 5. Changes, file by file
 
@@ -183,8 +202,9 @@ passing a worktree path searches its whole repo instead of matching nothing afte
 | Same project, other workspace or `NULL` | ×1.15 | ×1 |
 | Other project | ×1 | (filtered out) |
 
-- The workspace tier applies **only when the session is in a linked worktree** (`workspace !== project`). In a main
-  checkout, ranking is byte-for-byte today's, and non-worktree users see no change. The alternative, also boosting
+- The workspace tier applies **only when `workspace !== project`**: a linked worktree, or a subdirectory (§4), where
+  rows stored from that same subdirectory rank first. At the root of a main checkout, ranking is byte-for-byte
+  today's. The alternative, also boosting
   main-checkout rows when in the main checkout, would push repo-wide file memories and worktree rows down for every
   main-checkout user. Easy to flip later if wanted.
 - 1.10 is a starting value: enough to win ties inside the repo without hiding a clearly better match from a sibling
@@ -198,7 +218,9 @@ passing a worktree path searches its whole repo instead of matching nothing afte
 | Case | Result |
 |---|---|
 | Not a git repo / git missing | project = cwd, same as today. |
-| Main checkout, or a subdirectory of one | Unchanged (step 3). |
+| Main checkout root | Unchanged. |
+| Subdirectory of a main checkout | Project becomes the repo root, as the engine answers (§4); workspace stays the subdirectory. |
+| Folder reached through a symlink | Real path, from git and from the server's own `process.cwd()`, same as the engine. |
 | Session started in a subdirectory of a worktree | Main repo root, which matches what file-memory sync uses. |
 | Submodule | Its own toplevel, not the superproject (step 4). |
 | Worktree of a bare repo | cwd (there's no main checkout to fold into). |
@@ -213,8 +235,9 @@ passing a worktree path searches its whole repo instead of matching nothing afte
 
 Build real throwaway repos in a temp dir (`git init`, commit, `git worktree add`) so no git behaviour is mocked:
 
-1. `resolveProject`: main checkout, subdir of main, linked worktree, subdir of a worktree, non-repo folder, deleted
-   `.claude/worktrees/x` path, deleted other path, submodule.
+1. `resolveProject` (done, `tests/project-resolution.test.ts`): main checkout, subdir of main, Claude Code worktree,
+   subdir of a worktree, worktree outside the repo, symlink and subdir through it (expected real path), non-repo
+   folder, deleted `.claude/worktrees/x` path, deleted other path. Still to add with step 2: submodule.
 2. Config: `project` and `workspace` from a worktree cwd; `--project` override.
 3. Waypoints: two `MemoryService`s with one project and different workspaces set waypoints independently.
 4. Search: a memory stored from a worktree session is found with `scope: "project"` from the main checkout and vice
@@ -233,8 +256,9 @@ Build real throwaway repos in a temp dir (`git init`, commit, `git worktree add`
 
 ## 10. Implementation order
 
-1. Verify hook-kit's `repo().root` semantics (§4); adjust the algorithm if needed.
-2. `resolveProject` + tests.
+1. ~~Verify `$.session.repo().root` semantics (§4).~~ Done: probed, algorithm corrected, `resolveProject()` and
+   `tests/project-resolution.test.ts` landed.
+2. ~~`resolveProject` + tests~~ (landed with step 1; submodule case still to add).
 3. Config split + `MemoryService` workspace + lockfile, with tests.
 4. Parser + consolidation.
 5. Migration v6 (column, backfill, re-file) + backup + tests.
