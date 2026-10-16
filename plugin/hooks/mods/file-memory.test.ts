@@ -147,6 +147,12 @@ describe("memory folder helpers", () => {
     expect(memoryDirFromPrompt([claudeMd, { id: "memory", text: "nothing" }])).toBe(null);
   });
 
+  test("takes the first folder a memory section names (the private one, ahead of a team folder)", async () => {
+    const team = "/Users/me/.claude/projects/-Users-me-repo/team/memory";
+    const text = `You have a persistent file-based memory at \`${MEMORY_DIR}/\`. Team memories live at \`${team}/\`.`;
+    expect(memoryDirFromPrompt([{ id: "memory", text }])).toBe(MEMORY_DIR);
+  });
+
   test("knows a stored reply from a skipped duplicate", async () => {
     expect(isStoredReply("Memory stored with ID: 123")).toBe(true);
     expect(isStoredReply('Not stored: duplicate of existing memory 123:\n  "x"')).toBe(false);
@@ -447,6 +453,18 @@ describe("tool.call: Bash", () => {
     expect(done.deny).toBe(undefined);
     expect(h.lists).toEqual([]);
     expect(h.calls).toEqual([]);
+  });
+
+  test("two Bash calls running together that both see a file change store it once", async ($, on) => {
+    const h = harness(on, { listings: [[], [], [entry("prefers-bun.md", 1)], [entry("prefers-bun.md", 1)]] });
+    await Promise.all([
+      $.tool.call({ tool: "Bash", command: "first" }),
+      $.tool.call({ tool: "Bash", command: "second" }),
+    ]);
+    await h.settle(() => h.lists.length === 4);
+    await h.settle();
+    expect(h.calls.map((c) => c.tool)).toEqual(["store_memories"]);
+    expect(h.toasts.length).toBe(1);
   });
 
   test("a command that touched no memory file syncs nothing", async ($, on) => {
