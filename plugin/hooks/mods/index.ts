@@ -1,5 +1,6 @@
 /**
- * vector-memory mods (Claude Code function hooks): waypoint checkpoints.
+ * vector-memory mods (Claude Code function hooks): waypoint checkpoints and
+ * file-based memory sync.
  *
  * A checkpoint is what `/waypoint:set` does: the model reviews the session
  * (a fork of the conversation), its memories are stored (`store_memories`),
@@ -26,12 +27,21 @@
  * fresh"), `always` keeps it, `never` drops it. A waypoint the person chose
  * to save at the /clear just run is loaded without asking again.
  *
+ * File memories — Claude Code's file-based memories live in the folder the
+ * system prompt's `memory` section names (`…/projects/<slug>/memory/`). After
+ * a Write or Edit of a file directly in it (not the `MEMORY.md` index), the
+ * file is stored as a vector memory keyed `file-memory:<path>`, so a later
+ * edit replaces it (kept as history). Bash calls are caught by listing the
+ * folder before and after. Syncs run in the background, skip a file whose
+ * text is unchanged since its last sync, and never touch the tool's result.
+ * Per the `fileMemorySync` option.
+ *
  * Every failure degrades to the command, compaction or start running as usual.
  * Loaded by Claude Code builds with the mod system (via `modules` in
  * hooks.json); older builds ignore it and keep the classic command hooks.
  */
 
-import type { EngineInterface, Hook, Register, SessionMessage } from "claude-code";
+import type { EngineInterface, Hook, Register, SessionMessage, ToolCallResult } from "claude-code";
 import {
   ANSWER,
   type CheckpointDecision,
@@ -56,6 +66,19 @@ import {
   storedMemoryIds,
   waypointArgs,
 } from "./checkpoint.ts";
+import {
+  changedMemoryFiles,
+  fileMemoryArgs,
+  fileMemorySyncMode,
+  isStoredReply,
+  type MemoryListing,
+  memoryDirFromPrompt,
+  memoryFileName,
+  memoryListing,
+  parseFileMemory,
+  sha256,
+  syncedToast,
+} from "./file-memory.ts";
 
 /** The server's key in plugin/.mcp.json. */
 const MCP_SERVER_KEY = "vector-memory";
@@ -358,6 +381,127 @@ const checkpointBeforeExit: Hook<"command.run"> = async ($, e, next) => {
   return next(e);
 };
 
+/** SHA-256 of each file memory's text as last synced, by path: an unchanged file is not stored again. */
+const syncedHashes = new Map<string, string>();
+
+/**
+ * Store the file memory at `path` as a vector memory, unless unchanged since
+ * its last sync; resolves its name when stored. Failures are logged, never raised.
+ */
+async function syncFileMemory($: EngineInterface, path: string): Promise<string | null> {
+  try {
+    const text = await $.fs.read(path);
+    const hash = await sha256(text);
+    if (syncedHashes.get(path) === hash) return null;
+
+    const memory = parseFileMemory(text);
+    if (memory === null) {
+      $.ui.log(`${LABEL}: ${path} has no frontmatter name or body; not synced`);
+      return null;
+    }
+    const server = await connectServer($);
+    if (server === null) return null;
+
+    const project = (await $.session.repo())?.root;
+    const stored = await $.mcp.call(server, "store_memories", fileMemoryArgs(memory, path, project));
+    if (stored.isError || !isStoredReply(resultText(stored))) {
+      $.ui.log(`${LABEL}: file memory sync failed: ${resultText(stored).slice(0, 200)}`);
+      return null;
+    }
+    syncedHashes.set(path, hash);
+    return memory.name;
+  } catch (err) {
+    $.ui.log(`${LABEL}: file memory sync failed: ${errorMessage(err)}`);
+    return null;
+  }
+}
+
+/** Sync each of `paths`, then one toast for what was stored. */
+async function syncFileMemories($: EngineInterface, paths: readonly string[]): Promise<void> {
+  const names: string[] = [];
+  for (const path of paths) {
+    const name = await syncFileMemory($, path);
+    if (name !== null) names.push(name);
+  }
+  const toast = syncedToast(names);
+  if (toast !== null) $.ui.toast(toast);
+}
+
+/** Background syncs, one at a time, so two never store the same file at once. */
+let syncQueue: Promise<void> = Promise.resolve();
+
+/** Run `job` after the tool call has answered, off its dispatch, so the turn never waits on a sync. */
+function syncInBackground($: EngineInterface, job: () => Promise<void>): void {
+  $.clock.after(0, () => {
+    syncQueue = syncQueue.then(job).catch((err: unknown) => {
+      $.ui.log(`${LABEL}: file memory sync failed: ${errorMessage(err)}`);
+    });
+  });
+}
+
+/**
+ * After a Write or Edit to `path` ended as `done`: mirror it into vector
+ * memory when it is a file in the memory folder (checked in the background,
+ * as finding the folder may compose the system prompt).
+ */
+function syncAfterWrite<T extends ToolCallResult>($: EngineInterface, path: string, done: T): T {
+  if (done.deny === undefined && !done.isError && path.endsWith(".md")) {
+    syncInBackground($, async () => {
+      const dir = await memoryDir($);
+      if (dir !== null && memoryFileName(path, dir) !== null) await syncFileMemories($, [path]);
+    });
+  }
+  return done;
+}
+
+/**
+ * The memory folder the system prompt names, looked up once per load; null
+ * when it names none. A failed lookup is not kept, so the next call tries again.
+ */
+let memoryDirLookup: Promise<string | null> | null = null;
+
+function memoryDir($: EngineInterface): Promise<string | null> {
+  memoryDirLookup ??= $.prompt
+    .compose()
+    .then(({ sections }) => memoryDirFromPrompt(sections))
+    .catch((err: unknown) => {
+      $.ui.log(`${LABEL}: memory folder lookup failed: ${errorMessage(err)}`);
+      memoryDirLookup = null;
+      return null;
+    });
+  return memoryDirLookup;
+}
+
+/** The memory folder's files; empty when it cannot be listed (not created yet). */
+async function listMemoryDir($: EngineInterface, dir: string): Promise<MemoryListing> {
+  try {
+    return memoryListing(await $.fs.list(dir));
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * Around a Bash call: list the memory folder before it, then in the
+ * background list it again and sync each file memory added or changed
+ * (`cat >`, `sed -i`, a script, ...). Runs even when the command failed, as
+ * it may have written first.
+ */
+async function syncAroundBash<T extends ToolCallResult>($: EngineInterface, run: () => Promise<T>): Promise<T> {
+  const dir = await memoryDir($);
+  if (dir === null) return run();
+
+  const before = await listMemoryDir($, dir);
+  const done = await run();
+  if (done.deny !== undefined) return done;
+
+  syncInBackground($, async () => {
+    const changed = changedMemoryFiles(before, await listMemoryDir($, dir));
+    await syncFileMemories($, changed.map((name) => `${dir}/${name}`));
+  });
+  return done;
+}
+
 export const register: Register = (on, options) => {
   // ── Compaction ────────────────────────────────────────────────────
   compactCheckpointMode = checkpointMode(options.compactCheckpoint);
@@ -379,5 +523,18 @@ export const register: Register = (on, options) => {
     // Never strand the person in a session they asked to leave.
     on("command.run", { command: "clear" }, checkpointBeforeExit).catch(($, e, next) => next(e));
     on("command.run", { command: "exit" }, checkpointBeforeExit).catch(($, e, next) => next(e));
+  }
+
+  // ── File memories ─────────────────────────────────────────────────
+  if (fileMemorySyncMode(options.fileMemorySync) === "on") {
+    // The write already happened: a failed sync never touches its result.
+    // Syncs run in the background; the tool's result goes back unchanged at once.
+    on("tool.call", { tool: "Write" }, async ($, e, next) => syncAfterWrite($, e.file_path, await next(e))).catch(
+      ($, e, next) => next(e)
+    );
+    on("tool.call", { tool: "Edit" }, async ($, e, next) => syncAfterWrite($, e.file_path, await next(e))).catch(
+      ($, e, next) => next(e)
+    );
+    on("tool.call", { tool: "Bash" }, ($, e, next) => syncAroundBash($, () => next(e))).catch(($, e, next) => next(e));
   }
 };

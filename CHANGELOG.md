@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **File-based memory sync**: when Claude writes or edits a Claude Code file-based memory (a file directly in the memory folder the system prompt's `memory` section names, `<config dir>/projects/<project>/memory/<name>.md`; not the `MEMORY.md` index), `tool.call` hooks store the file as a vector memory too: the frontmatter `description` and the body as content, keyed `file-memory:<path>` so a later edit of that file replaces it (kept as history) and two files sharing a frontmatter `name` never do, with `metadata.source: "file-memory"`, the file's own type as `metadata.file_memory_type`, its path and `file-memory` tags. Stored with `allow_duplicates`, since the key already replaces the last version (the duplicate check would otherwise keep a stale version after a small edit). Content over 1000 characters gets an `embedding_text` summary: `<name>: <description>` followed by as much of the body as fits in 1000 characters.
+  - **Write, Edit and Bash**: Write and Edit are synced when the file is in the memory folder; a repository's own `projects/x/memory/` folder is never mistaken for it. For Bash (`cat >`, `sed -i`, heredocs, scripts), the hook lists the memory folder before and after the command and syncs each file added or changed. The folder is read once from the system prompt via `$.prompt.compose()` (a failed lookup is tried again on the next call); with no memory folder named, nothing is synced.
+  - **In the background**: the tool's result goes back at once; syncs run afterwards on a serialized queue (`$.clock.after`) and end with one toast naming the memory, or how many were synced. A reply that stored nothing is not counted as synced.
+  - **No churn**: a file whose text is unchanged since its last sync (SHA-256) is not stored again.
+  - **Frontmatter**: reads top-level values, folded (`>`) and literal (`|`) block values, one level of nesting (`metadata.type`), CRLF lines, a byte-order mark and trailing `# comments`.
+  - **Worktrees**: memories are filed under the main repository's root (`$.session.repo().root`), so edits from any worktree replace the same memory; outside a repository, the server's own project. Known limitation: in a session started in a worktree, the server's own project is the worktree path, so `scope: "project"` searches there do not return synced file memories and `scope: "all"` ranks them without the current-project boost.
+  - Files without frontmatter `name` or a body are skipped; a failed sync is logged and never affects the tool call. New `fileMemorySync` option (`on` | `off`, default `on`).
+
 ## [3.2.0] - 2026-10-15
 
 ### Added

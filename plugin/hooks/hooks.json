@@ -1,5 +1,5 @@
 {
-  "description": "Vector memory lifecycle hooks: session context loading and waypoint checkpoints (compaction, /clear, /exit)",
+  "description": "Vector memory lifecycle hooks: session context loading, waypoint checkpoints (compaction, /clear, /exit) and file-based memory sync",
   "modules": ["./mods/index.ts"],
   "hooks": {
     "SessionStart": [
