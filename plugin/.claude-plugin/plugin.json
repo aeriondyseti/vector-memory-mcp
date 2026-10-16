@@ -52,6 +52,16 @@
         "never"
       ],
       "default": "ask"
+    },
+    "fileMemorySync": {
+      "type": "string",
+      "title": "Sync file-based memories",
+      "description": "When Claude writes or edits a file-based memory (projects/<project>/memory/*.md), also store it as a vector memory.",
+      "options": [
+        "on",
+        "off"
+      ],
+      "default": "on"
     }
   }
 }

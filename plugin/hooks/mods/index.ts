@@ -26,12 +26,17 @@
  * fresh"), `always` keeps it, `never` drops it. A waypoint the person chose
  * to save at the /clear just run is loaded without asking again.
  *
+ * File memories — after a Write or Edit of a Claude Code file-based memory
+ * (`…/projects/<slug>/memory/<name>.md`, not the `MEMORY.md` index), the
+ * file is stored as a vector memory keyed `file-memory:<name>`, so a later
+ * edit replaces it (kept as history). Per the `fileMemorySync` option.
+ *
  * Every failure degrades to the command, compaction or start running as usual.
  * Loaded by Claude Code builds with the mod system (via `modules` in
  * hooks.json); older builds ignore it and keep the classic command hooks.
  */
 
-import type { EngineInterface, Hook, Register, SessionMessage } from "claude-code";
+import type { EngineInterface, Hook, Register, SessionMessage, ToolCallResult } from "claude-code";
 import {
   ANSWER,
   type CheckpointDecision,
@@ -56,6 +61,7 @@ import {
   storedMemoryIds,
   waypointArgs,
 } from "./checkpoint.ts";
+import { fileMemoryArgs, fileMemorySyncMode, isFileMemoryPath, parseFileMemory } from "./file-memory.ts";
 
 /** The server's key in plugin/.mcp.json. */
 const MCP_SERVER_KEY = "vector-memory";
@@ -358,6 +364,34 @@ const checkpointBeforeExit: Hook<"command.run"> = async ($, e, next) => {
   return next(e);
 };
 
+/** Store the file memory at `path` as a vector memory; failures are logged, never raised. */
+async function syncFileMemory($: EngineInterface, path: string): Promise<void> {
+  try {
+    const memory = parseFileMemory(await $.fs.read(path));
+    if (memory === null) {
+      $.ui.log(`${LABEL}: ${path} has no frontmatter name or body; not synced`);
+      return;
+    }
+    const server = await connectServer($);
+    if (server === null) return;
+
+    const stored = await $.mcp.call(server, "store_memories", fileMemoryArgs(memory, path));
+    if (stored.isError) {
+      $.ui.log(`${LABEL}: file memory sync failed: ${resultText(stored).slice(0, 200)}`);
+      return;
+    }
+    $.ui.toast(`Vector Memory: synced file memory "${memory.name}"`);
+  } catch (err) {
+    $.ui.log(`${LABEL}: file memory sync failed: ${errorMessage(err)}`);
+  }
+}
+
+/** After a Write or Edit to `path` ended as `done`: mirror a file memory into vector memory. */
+async function syncAfterWrite<T extends ToolCallResult>($: EngineInterface, path: string, done: T): Promise<T> {
+  if (done.deny === undefined && !done.isError && isFileMemoryPath(path)) await syncFileMemory($, path);
+  return done;
+}
+
 export const register: Register = (on, options) => {
   // ── Compaction ────────────────────────────────────────────────────
   compactCheckpointMode = checkpointMode(options.compactCheckpoint);
@@ -379,5 +413,16 @@ export const register: Register = (on, options) => {
     // Never strand the person in a session they asked to leave.
     on("command.run", { command: "clear" }, checkpointBeforeExit).catch(($, e, next) => next(e));
     on("command.run", { command: "exit" }, checkpointBeforeExit).catch(($, e, next) => next(e));
+  }
+
+  // ── File memories ─────────────────────────────────────────────────
+  if (fileMemorySyncMode(options.fileMemorySync) === "on") {
+    // The write already happened: a failed sync never touches its result.
+    on("tool.call", { tool: "Write" }, async ($, e, next) => syncAfterWrite($, e.file_path, await next(e))).catch(
+      ($, e, next) => next(e)
+    );
+    on("tool.call", { tool: "Edit" }, async ($, e, next) => syncAfterWrite($, e.file_path, await next(e))).catch(
+      ($, e, next) => next(e)
+    );
   }
 };
