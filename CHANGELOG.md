@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **In the background**: the tool's result goes back at once; syncs run afterwards on a serialized queue (`$.clock.after`) and end with one toast naming the memory, or how many were synced. A reply that stored nothing is not counted as synced.
   - **No churn**: a file whose text is unchanged since its last sync (SHA-256) is not stored again.
   - **Frontmatter**: reads top-level values, folded (`>`) and literal (`|`) block values, one level of nesting (`metadata.type`), CRLF lines, a byte-order mark and trailing `# comments`.
-  - **Worktrees**: memories are filed under the main repository's root (`$.session.repo().root`), so edits from any worktree replace the same memory; outside a repository, the server's own project. Known limitation: in a session started in a worktree, the server's own project is the worktree path, so `scope: "project"` searches there do not return synced file memories and `scope: "all"` ranks them without the current-project boost.
+  - **Project**: memories are filed under the server's own project; the plugin does not compute one, so the two can never disagree. Known limitation: until the server resolves a worktree to its main repository (planned, `docs/agent_notes/worktree-as-project-spec.md`), a session started in a worktree files them under the worktree path.
   - Files without frontmatter `name` or a body are skipped; a failed sync is logged and never affects the tool call. New `fileMemorySync` option (`on` | `off`, default `on`).
 
 ## [3.2.0] - 2026-10-15

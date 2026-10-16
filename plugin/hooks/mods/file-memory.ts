@@ -106,11 +106,11 @@ export function fileMemoryKey(path: string): string {
 export const LONG_CONTENT_CHARS = 1000;
 
 /**
- * `store_memories` arguments for one file memory read from `path`, filed
- * under `project` when given (the main repository's root, which a worktree
- * shares, so its key replaces across worktrees); else the server's own.
+ * `store_memories` arguments for one file memory read from `path`. No
+ * project: the server files it under its own, which resolves a worktree to
+ * its main repository, so the key replaces across worktrees.
  */
-export function fileMemoryArgs(memory: FileMemory, path: string, project?: string): Record<string, unknown> {
+export function fileMemoryArgs(memory: FileMemory, path: string): Record<string, unknown> {
   const content = memory.description ? `${memory.description}\n\n${memory.body}` : memory.body;
   // A summary headed by the name and description, then as much of the body as fits.
   const head = memory.description ? `${memory.name}: ${memory.description}\n\n` : "";
@@ -127,7 +127,6 @@ export function fileMemoryArgs(memory: FileMemory, path: string, project?: strin
         content,
         ...(embeddingText ? { embedding_text: embeddingText } : {}),
         key: fileMemoryKey(path),
-        ...(project ? { project } : {}),
         context: `File memory > ${memory.name}`,
         metadata: {
           type: "context",

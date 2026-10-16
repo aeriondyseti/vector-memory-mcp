@@ -402,8 +402,7 @@ async function syncFileMemory($: EngineInterface, path: string): Promise<string 
     const server = await connectServer($);
     if (server === null) return null;
 
-    const project = (await $.session.repo())?.root;
-    const stored = await $.mcp.call(server, "store_memories", fileMemoryArgs(memory, path, project));
+    const stored = await $.mcp.call(server, "store_memories", fileMemoryArgs(memory, path));
     if (stored.isError || !isStoredReply(resultText(stored))) {
       $.ui.log(`${LABEL}: file memory sync failed: ${resultText(stored).slice(0, 200)}`);
       return null;

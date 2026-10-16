@@ -56,8 +56,9 @@ New function in `server/core/project.ts`:
 export function resolveProject(cwd: string): string
 ```
 
-**Must match file-memory sync byte for byte.** File memories are filed under `$.session.repo().root`. That is a
-Claude Code engine API (the `claude-code` module), not hook-kit. Its contract only says "the repository's root,
+**Must match Claude Code's own notion of the repo**, which decides where its shared memory folder lives. File-memory
+sync originally filed under `$.session.repo().root`; it now leaves the project to the server (§5 Plugin), but the
+server still has to agree with the engine. `repo()` is a Claude Code engine API (the `claude-code` module), not hook-kit. Its contract only says "the repository's root,
 absolute: the main working tree's for a worktree; null outside a repository". So step 1 probed it: a throwaway mod
 recorded `repo().root` from real fixture folders under Claude Code 2.1.301 (2026-10-16):
 
@@ -122,10 +123,16 @@ Almost nothing changes, which is deliberate: the hooks only use their project va
 
 - `plugin/hooks/scripts/hooks-lib.ts`: update the `currentProject()` doc comment to say it must match the server's
   **workspace**, not project. Possibly rename it to `currentWorkspace()`.
-- `plugin/hooks/mods/index.ts:405`: keep passing the main root explicitly. It's now redundant with a new server,
-  but still correct against older servers still cached by `bunx`. Also pass `workspace: null`: a file memory belongs
-  to the whole repo, not to whichever worktree happened to sync it last (§7). `fileMemoryArgs` gains the field, and
-  its tests assert it.
+- File-memory sync (`plugin/hooks/mods/index.ts`, `fileMemoryArgs`): **done.** It no longer passes a `project`, and
+  no longer asks the engine for `$.session.repo()`; the server's `resolveProject()` is the single source of truth.
+  Why: `claude plugin test` can't reach the real `$.session.repo()` (its harness answers every engine call itself,
+  and an unanswered one fails with `no implementation for session.repo`, as probed), so no test could catch the
+  engine's answer drifting from the server's. With one computation there's nothing to drift. The harness in
+  `file-memory.test.ts` deliberately answers no `session.repo`, so a reintroduced call fails the tests. Cost: until
+  step 3 wires `resolveProject()` into config, a worktree session files them under the worktree path. Nothing is
+  published yet, so **this branch merges with step 3, not before.**
+- Still to do with step 6: pass `workspace: null`. A file memory belongs to the whole repo, not to whichever worktree
+  happened to sync it last (§7). `fileMemoryArgs` gains the field, and its tests assert it.
 
 ### Docs
 

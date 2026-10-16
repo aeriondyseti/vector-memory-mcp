@@ -183,8 +183,6 @@ describe("memory folder helpers", () => {
   });
 });
 
-/** The main working tree's root, as `$.session.repo()` answers it from a worktree too. */
-const REPO_ROOT = "/Users/me/repo";
 const MEMORY_SECTION = `# Memory\n\nYou have a persistent file-based memory at \`${MEMORY_DIR}/\`. Write to it directly.`;
 
 const entry = (name: string, mtimeMs: number) => ({ name, kind: "file" as const, size: 10, mtimeMs, isLink: false });
@@ -202,7 +200,6 @@ function harness(
     isError = false,
     section = MEMORY_SECTION,
     listings = [] as ReturnType<typeof entry>[][],
-    repoRoot = REPO_ROOT as string | null,
     /** What `store_memories` answers. */
     reply = "Memory stored with ID: 00000000-0000-0000-0000-000000000001",
     isConnected = true,
@@ -257,10 +254,6 @@ function harness(
     if (readFailures-- > 0) return { deny: "read failed" };
     return { value: (files.length > 1 ? files.shift() : files[0]) ?? "" };
   });
-  on("session.repo", () => {
-    activity++;
-    return { value: repoRoot === null ? null : { root: repoRoot, remote: null, internal: false, name: null } };
-  });
   on("mcp.connect", () => {
     activity++;
     return {
@@ -292,19 +285,14 @@ describe("tool.call: Write and Edit", () => {
 
     await h.settle(() => h.toasts.length > 0);
     expect(h.calls.map((c) => c.tool)).toEqual(["store_memories"]);
-    expect(h.calls[0]?.args).toEqual(fileMemoryArgs(parseFileMemory(MEMORY_FILE)!, MEMORY_PATH, REPO_ROOT));
+    expect(h.calls[0]?.args).toEqual(fileMemoryArgs(parseFileMemory(MEMORY_FILE)!, MEMORY_PATH));
     expect(h.toasts).toEqual(['Vector Memory: synced file memory "prefers-bun"']);
   });
 
-  test("files the memory under the main repository's root, shared by its worktrees", async ($, on) => {
+  // The harness answers no `session.repo`: were the plugin to ask the engine
+  // for the repository again, the sync would fail and so would this test.
+  test("leaves the project to the server, which resolves a worktree to its main repository", async ($, on) => {
     const h = harness(on);
-    await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
-    await h.settle(() => h.toasts.length > 0);
-    expect((h.calls[0]?.args.memories as Array<{ project?: string }>)[0]?.project).toBe(REPO_ROOT);
-  });
-
-  test("outside a repository the server's own project is used", async ($, on) => {
-    const h = harness(on, { repoRoot: null });
     await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
     await h.settle(() => h.toasts.length > 0);
     expect(h.calls.map((c) => c.tool)).toEqual(["store_memories"]);
