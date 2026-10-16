@@ -163,6 +163,7 @@ function harness(
     section = MEMORY_SECTION,
     listings = [] as ReturnType<typeof entry>[][],
     repoRoot = REPO_ROOT as string | null,
+    isServerStuck = false,
   } = {}
 ) {
   const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
@@ -190,6 +191,7 @@ function harness(
   }));
   on("mcp.connect", () => ({ value: { isConnected: true, server: SERVER } }));
   on("mcp.call", (_$, e) => {
+    if (isServerStuck) return new Promise<never>(() => {}); // never answers
     calls.push({ tool: e.tool, args: e.args });
     return { value: { content: [{ type: "text", text: "Memory stored" }], isError: false } };
   });
@@ -275,6 +277,52 @@ describe("tool.call: Write and Edit", () => {
     const h = harness(on);
     await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
     await h.clock.settle();
+    expect(h.calls).toEqual([]);
+  });
+});
+
+describe("session.end", () => {
+  test("finishes queued syncs before the session ends", async ($, on) => {
+    const h = harness(on);
+    let endedAfterSync = false;
+    on("session.end", () => {
+      endedAfterSync = h.calls.length === 1;
+      return { sessionId: "s" };
+    });
+
+    await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
+    expect(h.calls).toEqual([]); // its timer has not fired: the clock never moved
+
+    await $.session.end({ reason: "other", sessionId: "s", resume: { id: "s" } });
+    expect(endedAfterSync).toBe(true);
+    expect(h.toasts).toEqual(['Vector Memory: synced file memory "prefers-bun"']);
+  });
+
+  test("a sync that never finishes does not hold the session past its budget", async ($, on) => {
+    const h = harness(on, { isServerStuck: true });
+    let ended = false;
+    on("session.end", () => {
+      ended = true;
+      return { sessionId: "s" };
+    });
+
+    await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
+    const ending = $.session.end({ reason: "other", sessionId: "s", resume: { id: "s" } });
+    await h.clock.advance(10_000);
+    await ending;
+    expect(ended).toBe(true);
+    expect(h.toasts).toEqual([]);
+  });
+
+  test("ends at once when nothing is queued", async ($, on) => {
+    const h = harness(on);
+    let ended = false;
+    on("session.end", () => {
+      ended = true;
+      return { sessionId: "s" };
+    });
+    await $.session.end({ reason: "prompt_input_exit", sessionId: "s", resume: { id: "s" } });
+    expect(ended).toBe(true);
     expect(h.calls).toEqual([]);
   });
 });

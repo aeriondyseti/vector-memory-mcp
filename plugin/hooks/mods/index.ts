@@ -32,7 +32,8 @@
  * edit replaces it (kept as history). Bash calls are caught by listing the
  * memory folder (named in the system prompt's `memory` section) before and
  * after. Syncs run in the background, skip a file whose text is unchanged
- * since its last sync, and never touch the tool's result. Per the
+ * since its last sync, and never touch the tool's result; when the session
+ * ends, queued syncs are finished first, within its budget. Per the
  * `fileMemorySync` option.
  *
  * Every failure degrades to the command, compaction or start running as usual.
@@ -40,7 +41,7 @@
  * hooks.json); older builds ignore it and keep the classic command hooks.
  */
 
-import type { EngineInterface, Hook, Register, SessionMessage, ToolCallResult } from "claude-code";
+import type { EngineInterface, Hook, Register, SessionMessage, Timer, ToolCallResult } from "claude-code";
 import {
   ANSWER,
   type CheckpointDecision,
@@ -428,14 +429,56 @@ async function syncFileMemories($: EngineInterface, paths: readonly string[]): P
 /** Background syncs, one at a time, so two never store the same file at once. */
 let syncQueue: Promise<void> = Promise.resolve();
 
-/** Run `job` after the tool call has answered, off its dispatch, so the turn never waits on a sync. */
+/** Queued syncs whose timer has not fired yet: calling one lets it run. */
+const unstartedSyncs = new Set<() => void>();
+
+/**
+ * Run `job` after the tool call has answered, off its dispatch, so the turn
+ * never waits on a sync. It is queued at once, but runs only when its timer
+ * fires (or the session ends: `finishSyncs`).
+ */
 function syncInBackground($: EngineInterface, job: () => Promise<void>): void {
-  $.clock.after(0, () => {
-    syncQueue = syncQueue.then(job).catch((err: unknown) => {
+  let start = () => {};
+  const started = new Promise<void>((resolve) => {
+    start = () => {
+      unstartedSyncs.delete(start);
+      resolve();
+    };
+  });
+  unstartedSyncs.add(start);
+  syncQueue = syncQueue
+    .then(() => started)
+    .then(job)
+    .catch((err: unknown) => {
       $.ui.log(`${LABEL}: file memory sync failed: ${errorMessage(err)}`);
     });
-  });
+  $.clock.after(0, start);
 }
+
+/** Leave this much of `session.end`'s shared budget to the hooks and engine after this one. */
+const END_MARGIN_MS = 500;
+
+/**
+ * Before the session ends: start every queued sync and wait for them all,
+ * within `session.end`'s budget, so a `-p` run that exits right after saving
+ * a memory still syncs it.
+ */
+const finishSyncs: Hook<"session.end"> = async ($, e, next) => {
+  for (const start of [...unstartedSyncs]) start();
+  const waitMs = next.budget.remainingMs - END_MARGIN_MS;
+  if (waitMs > 0) {
+    let timer: Timer | undefined;
+    const timedOut = new Promise<void>((resolve) => {
+      timer = $.clock.after(waitMs, () => {
+        $.ui.log(`${LABEL}: session ended before every file memory sync finished`);
+        resolve();
+      });
+    });
+    await Promise.race([syncQueue, timedOut]);
+    timer?.cancel();
+  }
+  return next(e);
+};
 
 /** After a Write or Edit to `path` ended as `done`: mirror a file memory into vector memory. */
 function syncAfterWrite<T extends ToolCallResult>($: EngineInterface, path: string, done: T): T {
@@ -523,5 +566,7 @@ export const register: Register = (on, options) => {
       ($, e, next) => next(e)
     );
     on("tool.call", { tool: "Bash" }, ($, e, next) => syncAroundBash($, () => next(e))).catch(($, e, next) => next(e));
+    // The session always ends: past the budget it ends without the rest.
+    on("session.end", finishSyncs).catch(($, e, next) => next(e));
   }
 };
