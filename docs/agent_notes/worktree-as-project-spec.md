@@ -29,6 +29,7 @@ File-memory sync, though, files memories under the main repo root (`plugin/hooks
 | What happens to existing rows filed under worktree paths? | A **one-time versioned migration** re-files them under the main repo. |
 | Which folders count as worktrees? | **Any git worktree**, detected by asking git. Path patterns are used only for worktrees that were already deleted. |
 | Which project does conversation history get? | **The main repo** too, using the same resolution. |
+| Can the model file a memory for another project? | **Yes** (already possible; made robust in §8). An explicit path is resolved like a session's cwd: `~` and relative paths expanded, subdirectories and worktrees folded to their repo root. |
 | Can searches target the workspace? | **Yes.** Rows also record their `workspace`. `scope: "workspace"` filters to it, and results from the current workspace rank above the rest of the repo (§7). |
 
 ## 3. Core idea: split one identity into two
@@ -103,7 +104,8 @@ with no extra work, because `resolveProject()` on an existing subdirectory answe
 
 | File | Change |
 |---|---|
-| `server/core/project.ts` | Add `resolveProject()` and the deleted-worktree pattern helper (§4). |
+| `server/core/project.ts` | Add `resolveProject()` and the deleted-worktree pattern helper (§4, done), and `resolveExplicitProject()` for tool arguments (§8). |
+| `server/transports/mcp/handlers.ts` | Run every memory/history/context `project` argument through `resolveExplicitProject()`; waypoint args get path resolution only (§8). |
 | `server/config/index.ts` | `project: normalizeProject(overrides.project ?? resolveProject(process.cwd()))`; new `workspace: normalizeProject(process.cwd())`. The existing `--project` flag still wins, which is the escape hatch. |
 | `server/index.ts` | Pass `config.workspace` into `MemoryService`; the startup log shows both values when they differ. |
 | `server/core/memory.service.ts` | Constructor takes `workspace`. `setWaypoint` / `getLatestWaypoint` default to `workspace` instead of `this.project` (an explicit `project` arg still wins, as the HTTP `/waypoint?project=` hook call does). Stamping and search use `workspace` as §7 describes; everything else keeps using `this.project`. |
@@ -131,7 +133,7 @@ Almost nothing changes, which is deliberate: the hooks only use their project va
   `file-memory.test.ts` deliberately answers no `session.repo`, so a reintroduced call fails the tests. Cost: until
   step 3 wires `resolveProject()` into config, a worktree session files them under the worktree path. Nothing is
   published yet, so **this branch merges with step 3, not before.**
-- Still to do with step 6: pass `workspace: null`. A file memory belongs to the whole repo, not to whichever worktree
+- Still to do with step 7: pass `workspace: null`. A file memory belongs to the whole repo, not to whichever worktree
   happened to sync it last (§7). `fileMemoryArgs` gains the field, and its tests assert it.
 
 ### Docs
@@ -185,9 +187,10 @@ manually if anyone needs it.
 
 **Stamping.** Every new memory and history row stores a `workspace` beside its `project`:
 
-- `store_memories` from a session: the server's `workspace`, if the memory is filed under the server's own
-  project. If an explicit, different `project` is passed, `workspace` is `NULL`, because it's another repo and this
-  folder means nothing there.
+- `store_memories` with no `project`: the server's own `workspace`.
+- `store_memories` with an explicit `project`: the folder the model named, which may be a repo root, a subdirectory
+  or a worktree. Its project is that folder's repo root (§8), so the row lands exactly as if a session in that folder
+  had stored it.
 - An explicit `workspace` arg wins. `null` means "repo-wide", which is what file-memory sync sends.
 - Conversation history: the session log's raw `cwd`, normalized. That cwd *is* the workspace.
 - `update_memories` never changes `workspace`. Supersession by key copies the new row's workspace as usual.
@@ -198,8 +201,9 @@ afterwards. That's why the column gets an index. Repo-wide rows (`NULL`) are exc
 "what happened in this worktree". A caller who wants those rows too uses `scope: "project"`, which now ranks the
 workspace first anyway (below).
 
-**Explicit paths.** Today `scope: "<path>"` means "that project". The path now goes through `resolveProject()`, so
-passing a worktree path searches its whole repo instead of matching nothing after the migration.
+**Explicit paths.** Today `scope: "<path>"` means "that project". The path now goes through `resolveExplicitProject()`
+(§8), so passing a worktree path, a subdirectory or `~/Development/repo-b` searches that whole repo, instead of
+matching nothing after the migration.
 
 **Boosting.** `CURRENT_PROJECT_BOOST` (×1.15, `scope: "all"` only) becomes a tier, not a stack:
 
@@ -220,7 +224,67 @@ passing a worktree path searches its whole repo instead of matching nothing afte
 - Out of scope for now: `proactive_context`, `get_session_context` and the stale/duplicate tools keep working at
   project level.
 
-## 8. Edge cases
+## 8. Filing a memory for another project
+
+**The case.** An agent runs in a folder that holds several repos, such as `~/Development`. That folder isn't a
+repo, so the server's project is `~/Development` itself. When the agent learns something about `repo-b` and
+deliberately files it there, the memory should land exactly where a session inside `repo-b` would put it and look
+for it.
+
+**Today.** Already possible: `store_memories` takes a per-memory `project` (`tools.ts:80`, applied at
+`memory.service.ts:297`). But it only goes through `normalizeProject()`, a pure string cleanup, which leaves three
+gaps once repo sessions file under `resolveProject()`:
+
+| Model passes | Today it becomes | Problem |
+|---|---|---|
+| `/Users/k/Development/repo-b/server` (a subdirectory) | that path | repo-b's sessions file under `…/repo-b`, so nothing ever finds it |
+| `…/repo-b/.claude/worktrees/x` (a worktree) | that path | the same, and stranded once the worktree is deleted |
+| `repo-b`, or `~/Development/repo-b` | `/repo-b`, `/~/Development/repo-b` | not a real path at all |
+
+**Change.** A new boundary helper in `server/core/project.ts`:
+
+```ts
+export function resolveExplicitProject(value: string, workspace: string): string
+```
+
+1. Trim it. Expand a leading `~` or `~/` to the home directory.
+2. Resolve a relative path against the server's **workspace** (its cwd), so `repo-b` from `~/Development` means
+   `~/Development/repo-b`, as it would in a shell there.
+3. Pass the absolute path to `resolveProject()`. A subdirectory or worktree becomes its repo root; a folder that
+   doesn't exist (a repo not cloned on this machine, a deleted worktree) keeps its normalized path, via §4's
+   fallbacks. It is accepted, not refused: filing for a repo that isn't checked out is legitimate.
+
+The helper also returns the normalized absolute folder before step 3. That folder is the row's `workspace` (§7), so
+"which part of repo-b this was about" is kept too.
+
+**Where it applies.** Every tool argument that names a project for memories, history or context goes through it, at
+the handler boundary (`handlers.ts`):
+
+- `store_memories` (per memory), `ingest_document`, `search_memories` `scope: "<path>"`, `get_session_context`,
+  `prepare_handoff`, `resume_from_handoff`, `list_handoffs`, `proactive_context` (where it takes one).
+
+**Not waypoints.** `set_waypoint` / `get_waypoint` `project` args name a *workspace* (waypoints are keyed by folder,
+§3). They get steps 1–2 only (no folding to the repo root), so a waypoint named for a worktree stays that worktree's.
+The legacy display-name lookup in `getLatestWaypoint` keeps working: a bare `acme-api` now resolves to
+`<workspace>/acme-api`, and the lookup's `waypointId(basename(resolved))` candidate is still `acme-api`'s old ID.
+
+`normalizeProject()` itself does **not** change. It stays the pure string normalizer every comparison uses, so
+stored values and hashes stay byte-identical.
+
+**Telling the model where it went.** When the resolved project differs from what was passed, the store response
+says so, e.g. `Filed under project /Users/k/Development/repo-b (from repo-b/server)`. The model sees the folding
+instead of guessing. The same goes when it differs from the server's own project, so a deliberate cross-project
+write is confirmed visibly.
+
+**Tool and skill text.**
+
+- `store_memories.project`: "Project to file this memory under, when it's about a different repository than the
+  current one (e.g. working from a folder of several repos). An absolute path, `~/…`, or a path relative to the
+  working directory; a subdirectory or worktree is filed under its repository's root. Omit it for the current
+  project."
+- `plugin/skills/vector-memory-usage/SKILL.md`: add the multi-repo folder example under *Storing*.
+
+## 9. Edge cases
 
 | Case | Result |
 |---|---|
@@ -238,7 +302,7 @@ passing a worktree path searches its whole repo instead of matching nothing afte
 | Worktree deleted, then recreated with the same name | Its old rows have the same workspace path, so they're boosted again. Harmless, often useful. |
 | `scope: "workspace"` in a main checkout | Rows stored from the main checkout itself (not from worktrees, not file memories). |
 
-## 9. Tests (`bun:test`, in `tests/`)
+## 10. Tests (`bun:test`, in `tests/`)
 
 Build real throwaway repos in a temp dir (`git init`, commit, `git worktree add`) so no git behaviour is mocked:
 
@@ -260,18 +324,28 @@ Build real throwaway repos in a temp dir (`git init`, commit, `git worktree add`
 10. Boost tiers: in a worktree, an equally relevant same-workspace row outranks a sibling-worktree row under both
     `"all"` and `"project"`; in a main checkout, scores equal today's.
 11. Migration step 0: workspace backfilled from the *original* project; file memories `NULL`.
+12. `resolveExplicitProject`: absolute, `~/…`, relative-to-workspace, a subdirectory and a worktree of a fixture repo
+    (→ its root, workspace = the named folder), a folder that doesn't exist (kept, normalized).
+13. Cross-project store from a non-repo server cwd (a fixture "Development" folder holding two repos): a memory
+    stored with `project: "repo-b/sub"` is found by `scope: "project"` from a server started in `repo-b`, and the
+    store reply names the resolved project.
+14. Waypoint `project` args resolve relative and `~` paths but don't fold to the repo root; a legacy display-name
+    waypoint is still found.
 
-## 10. Implementation order
+## 11. Implementation order
 
 1. ~~Verify `$.session.repo().root` semantics (§4).~~ Done: probed, algorithm corrected, `resolveProject()` and
    `tests/project-resolution.test.ts` landed.
 2. ~~`resolveProject` + tests~~ (landed with step 1; submodule case still to add).
 3. Config split + `MemoryService` workspace + lockfile, with tests.
-4. Parser + consolidation.
-5. Migration v6 (column, backfill, re-file) + backup + tests.
-6. Workspace stamping, `scope: "workspace"` pre-filter, boost tiers, tool schema, and the plugin's
+4. `resolveExplicitProject` at every handler that takes a `project` (§8), the "filed under" reply, and the tool and
+   skill text, with tests. It lands with step 3: once repo sessions file under the root, an unresolved explicit
+   subdirectory path stops joining.
+5. Parser + consolidation.
+6. Migration v6 (column, backfill, re-file) + backup + tests.
+7. Workspace stamping, `scope: "workspace"` pre-filter, boost tiers, tool schema, and the plugin's
    `workspace: null`, with tests.
-7. Docs, CHANGELOG, remove the IDEAS item. `bun run typecheck && bun run test`.
+8. Docs, CHANGELOG, remove the IDEAS item. `bun run typecheck && bun run test`.
 
 One `feat/worktree-project` branch → PR → `main`. Likely a minor version bump, because default search results
 change for worktree users.
