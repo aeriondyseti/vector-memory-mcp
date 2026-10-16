@@ -170,6 +170,24 @@ function harness(
   const reads: string[] = [];
   const lists: string[] = [];
   const clock = mock.clock(on);
+  let activity = 0;
+
+  /**
+   * Let the background syncs run: the timer fires on the first settle, but
+   * the job's `$` calls cross to the plugin's worker and back, so one settle
+   * is not always enough. With `until`, settle until it holds; without,
+   * until nothing reaches these hooks for several rounds.
+   */
+  async function settle(until?: () => boolean): Promise<void> {
+    for (let rounds = 0, quiet = 0; rounds < 500; rounds++) {
+      if (until?.()) return;
+      if (!until && quiet >= 10) return;
+      const seen = activity;
+      await clock.settle();
+      quiet = activity === seen ? quiet + 1 : 0;
+    }
+    throw new Error("the background sync never finished");
+  }
 
   const ran = () =>
     (isError ? { result: "failed", isError: true } : { result: { type: "update", filePath: MEMORY_PATH } }) as never;
@@ -178,26 +196,34 @@ function harness(
   on("tool.call", { tool: "Bash" }, ran);
   on("prompt.compose", () => ({ sections: [{ id: "memory", text: section, scope: "session" as const }] }));
   on("fs.list", (_$, e) => {
+    activity++;
     lists.push(e.path);
     return { value: listings.shift() ?? [] };
   });
   on("fs.read", (_$, e) => {
+    activity++;
     reads.push(e.path);
     return { value: (files.length > 1 ? files.shift() : files[0]) ?? "" };
   });
-  on("session.repo", () => ({
-    value: repoRoot === null ? null : { root: repoRoot, remote: null, internal: false, name: null },
-  }));
-  on("mcp.connect", () => ({ value: { isConnected: true, server: SERVER } }));
+  on("session.repo", () => {
+    activity++;
+    return { value: repoRoot === null ? null : { root: repoRoot, remote: null, internal: false, name: null } };
+  });
+  on("mcp.connect", () => {
+    activity++;
+    return { value: { isConnected: true, server: SERVER } };
+  });
   on("mcp.call", (_$, e) => {
+    activity++;
     calls.push({ tool: e.tool, args: e.args });
     return { value: { content: [{ type: "text", text: "Memory stored" }], isError: false } };
   });
   on("ui.toast", (_$, e) => {
+    activity++;
     toasts.push(e.text);
     return { value: undefined };
   });
-  return { calls, toasts, reads, lists, clock };
+  return { calls, toasts, reads, lists, settle };
 }
 
 describe("tool.call: Write and Edit", () => {
@@ -208,7 +234,7 @@ describe("tool.call: Write and Edit", () => {
     expect(done.deny).toBe(undefined);
     expect(h.calls).toEqual([]); // the result came back before the sync ran
 
-    await h.clock.settle();
+    await h.settle(() => h.toasts.length > 0);
     expect(h.calls.map((c) => c.tool)).toEqual(["store_memories"]);
     expect(h.calls[0]?.args).toEqual(fileMemoryArgs(parseFileMemory(MEMORY_FILE)!, MEMORY_PATH, REPO_ROOT));
     expect(h.toasts).toEqual(['Vector Memory: synced file memory "prefers-bun"']);
@@ -217,14 +243,14 @@ describe("tool.call: Write and Edit", () => {
   test("files the memory under the main repository's root, shared by its worktrees", async ($, on) => {
     const h = harness(on);
     await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
-    await h.clock.settle();
+    await h.settle(() => h.toasts.length > 0);
     expect((h.calls[0]?.args.memories as Array<{ project?: string }>)[0]?.project).toBe(REPO_ROOT);
   });
 
   test("outside a repository the server's own project is used", async ($, on) => {
     const h = harness(on, { repoRoot: null });
     await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
-    await h.clock.settle();
+    await h.settle(() => h.toasts.length > 0);
     expect(h.calls.map((c) => c.tool)).toEqual(["store_memories"]);
     expect((h.calls[0]?.args.memories as Array<Record<string, unknown>>)[0]).not.toHaveProperty("project");
   });
@@ -232,7 +258,7 @@ describe("tool.call: Write and Edit", () => {
   test("an Edit of a file memory stores the whole file", async ($, on) => {
     const h = harness(on);
     await $.tool.call({ tool: "Edit", file_path: MEMORY_PATH, old_string: "a", new_string: "b" });
-    await h.clock.settle();
+    await h.settle(() => h.toasts.length > 0);
 
     expect(h.calls.map((c) => c.tool)).toEqual(["store_memories"]);
   });
@@ -241,8 +267,9 @@ describe("tool.call: Write and Edit", () => {
     const h = harness(on, { files: [MEMORY_FILE.replace("faster", "quicker")] });
     for (let i = 0; i < 2; i++) {
       await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: "x" });
-      await h.clock.settle();
+      await h.settle(() => h.reads.length > i);
     }
+    await h.settle();
     expect(h.calls.map((c) => c.tool)).toEqual(["store_memories"]);
     expect(h.toasts.length).toBe(1);
   });
@@ -251,21 +278,21 @@ describe("tool.call: Write and Edit", () => {
     const h = harness(on);
     await $.tool.call({ tool: "Write", file_path: "/repo/src/a.ts", content: "x" });
     await $.tool.call({ tool: "Write", file_path: MEMORY_PATH.replace("prefers-bun", "MEMORY"), content: "x" });
-    await h.clock.settle();
+    await h.settle();
     expect(h.calls).toEqual([]);
   });
 
   test("a failed write is not synced", async ($, on) => {
     const h = harness(on, { isError: true });
     await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
-    await h.clock.settle();
+    await h.settle();
     expect(h.calls).toEqual([]);
   });
 
   test("a file without frontmatter is not synced", async ($, on) => {
     const h = harness(on, { files: ["no frontmatter"] });
     const done = await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: "no frontmatter" });
-    await h.clock.settle();
+    await h.settle();
     expect(done.deny).toBe(undefined);
     expect(h.calls).toEqual([]);
     expect(h.toasts).toEqual([]);
@@ -274,7 +301,7 @@ describe("tool.call: Write and Edit", () => {
   test("off: nothing is synced", { options: { fileMemorySync: "off" } }, async ($, on) => {
     const h = harness(on);
     await $.tool.call({ tool: "Write", file_path: MEMORY_PATH, content: MEMORY_FILE });
-    await h.clock.settle();
+    await h.settle();
     expect(h.calls).toEqual([]);
   });
 });
@@ -291,7 +318,7 @@ describe("tool.call: Bash", () => {
       ],
     });
     await $.tool.call({ tool: "Bash", command: 'cat > "$DIR/a.md" <<EOF ... EOF' });
-    await h.clock.settle();
+    await h.settle(() => h.toasts.length > 0);
 
     expect(h.lists).toEqual([MEMORY_DIR, MEMORY_DIR]);
     expect(h.reads).toEqual([`${MEMORY_DIR}/a.md`, `${MEMORY_DIR}/new.md`]);
@@ -305,14 +332,14 @@ describe("tool.call: Bash", () => {
   test("still syncs when the command failed after writing", async ($, on) => {
     const h = harness(on, { isError: true, listings: [[], [entry("prefers-bun.md", 1)]] });
     await $.tool.call({ tool: "Bash", command: "write-then-fail" });
-    await h.clock.settle();
+    await h.settle(() => h.toasts.length > 0);
     expect(h.calls.map((c) => c.tool)).toEqual(["store_memories"]);
   });
 
   test("without a memory folder in the system prompt, Bash is left alone", async ($, on) => {
     const h = harness(on, { section: "No file-based memory here.", listings: [[], [entry("a.md", 1)]] });
     const done = await $.tool.call({ tool: "Bash", command: "ls" });
-    await h.clock.settle();
+    await h.settle();
     expect(done.deny).toBe(undefined);
     expect(h.lists).toEqual([]);
     expect(h.calls).toEqual([]);
@@ -322,7 +349,7 @@ describe("tool.call: Bash", () => {
     const same = [entry("a.md", 1)];
     const h = harness(on, { listings: [same, same] });
     await $.tool.call({ tool: "Bash", command: "ls" });
-    await h.clock.settle();
+    await h.settle();
     expect(h.reads).toEqual([]);
     expect(h.calls).toEqual([]);
   });
