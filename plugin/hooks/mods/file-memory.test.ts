@@ -81,6 +81,25 @@ describe("fileMemoryArgs", () => {
   });
 });
 
+describe("fileMemoryArgs embedding_text", () => {
+  const first = (args: Record<string, unknown>) => (args.memories as Array<Record<string, unknown>>)[0];
+
+  test("none up to 1000 characters of description and body", async () => {
+    const body = "x".repeat(1000 - "d\n\n".length);
+    expect(first(fileMemoryArgs({ name: "a", description: "d", body }, MEMORY_PATH))?.embedding_text).toBe(undefined);
+  });
+
+  test("name and description past 1000 characters", async () => {
+    const body = "x".repeat(1000);
+    expect(first(fileMemoryArgs({ name: "a", description: "d", body }, MEMORY_PATH))?.embedding_text).toBe("a: d");
+  });
+
+  test("the first 1000 characters past 1000 without a description", async () => {
+    const body = "y".repeat(1500);
+    expect(first(fileMemoryArgs({ name: "a", body }, MEMORY_PATH))?.embedding_text).toBe("y".repeat(1000));
+  });
+});
+
 /** Stand in for the engine: a Write/Edit that succeeds (or errors), a file on disk, the MCP server. */
 function harness(on: On, { file = MEMORY_FILE, isError = false } = {}) {
   const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];

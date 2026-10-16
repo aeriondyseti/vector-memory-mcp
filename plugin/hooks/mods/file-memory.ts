@@ -65,13 +65,23 @@ export function fileMemoryKey(name: string): string {
   return `file-memory:${name}`;
 }
 
+/** Past this many characters, content gets an `embedding_text` summary, as `store_memories` asks. */
+export const LONG_CONTENT_CHARS = 1000;
+
 /** `store_memories` arguments for one file memory read from `path`. */
 export function fileMemoryArgs(memory: FileMemory, path: string): Record<string, unknown> {
   const content = memory.description ? `${memory.description}\n\n${memory.body}` : memory.body;
+  const embeddingText =
+    content.length <= LONG_CONTENT_CHARS
+      ? undefined
+      : memory.description
+        ? `${memory.name}: ${memory.description}`
+        : content.slice(0, LONG_CONTENT_CHARS);
   return {
     memories: [
       {
         content,
+        ...(embeddingText ? { embedding_text: embeddingText } : {}),
         key: fileMemoryKey(memory.name),
         context: `File memory > ${memory.name}`,
         metadata: {
