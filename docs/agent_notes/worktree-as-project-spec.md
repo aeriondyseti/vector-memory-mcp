@@ -29,6 +29,7 @@ File-memory sync, though, files memories under the main repo root (`plugin/hooks
 | What happens to existing rows filed under worktree paths? | A **one-time versioned migration** re-files them under the main repo. |
 | Which folders count as worktrees? | **Any git worktree**, detected by asking git. Path patterns are used only for worktrees that were already deleted. |
 | Which project does conversation history get? | **The main repo** too, using the same resolution. |
+| Can searches target the workspace? | **Yes.** Rows also record their `workspace`. `scope: "workspace"` filters to it, and results from the current workspace rank above the rest of the repo (§7). |
 
 ## 3. Core idea: split one identity into two
 
@@ -37,11 +38,12 @@ Today one value, "project = cwd", does four jobs. We split it:
 | Name | Value | Used for |
 |---|---|---|
 | **project** | main working tree root of the repo containing cwd (or cwd if not a linked worktree) | memory stamping, search filter and boost, file memories, conversation history |
-| **workspace** | `normalizeProject(cwd)`, exactly today's value | waypoint ID, server-discovery lockfile |
+| **workspace** | `normalizeProject(cwd)`, exactly today's value | waypoint ID, server-discovery lockfile, the new `workspace` column, `scope: "workspace"` and the workspace boost |
 
 Why keep `workspace`? Parallel sessions in two worktrees of one repo must not share a waypoint (they'd overwrite
 each other), and each session's hooks must find *their own* server's lockfile. Keeping both on the cwd means
-waypoints and server discovery behave **exactly as today**, so neither needs a migration.
+waypoints and server discovery behave **exactly as today**, so neither needs a migration. Recording it on every
+row as well means a search can still tell "from this worktree" apart from "from this repo" (§7).
 
 For a session in the main checkout, or in any folder that isn't a linked worktree, `project === workspace`.
 Nothing changes for those users.
@@ -84,7 +86,11 @@ If they differ, align `resolveProject` with hook-kit, since the point of this wo
 | `server/core/project.ts` | Add `resolveProject()` and the deleted-worktree pattern helper (§4). |
 | `server/config/index.ts` | `project: normalizeProject(overrides.project ?? resolveProject(process.cwd()))`; new `workspace: normalizeProject(process.cwd())`. The existing `--project` flag still wins, which is the escape hatch. |
 | `server/index.ts` | Pass `config.workspace` into `MemoryService`; the startup log shows both values when they differ. |
-| `server/core/memory.service.ts` | Constructor takes `workspace`. `setWaypoint` / `getLatestWaypoint` default to `workspace` instead of `this.project` (an explicit `project` arg still wins, as the HTTP `/waypoint?project=` hook call does). Everything else keeps using `this.project`. |
+| `server/core/memory.service.ts` | Constructor takes `workspace`. `setWaypoint` / `getLatestWaypoint` default to `workspace` instead of `this.project` (an explicit `project` arg still wins, as the HTTP `/waypoint?project=` hook call does). Stamping and search use `workspace` as §7 describes; everything else keeps using `this.project`. |
+| `server/core/memory.repository.ts` | `workspace` column in insert/upsert/row mapping; a `workspace = ?` condition beside every `project = ?` candidate filter (KNN, FTS, graph lanes, `queryMemories`). |
+| `server/core/memory.ts` / `conversation.ts` | `workspace: string \| null` on the types. |
+| `server/core/conversation.repository.ts` | Stamp and filter `workspace` on history rows. |
+| `server/transports/mcp/tools.ts` + `handlers.ts` | `search_memories` `scope` gains `"workspace"` (schema at ~317 plus the SCOPE text at ~308; `get_session_context`'s own `scope` at ~743 stays `project`/`all`); `store_memories` gains optional `workspace` (path or `null`, §7). Results show `workspace` when it differs from `project`. |
 | `server/transports/http/server.ts` | `writeLockfiles` / `removeLockfiles` take `config.workspace`, so hooks (which hash their cwd) still find the right server. |
 | `server/core/parsers/claude-code.parser.ts` | `project = resolveProject(entry.cwd)` instead of `normalizeProject(entry.cwd)`. |
 | `server/core/consolidation.service.ts:278` | A legacy `.vector-memory/` db found inside a worktree consolidates into the main repo's project (`resolveProject`). Waypoint re-keying there keeps using the folder path (workspace). |
@@ -98,7 +104,9 @@ Almost nothing changes, which is deliberate: the hooks only use their project va
 - `plugin/hooks/scripts/hooks-lib.ts`: update the `currentProject()` doc comment to say it must match the server's
   **workspace**, not project. Possibly rename it to `currentWorkspace()`.
 - `plugin/hooks/mods/index.ts:405`: keep passing the main root explicitly. It's now redundant with a new server,
-  but still correct against older servers still cached by `bunx`.
+  but still correct against older servers still cached by `bunx`. Also pass `workspace: null`: a file memory belongs
+  to the whole repo, not to whichever worktree happened to sync it last (§7). `fileMemoryArgs` gains the field, and
+  its tests assert it.
 
 ### Docs
 
@@ -123,6 +131,11 @@ processes.
 
 Inside the transaction, if the re-checked version is still < 6:
 
+0. Add the `workspace` column to `memories` and `conversation_history` (`addColumnIfMissing`), add
+   `idx_memories_workspace` and `idx_conversation_workspace`, and backfill **before** re-filing:
+   `UPDATE memories SET workspace = project WHERE json_extract(metadata, '$.source') IS NOT 'file-memory'`, and the
+   same for history. A row's original project *is* the folder it was stored from, so old worktree rows keep their
+   worktree as workspace while their project moves to the main repo. File memories stay `NULL` (repo-wide).
 1. `UPDATE memories SET project = ? WHERE project = ? AND id NOT LIKE 'wp:%'`. Waypoints keep their worktree
    project, because they're keyed by workspace.
 2. `UPDATE conversation_history SET project = ?, metadata = json_set(metadata, '$.project', ?) WHERE project = ?`,
@@ -142,7 +155,45 @@ no-op that still bumps the version.
 leaves no trace of which repo it belonged to, so those rows stay put. A later `consolidate`-style CLI could map them
 manually if anyone needs it.
 
-## 7. Edge cases
+## 7. Searching by workspace
+
+**Stamping.** Every new memory and history row stores a `workspace` beside its `project`:
+
+- `store_memories` from a session: the server's `workspace`, if the memory is filed under the server's own
+  project. If an explicit, different `project` is passed, `workspace` is `NULL`, because it's another repo and this
+  folder means nothing there.
+- An explicit `workspace` arg wins. `null` means "repo-wide", which is what file-memory sync sends.
+- Conversation history: the session log's raw `cwd`, normalized. That cwd *is* the workspace.
+- `update_memories` never changes `workspace`. Supersession by key copies the new row's workspace as usual.
+
+**Filtering, `scope: "workspace"`.** Restricts to `workspace = <current workspace>`. Following the repo rule, this
+is **pre-filtered** into KNN/FTS candidate selection, the same way `project` is, never applied to a global top-K
+afterwards. That's why the column gets an index. Repo-wide rows (`NULL`) are excluded: a scope this narrow means
+"what happened in this worktree". A caller who wants those rows too uses `scope: "project"`, which now ranks the
+workspace first anyway (below).
+
+**Explicit paths.** Today `scope: "<path>"` means "that project". The path now goes through `resolveProject()`, so
+passing a worktree path searches its whole repo instead of matching nothing after the migration.
+
+**Boosting.** `CURRENT_PROJECT_BOOST` (×1.15, `scope: "all"` only) becomes a tier, not a stack:
+
+| Result row | `scope: "all"` | `scope: "project"` |
+|---|---|---|
+| Same workspace (session is in a linked worktree) | ×1.15 × `CURRENT_WORKSPACE_BOOST` (1.10) | × `CURRENT_WORKSPACE_BOOST` |
+| Same project, other workspace or `NULL` | ×1.15 | ×1 |
+| Other project | ×1 | (filtered out) |
+
+- The workspace tier applies **only when the session is in a linked worktree** (`workspace !== project`). In a main
+  checkout, ranking is byte-for-byte today's, and non-worktree users see no change. The alternative, also boosting
+  main-checkout rows when in the main checkout, would push repo-wide file memories and worktree rows down for every
+  main-checkout user. Easy to flip later if wanted.
+- 1.10 is a starting value: enough to win ties inside the repo without hiding a clearly better match from a sibling
+  worktree. It's a named constant, so tuning it is a one-line change.
+- The same boost function also wraps conversation-history scores (`memory.service.ts:661`).
+- Out of scope for now: `proactive_context`, `get_session_context` and the stale/duplicate tools keep working at
+  project level.
+
+## 8. Edge cases
 
 | Case | Result |
 |---|---|
@@ -155,8 +206,10 @@ manually if anyone needs it.
 | `EnterWorktree` mid-session | The server's cwd was fixed at launch, so its workspace and project stay the launch folder's. Hooks run in the new cwd and pass `?project=` explicitly. This is existing behaviour, not made worse; noted as a known limitation. |
 | Older server version still running after migration | It may file a few new rows under a worktree path. Accepted; they're found again once that session upgrades. |
 | `--project <path>` given | Used verbatim as project; workspace is still cwd. |
+| Worktree deleted, then recreated with the same name | Its old rows have the same workspace path, so they're boosted again. Harmless, often useful. |
+| `scope: "workspace"` in a main checkout | Rows stored from the main checkout itself (not from worktrees, not file memories). |
 
-## 8. Tests (`bun:test`, in `tests/`)
+## 9. Tests (`bun:test`, in `tests/`)
 
 Build real throwaway repos in a temp dir (`git init`, commit, `git worktree add`) so no git behaviour is mocked:
 
@@ -171,15 +224,23 @@ Build real throwaway repos in a temp dir (`git init`, commit, `git worktree add`
    backup created only when rows move.
 6. Parser: a session log whose `cwd` is a worktree yields the main root.
 7. Lockfile: the server writes its lock at `globalLockPath(workspace)`; hooks-lib's hash of cwd matches.
+8. Workspace stamping: session store, explicit other project (`NULL`), explicit `workspace: null`, history rows.
+9. `scope: "workspace"`: finds only this worktree's rows, and with more matching rows elsewhere than the limit it
+   still returns this workspace's (proves it's a pre-filter, not a post-filter).
+10. Boost tiers: in a worktree, an equally relevant same-workspace row outranks a sibling-worktree row under both
+    `"all"` and `"project"`; in a main checkout, scores equal today's.
+11. Migration step 0: workspace backfilled from the *original* project; file memories `NULL`.
 
-## 9. Implementation order
+## 10. Implementation order
 
 1. Verify hook-kit's `repo().root` semantics (§4); adjust the algorithm if needed.
 2. `resolveProject` + tests.
 3. Config split + `MemoryService` workspace + lockfile, with tests.
 4. Parser + consolidation.
-5. Migration v6 + backup + tests.
-6. Docs, CHANGELOG, remove the IDEAS item. `bun run typecheck && bun run test`.
+5. Migration v6 (column, backfill, re-file) + backup + tests.
+6. Workspace stamping, `scope: "workspace"` pre-filter, boost tiers, tool schema, and the plugin's
+   `workspace: null`, with tests.
+7. Docs, CHANGELOG, remove the IDEAS item. `bun run typecheck && bun run test`.
 
 One `feat/worktree-project` branch → PR → `main`. Likely a minor version bump, because default search results
 change for worktree users.
