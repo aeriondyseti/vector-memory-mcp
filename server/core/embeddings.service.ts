@@ -1,7 +1,8 @@
 import * as ort from "onnxruntime-node";
 import { Tokenizer } from "@huggingface/tokenizers";
 import { join, dirname } from "path";
-import { mkdir } from "fs/promises";
+import { homedir } from "os";
+import { mkdir, rename, rm } from "fs/promises";
 import { existsSync } from "fs";
 
 const HF_CDN = "https://huggingface.co";
@@ -29,18 +30,44 @@ export function modelProfile(modelName: string): EmbeddingModelProfile {
   return MODEL_PROFILES[modelName] ?? { pooling: "mean", queryPrefix: "" };
 }
 
-/** Download a model file from Hugging Face into the package's model cache, unless already there. */
+/**
+ * Where downloaded models live: `VECTOR_MEMORY_MODEL_DIR`, else beside the
+ * global database (~/.vector-memory/models). Not in the package: `bunx`
+ * re-extracts the package on every start, which wiped models cached there
+ * and made each session download them again.
+ */
+export function modelCacheDir(): string {
+  return process.env.VECTOR_MEMORY_MODEL_DIR || join(homedir(), ".vector-memory", "models");
+}
+
+/** The package-local cache earlier versions used (still read: a source checkout or warmup may hold it). */
+function legacyModelPath(modelName: string, fileName: string): string {
+  return join(dirname(Bun.main), "..", ".cache", "models", modelName, fileName);
+}
+
+/** Download a model file from Hugging Face into the model cache, unless already there. */
 async function downloadIfMissing(modelName: string, fileName: string): Promise<string> {
-  const packageRoot = join(dirname(Bun.main), "..");
-  const filePath = join(packageRoot, ".cache", "models", modelName, fileName);
+  const filePath = join(modelCacheDir(), modelName, fileName);
   if (existsSync(filePath)) return filePath;
+  const legacyPath = legacyModelPath(modelName, fileName);
+  if (existsSync(legacyPath)) return legacyPath;
 
   const url = `${HF_CDN}/${modelName}/resolve/main/${fileName}`;
   await mkdir(dirname(filePath), { recursive: true });
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Failed to download ${url}: ${response.status}`);
   const buffer = await response.arrayBuffer();
-  await Bun.write(filePath, buffer);
+
+  // Written whole, then renamed into place: another server starting at the
+  // same time never reads a partial file.
+  const partial = `${filePath}.${process.pid}.partial`;
+  await Bun.write(partial, buffer);
+  try {
+    await rename(partial, filePath);
+  } catch (err) {
+    await rm(partial, { force: true });
+    if (!existsSync(filePath)) throw err; // another server's copy landed first otherwise
+  }
   return filePath;
 }
 
@@ -96,9 +123,12 @@ export class EmbeddingsService {
 
   private async initialize(): Promise<void> {
     if (this.session) return;
-    if (!this.initPromise) {
-      this.initPromise = this._init();
-    }
+    // A failed load (a dropped download) is retried on the next call, not
+    // kept: kept, every later embed failed until the server restarted.
+    this.initPromise ??= this._init().catch((err) => {
+      this.initPromise = null;
+      throw err;
+    });
     await this.initPromise;
   }
 

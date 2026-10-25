@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Worktrees**: memories are filed under the main repository's root (`$.session.repo().root`), so edits from any worktree replace the same memory; outside a repository, the server's own project. Known limitation: in a session started in a worktree, the server's own project is the worktree path, so `scope: "project"` searches there do not return synced file memories and `scope: "all"` ranks them without the current-project boost.
   - Files without frontmatter `name` or a body are skipped; a failed sync is logged and never affects the tool call. New `fileMemorySync` option (`on` | `off`, default `on`).
 
+### Fixed
+- **Saves and searches no longer fail until the server is reconnected**: a failed model load (typically a dropped download) was kept, so every later embedding (`store_memories`, `search_memories`, …) failed instantly with the same error ("The socket connection was closed unexpectedly") until the MCP server restarted. The embedding model and the reranker now retry their load on the next call.
+- **Models are no longer downloaded again every session**: they were cached inside the installed package, which `bunx …@latest` re-extracts on every start, so each session's first save or search downloaded ~90 MB per model (and a second server starting could wipe the folder mid-download). They now live in `~/.vector-memory/models` (`VECTOR_MEMORY_MODEL_DIR` to override); a package-local cache from earlier versions is still read. Downloads are written whole and renamed into place, so servers starting together never read a partial file.
+
 ## [3.2.0] - 2026-10-15
 
 ### Added
