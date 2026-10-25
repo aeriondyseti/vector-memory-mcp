@@ -176,6 +176,10 @@ directory) it was stored from:
 - A repo-local database is still available via `--db-file` or
   `VECTOR_MEMORY_DB_PATH` (note: keep the db on local disk — WAL mode
   misbehaves on network filesystems like NFS home directories).
+- **Models** (the embedding model and the reranker, ~90 MB each) are
+  downloaded from Hugging Face on first use into `~/.vector-memory/models`,
+  shared by every server and kept across upgrades. Set
+  `VECTOR_MEMORY_MODEL_DIR` to keep them elsewhere.
 
 ### Migrating repo-local databases
 

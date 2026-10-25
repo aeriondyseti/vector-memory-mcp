@@ -39,10 +39,17 @@ export class RerankerService {
 
   private async initialize(): Promise<void> {
     if (this.session) return;
-    this.initPromise ??= loadOnnxModel(this.modelName).then(({ session, tokenizer }) => {
-      this.session = session;
-      this.tokenizer = tokenizer;
-    });
+    // A failed load is retried on the next call, not kept (see EmbeddingsService).
+    this.initPromise ??= loadOnnxModel(this.modelName).then(
+      ({ session, tokenizer }) => {
+        this.session = session;
+        this.tokenizer = tokenizer;
+      },
+      (err) => {
+        this.initPromise = null;
+        throw err;
+      }
+    );
     await this.initPromise;
   }
 
